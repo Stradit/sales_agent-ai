@@ -216,7 +216,6 @@ export async function initTopbarAuth(options = {}) {
       w.insertAdjacentHTML('afterbegin', '<span class="topbar-readonly" title="Your role can view but not change data"><i class="fa-solid fa-eye"></i> Read-only</span>');
     }
   }
-  const user = getCurrentUser();
   if (user) initSearchPalette();
   return user;
 }

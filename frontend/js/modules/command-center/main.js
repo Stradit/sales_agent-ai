@@ -2,7 +2,6 @@ import '../fetch-instrumentation.js';
 import { initThemeToggle } from '../theme.js';
 import { initTopbarAuth } from '../topbar-auth.js';
 import { showToast } from '../toast.js';
-import { esc } from '../utils.js';
 import { ccState } from './state.js';
 import { renderKpiStrip, bindKpiListeners } from './kpi.js';
 import { renderMatrix } from './matrix.js';

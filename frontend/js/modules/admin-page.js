@@ -3,12 +3,10 @@ import './fetch-instrumentation.js';
 import { getCurrentUser, logout, refreshAccessToken } from './auth-client.js';
 import { initTopbarAuth } from './topbar-auth.js';
 import { initThemeToggle } from './theme.js';
-import { initTopbarAuth } from './topbar-auth.js';
 import { showToast } from './toast.js';
 import { mountCrmSettings } from './admin-crm-settings.js';
 
 initThemeToggle();
-initTopbarAuth();
 
 const esc = (s) => {
   const d = document.createElement('div');
