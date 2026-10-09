@@ -55,6 +55,8 @@
           </div>
           <i class="fa-solid fa-chevron-right nav-digest-arrow"></i>
         </a>
+        {# Temporarily hidden — set FORECAST_ENABLED=1 in .env to show it again (api.py). #}
+        {% if forecast_enabled %}
         <a href="/forecast" class="nav-digest-btn">
           <span class="nav-digest-icon"><i class="fa-solid fa-chart-line"></i></span>
           <div class="nav-digest-info">
@@ -63,6 +65,7 @@
           </div>
           <i class="fa-solid fa-chevron-right nav-digest-arrow"></i>
         </a>
+        {% endif %}
         <a href="/introductions" class="nav-digest-btn">
           <span class="nav-digest-icon"><i class="fa-solid fa-handshake"></i></span>
           <div class="nav-digest-info">

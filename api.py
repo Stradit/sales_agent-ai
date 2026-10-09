@@ -7523,6 +7523,10 @@ if FASTAPI_AVAILABLE:
     frontend_dir = Path(__file__).resolve().parent / "frontend"
     if frontend_dir.exists():
         templates = Jinja2Templates(directory=str(frontend_dir / "templates"))
+        # Temporarily hidden pages. FORECAST_ENABLED=1 in .env brings the Forecast page and
+        # its nav entry back; its API (/api/crm/forecast*) and data are untouched either way.
+        FORECAST_ENABLED = os.getenv("FORECAST_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+        templates.env.globals["forecast_enabled"] = FORECAST_ENABLED
 
         _NO_CACHE_HEADERS = {
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -7604,7 +7608,10 @@ if FASTAPI_AVAILABLE:
 
         @app.get("/forecast", response_class=HTMLResponse, include_in_schema=False)
         async def forecast_page(request: Request):
-            """Quarterly forecast roll-up, targets and week-over-week changes (apps/sales_crm/README.md §3)."""
+            """Quarterly forecast roll-up, targets and week-over-week changes (apps/sales_crm/README.md §3).
+            Hidden for now unless FORECAST_ENABLED is set: old links land on Deals instead."""
+            if not FORECAST_ENABLED:
+                return RedirectResponse(url="/deals", status_code=302)
             return templates.TemplateResponse(request, "forecast.html", headers=_NO_CACHE_HEADERS)
 
         @app.get("/introductions", response_class=HTMLResponse, include_in_schema=False)
