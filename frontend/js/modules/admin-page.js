@@ -1055,10 +1055,7 @@ async function loadAndRender() {
   usersCache = usersData.users || [];
   await loadCrmTeam();
 
-  const me = getCurrentUser();
-  if (me) {
-    renderTopBarUser(me);
-  }
+  const me = getCurrentUser();   // the topbar user menu is drawn by initTopbarAuth()
 
   let tabContentHtml = '';
   if (activeAdminTab === 'users') {

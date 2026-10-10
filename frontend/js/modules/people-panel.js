@@ -6,6 +6,8 @@ import { hasDossier, openContactDrawer } from './contact-drawer.js';
 import { downloadFile } from './download.js';
 import { openContactEditor } from './crm-extras.js';
 import { photoAttr } from './persona-photo.js';
+// Circular with selection.js (which imports renderPeople from here) — fine: only called on click.
+import { renderSelection } from './selection.js';
 
 export function renderContactsList(personas) {
   state.currentPersonas = personas;
