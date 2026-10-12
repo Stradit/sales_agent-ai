@@ -1,3 +1,78 @@
+// ─── Global /api/ Auth Interceptor for Pipeline Console ──────────────────
+(function () {
+  if (window.__pipelineFetchWrapped) return;
+  window.__pipelineFetchWrapped = true;
+  const nativeFetch = window.fetch.bind(window);
+  const AUTH_ENDPOINTS = ["/api/auth/login", "/api/auth/refresh", "/api/auth/logout"];
+  let refreshPromise = null;
+
+  function getStoredToken() {
+    try {
+      return sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function refreshTokenOnce() {
+    if (refreshPromise) return refreshPromise;
+    refreshPromise = nativeFetch("/api/auth/refresh", {
+      method: "POST",
+      credentials: "include",
+    })
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const data = await res.json().catch(() => null);
+        if (data && data.access_token) {
+          try {
+            sessionStorage.setItem("access_token", data.access_token);
+          } catch (_) {}
+          return data.access_token;
+        }
+        return null;
+      })
+      .catch(() => null)
+      .finally(() => {
+        refreshPromise = null;
+      });
+    return refreshPromise;
+  }
+
+  function withApiAuth(input, init) {
+    const token = getStoredToken();
+    const headers = new Headers(
+      (init && init.headers) || (input instanceof Request ? input.headers : undefined)
+    );
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    return {
+      ...init,
+      headers,
+      credentials: (init && init.credentials) || "include",
+    };
+  }
+
+  window.fetch = function (input, init) {
+    const url = typeof input === "string" ? input : (input && input.url) || "";
+    const isApi = url.startsWith("/api/") || url.includes("/api/");
+    const isAuthEndpoint = AUTH_ENDPOINTS.some((p) => url.includes(p));
+
+    if (!isApi) {
+      return nativeFetch(input, init);
+    }
+
+    return nativeFetch(input, withApiAuth(input, init)).then(async (res) => {
+      if (res.status !== 401 || isAuthEndpoint) {
+        return res;
+      }
+      const newToken = await refreshTokenOnce();
+      if (!newToken) return res;
+      return nativeFetch(input, withApiAuth(input, init));
+    });
+  };
+})();
+
 $(function () {
   // ─── Sidebar Shrink / Expand Toggle ──────────────────────────────────────
   let sidebarCollapsed = false;
