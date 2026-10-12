@@ -145,7 +145,7 @@ initTopbarAuth().then((user) => {
       // In-place restricted notice - DO NOT REDIRECT IN A LOOP!
       const container = document.querySelector('.cc-container') || document.body;
       container.innerHTML = `
-        <div class="empty-block" style="margin:80px auto; max-width:460px; text-align:center; padding:40px; background:var(--card-bg); border-radius:12px; border:1px solid var(--border-color);">
+        <div class="empty-block" style="margin:80px auto; max-width:460px; text-align:center; padding:40px; background:var(--card-bg); border-radius:0; border:1px solid var(--border-color);">
           <div class="empty-block-icon" style="font-size:2.5rem; color:var(--text-muted); margin-bottom:16px;"><i class="fa-solid fa-shield-halved"></i></div>
           <div style="font-size:1.15rem; font-weight:700; color:var(--text-primary); margin-bottom:8px;">Command Center Access Restricted</div>
           <div style="font-size:0.85rem; color:var(--text-secondary); line-height:1.5;">You do not have access to the Sales Command Center. Please ask a Super Administrator to grant you permissions.</div>

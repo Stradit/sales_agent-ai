@@ -1,6 +1,6 @@
 /* ── Email & Calendar Sync page (apps/sales_crm/README.md §4). Builds on deals.css (dl-*) ── */
 .cap-main { max-width: 900px; }
-.cap-card { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 14px; box-shadow: var(--shadow); }
+.cap-card { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 0; padding: 16px 18px; margin-bottom: 14px; box-shadow: var(--shadow); }
 .cap-card h2 { margin: 0 0 8px; font-size: 1rem; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
 .cap-card h2 .fa-microsoft { color: #0078D4; }
 .cap-card p { margin: 4px 0; font-size: .84rem; color: var(--text-secondary); line-height: 1.5; }
@@ -8,7 +8,7 @@
 .cap-connect { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 .cap-connect > div { flex: 1 1 360px; }
 .cap-conn-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 6px; }
-.cap-pill { display: inline-block; font-size: .7rem; font-weight: 700; padding: 2px 9px; border-radius: var(--radius-xl); }
+.cap-pill { display: inline-block; font-size: .7rem; font-weight: 700; padding: 2px 9px; border-radius: 0; }
 .cap-pill.good { background: rgba(34, 183, 131, .14); color: var(--success); }
 .cap-pill.bad { background: rgba(245, 50, 92, .12); color: var(--danger); }
 .cap-pill.warn { background: rgba(255, 184, 34, .16); color: #B7800F; }
@@ -21,15 +21,15 @@
 .cap-toggle small, .cap-field small { font-size: .74rem; color: var(--text-muted); font-weight: 400; }
 .cap-toggle:has(input:disabled) { opacity: .6; cursor: default; }
 .cap-field { display: flex; flex-direction: column; gap: 4px; font-size: .84rem; font-weight: 600; color: var(--text-primary); margin-top: 10px; }
-.cap-field input { font: inherit; font-size: .82rem; font-weight: 400; padding: 7px 10px; border: 1px solid var(--border-mid); border-radius: var(--radius-md);
+.cap-field input { font: inherit; font-size: .82rem; font-weight: 400; padding: 7px 10px; border: 1px solid var(--border-mid); border-radius: 0;
   background: var(--panel-bg); color: var(--text-primary); }
 .cap-check { display: flex; gap: 8px; align-items: center; font-size: .8rem; color: var(--text-secondary); margin: 8px 0 10px; }
 .cap-danger { border-color: rgba(245, 50, 92, .3); }
 .cap-privacy ul { margin: 4px 0 0; padding-left: 20px; font-size: .82rem; color: var(--text-secondary); line-height: 1.6; }
 .cap-privacy h2 i { color: var(--success); }
 .cap-steps { margin: 6px 0 0; padding-left: 20px; font-size: .84rem; color: var(--text-secondary); line-height: 1.7; }
-.cap-steps code, .cap-card code { font-size: .78rem; background: var(--badge-bg); padding: 1px 5px; border-radius: 4px; color: var(--text-primary); overflow-wrap: anywhere; }
-.cap-banner { padding: 10px 14px; border-radius: var(--radius-md); margin-bottom: 14px; font-size: .84rem; }
+.cap-steps code, .cap-card code { font-size: .78rem; background: var(--badge-bg); padding: 1px 5px; border-radius: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.cap-banner { padding: 10px 14px; border-radius: 0; margin-bottom: 14px; font-size: .84rem; }
 .cap-banner.good { background: rgba(34, 183, 131, .12); color: var(--success); border: 1px solid rgba(34, 183, 131, .35); }
 .cap-banner.bad { background: rgba(245, 50, 92, .08); color: var(--danger); border: 1px solid rgba(245, 50, 92, .3); }
 .cap-banner[hidden] { display: none; }

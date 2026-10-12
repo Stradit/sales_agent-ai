@@ -64,7 +64,7 @@
 .nav-collapse-btn {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   color: var(--text-secondary);
   width: 28px;
   height: 28px;
@@ -95,7 +95,7 @@
 .nav-search-wrap input {
   width: 100%;
   border: 1.5px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--input-bg);
   color: var(--text-primary);
   font-family: inherit;
@@ -140,7 +140,7 @@
   color: var(--text-secondary);
   background: var(--badge-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   padding: 4px 8px;
   cursor: pointer;
   transition: var(--transition);
@@ -162,7 +162,7 @@
   font-size: 0.62rem;
   font-weight: 700;
   padding: 0 4px;
-  border-radius: 99px;
+  border-radius: 0;
   background: rgba(0,0,0,0.08);
 }
 .nav-filter-pill.active .pill-count {
@@ -199,7 +199,7 @@
   color: var(--text-secondary);
   background: var(--panel-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   padding: 3px 6px;
   outline: none;
   cursor: pointer;
@@ -216,7 +216,7 @@
   color: var(--text-muted);
   background: var(--panel-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   cursor: pointer;
   transition: var(--transition);
 }
@@ -243,7 +243,7 @@
   padding: 9px 12px;
   border: 1.5px solid var(--border-color);
   background: var(--panel-bg);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   cursor: pointer;
   font-family: inherit;
   text-align: left;
@@ -262,7 +262,7 @@
 .nav-digest-icon {
   width: 30px;
   height: 30px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--brand);
   color: #fff;
   display: grid;

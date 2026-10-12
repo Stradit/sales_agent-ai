@@ -53,7 +53,7 @@
   color: #ffffff;
   background: var(--brand, var(--brand));
   border: 1px solid transparent;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: 0;
   cursor: pointer;
   box-sizing: border-box;
   white-space: nowrap;
@@ -79,7 +79,7 @@
   color: var(--text-secondary);
   background: var(--card-bg, #ffffff);
   border: 1.5px solid var(--border-color, #e2e8f0);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: 0;
   cursor: pointer;
   box-sizing: border-box;
   white-space: nowrap;
@@ -103,7 +103,7 @@
 .tp-kpi-card {
   background: var(--card-bg, #ffffff);
   border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: var(--radius-md, 8px);
+  border-radius: 0;
   padding: 14px 16px;
   display: flex;
   align-items: center;
@@ -120,7 +120,7 @@
 .tp-kpi-icon {
   width: 40px;
   height: 40px;
-  border-radius: 8px;
+  border-radius: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -179,7 +179,7 @@
   font-size: .82rem;
   padding: 7px 11px;
   border: 1.5px solid var(--border-color, #cbd5e1);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: 0;
   background: var(--input-bg, #ffffff);
   color: var(--text-primary, #0f172a);
   outline: none;
@@ -195,7 +195,7 @@
 .tp-task-item {
   background: var(--card-bg, #ffffff);
   border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: var(--radius-md, 8px);
+  border-radius: 0;
   padding: 14px 16px;
   margin-bottom: 10px;
   display: flex;
@@ -233,7 +233,7 @@
   color: #047857;
   background: rgba(16, 185, 129, 0.12);
   border: 1px solid rgba(16, 185, 129, 0.3);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: 0;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.15s ease;
@@ -256,7 +256,7 @@
   color: var(--text-secondary);
   background: var(--bg-hover, #f1f5f9);
   border: 1px solid var(--border-color, #cbd5e1);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: 0;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.15s ease;
@@ -277,7 +277,7 @@
   color: #ffffff;
   background: #10b981;
   border: 1px solid #10b981;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: 0;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.15s ease;
@@ -299,7 +299,7 @@
   color: #dc2626;
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: 0;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.15s ease;
@@ -352,7 +352,7 @@
   color: var(--text-muted);
   background: var(--bg-hover, #f1f5f9);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0;
   font-family: monospace;
   margin-top: 2px;
   flex-shrink: 0;
@@ -392,7 +392,7 @@
   overflow-wrap: anywhere;
   background: rgba(228, 101, 33, 0.08);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: 0;
   font-size: .76rem;
   vertical-align: middle;
   transition: all 0.15s ease;
@@ -418,7 +418,7 @@
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 0;
   font-size: .74rem;
   font-weight: 500;
   background: var(--bg-hover, #f1f5f9);
@@ -486,7 +486,7 @@
 .tp-modal-card {
   background: var(--card-bg, #ffffff);
   border: 1px solid var(--border-color, #cbd5e1);
-  border-radius: var(--radius-lg, 12px);
+  border-radius: 0;
   width: 100%;
   max-width: 580px;
   max-height: 90vh;
@@ -515,7 +515,7 @@
 .tp-modal-icon {
   width: 36px;
   height: 36px;
-  border-radius: 8px;
+  border-radius: 0;
   background: rgba(228, 101, 33, 0.12);
   color: var(--brand, var(--brand));
   display: flex;
@@ -542,7 +542,7 @@
   color: var(--text-muted);
   cursor: pointer;
   padding: 4px;
-  border-radius: 4px;
+  border-radius: 0;
 }
 .tp-modal-close:hover { color: var(--text-primary); }
 
@@ -580,7 +580,7 @@
   color: #dc2626;
   background: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.2);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: 0;
   padding: 8px 12px;
 }
 

@@ -364,7 +364,7 @@ function renderCoveragePieChart(accounts, activeAccountName) {
           labels: {
             boxWidth: 11,
             boxHeight: 11,
-            borderRadius: 3,
+            borderRadius: 0,
             padding: 7,
             font: {
               family: 'Inter, system-ui, -apple-system, sans-serif',

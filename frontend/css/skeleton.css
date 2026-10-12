@@ -13,7 +13,7 @@
 .skeleton {
   background: linear-gradient(90deg, var(--border-color) 25%, var(--panel-border) 37%, var(--border-color) 63%);
   background-size: 400% 100%;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
 }
 
@@ -41,14 +41,14 @@
    Recently Updated / Most-Mapped / Recent LinkedIn Jobs. */
 .skeleton-card {
   height: 40px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
 }
 
 /* Taller row — matches the .alert-card / .opportunity-card multi-line layout used by
    Global Sales Alerts / Emerging Domain Expansion. */
 .skeleton-list-row {
   height: 88px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
 }
 
 /* Nav sidebar account-card placeholder — matches .nav-account-card's
@@ -59,7 +59,7 @@
   gap: 8px;
   padding: 10px 12px;
   border: 1.5px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
 }
 .skeleton-nav-card-top {
   display: flex;
@@ -69,7 +69,7 @@
 .skeleton-avatar {
   width: 26px;
   height: 26px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   flex-shrink: 0;
 }
 /* Larger avatar for a full profile-page header (see profile.html). */
@@ -99,5 +99,5 @@
 .skeleton-chart {
   height: 260px;
   width: 100%;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
 }

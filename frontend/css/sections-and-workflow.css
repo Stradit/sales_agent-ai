@@ -9,7 +9,7 @@
 .info-banner {
   display: flex; align-items: flex-start; gap: 10px;
   background: var(--brand-soft); border: 1px solid rgba(228, 101, 33,.14);
-  border-radius: var(--radius-sm); padding: 10px 12px;
+  border-radius: 0; padding: 10px 12px;
   font-size: .78rem; color: var(--text-secondary); line-height: 1.55;
   margin-bottom: 14px;
 }
@@ -29,7 +29,7 @@
   display: flex; align-items: center; gap: 8px;
   font-size: .74rem; color: var(--text-secondary);
   background: var(--panel-bg); border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm); padding: 8px 12px;
+  border-radius: 0; padding: 8px 12px;
   box-sizing: border-box; min-width: 0;
 }
 .step-guide-num {
@@ -63,7 +63,7 @@
   display: inline-flex; align-items: center; gap: 4px;
   font-size: .63rem; font-weight: 600; text-transform: none;
   letter-spacing: 0; padding: 2px 8px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   background: var(--badge-bg); color: var(--text-muted);
   border: 1px solid var(--border-color);
 }
@@ -76,7 +76,7 @@
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
   background: linear-gradient(135deg, rgba(228, 101, 33,.06), rgba(228, 101, 33,.02));
   border: 1.5px solid rgba(228, 101, 33,.2);
-  border-radius: var(--radius-md);
+  border-radius: 0;
   padding: 12px 16px;
   margin-bottom: 16px;
 }
@@ -94,7 +94,7 @@
 .arsenal-btn {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: .74rem; font-weight: 600; font-family: inherit;
-  padding: 6px 12px; border-radius: var(--radius-sm);
+  padding: 6px 12px; border-radius: 0;
   cursor: pointer; transition: var(--transition);
   border: 1px solid rgba(228, 101, 33,.2);
   background: var(--panel-bg); color: var(--brand);
@@ -133,7 +133,7 @@
   color: var(--text-primary);
   background: var(--panel-bg);
   border: 1.5px solid var(--border-mid);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -177,7 +177,7 @@
   padding: 1px 5px;
   font-size: .62rem;
   font-weight: 800;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--brand-soft);
   color: var(--brand);
   border: 1px solid rgba(228, 101, 33, 0.2);

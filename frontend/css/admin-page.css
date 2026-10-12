@@ -26,7 +26,7 @@ body.admin-page-body {
   font-family: inherit;
   font-size: 0.78rem;
   font-weight: 600;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -57,7 +57,7 @@ body.admin-page-body {
   width: 320px;
   background: var(--panel-bg, #ffffff);
   border: 1px solid var(--panel-border, #e2e8f0);
-  border-radius: var(--radius-md, 10px);
+  border-radius: 0;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2), 0 2px 6px rgba(0, 0, 0, 0.08);
   z-index: 1000;
   overflow: hidden;
@@ -95,7 +95,7 @@ body.admin-page-body {
   background: rgba(228, 101, 33, 0.12);
   color: var(--brand, var(--brand));
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: 0;
 }
 
 .dropdown-menu-list {
@@ -138,7 +138,7 @@ body.admin-page-body {
 .dropdown-account-avatar {
   width: 34px;
   height: 34px;
-  border-radius: 8px;
+  border-radius: 0;
   background: linear-gradient(135deg, var(--brand, var(--brand)), var(--brand-hover));
   color: #fff;
   font-weight: 700;
@@ -178,7 +178,7 @@ body.admin-page-body {
   font-size: 0.65rem;
   font-weight: 700;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 0;
   background: rgba(34, 197, 94, 0.12);
   color: #16a34a;
 }
@@ -188,7 +188,7 @@ body.admin-page-body {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: var(--radius-sm, 6px);
+  border-radius: 0;
   color: var(--text-primary, #0f172a);
   text-decoration: none;
   transition: all 0.15s ease;
@@ -203,7 +203,7 @@ body.admin-page-body {
 .topbar-pipeline-icon {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--bg-subtle, #f1f5f9);
   color: var(--brand, var(--brand));
   display: flex;
@@ -301,7 +301,7 @@ body.admin-page-body {
 .admin-kpi-card {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-md);
+  border-radius: 0;
   padding: 16px 20px;
   box-shadow: var(--shadow);
   display: flex;
@@ -320,7 +320,7 @@ body.admin-page-body {
 .admin-kpi-icon {
   width: 44px;
   height: 44px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   display: grid;
   place-items: center;
   font-size: 1.25rem;
@@ -385,7 +385,7 @@ body.admin-page-body {
 .admin-panel {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-md);
+  border-radius: 0;
   box-shadow: var(--shadow);
   overflow: visible;
   width: 100%;
@@ -395,8 +395,8 @@ body.admin-page-body {
 .admin-panel-header {
   padding: 14px 20px;
   border-bottom: 1px solid var(--panel-border);
-  border-top-left-radius: var(--radius-md);
-  border-top-right-radius: var(--radius-md);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -459,7 +459,7 @@ body.admin-page-body {
   font-family: inherit;
   background: var(--panel-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   color: var(--text-primary);
   transition: var(--transition);
 }
@@ -496,7 +496,7 @@ body.admin-page-body {
 
 .admin-filter-chip {
   padding: 4px 9px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   border: 1px solid var(--border-color);
   background: var(--panel-bg);
   color: var(--text-secondary);
@@ -606,7 +606,7 @@ body.admin-page-body {
   font-weight: 600;
   padding: 4px 8px;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   background: var(--input-bg);
   color: var(--text-primary);
   cursor: pointer;
@@ -628,7 +628,7 @@ body.admin-page-body {
   align-items: center;
   gap: 5px;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: 0;
   font-size: 0.68rem;
   font-weight: 700;
   white-space: nowrap;
@@ -672,7 +672,7 @@ body.admin-page-body {
   font-weight: 600;
   padding: 5px 10px;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--panel-bg);
   color: var(--text-secondary);
   cursor: pointer;
@@ -692,7 +692,7 @@ body.admin-page-body {
   border: 1px solid rgba(228, 101, 33, 0.22);
   font-weight: 600;
   padding: 5px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
 }
 
 .admin-access-btn:hover {
@@ -751,7 +751,7 @@ body.admin-page-body {
   place-items: center;
   font-size: 0.85rem;
   color: var(--text-muted);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--input-bg);
   border: 1px solid var(--border-color);
 }
@@ -769,7 +769,7 @@ body.admin-page-body {
   min-width: 175px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   box-shadow: 0 14px 35px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.12);
   padding: 6px;
   z-index: 10000 !important;
@@ -796,7 +796,7 @@ body.admin-page-body {
   color: var(--text-primary);
   background: transparent;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   cursor: pointer;
   text-align: left;
   transition: var(--transition);
@@ -872,7 +872,7 @@ body.admin-page-body {
   font-family: inherit;
   background: var(--input-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   color: var(--text-primary);
   box-sizing: border-box;
   transition: var(--transition);
@@ -942,7 +942,7 @@ body.admin-page-body {
   font-family: inherit;
   background: var(--input-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   color: var(--text-primary);
   transition: var(--transition);
 }
@@ -964,7 +964,7 @@ body.admin-page-body {
   color: #fff;
   background: var(--brand);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   cursor: pointer;
   transition: var(--transition);
   display: flex;
@@ -990,7 +990,7 @@ body.admin-page-body {
   padding: 8px 12px;
   background: rgba(255, 77, 79, 0.08);
   border: 1px solid rgba(255, 77, 79, 0.2);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   font-size: 0.74rem;
   color: var(--danger);
   display: flex;
@@ -1098,7 +1098,7 @@ body.admin-page-body {
   display: flex;
   flex-direction: column;
   background: var(--panel-bg);
-  border-radius: var(--radius-md);
+  border-radius: 0;
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow-modal);
   overflow: hidden;
@@ -1134,7 +1134,7 @@ body.admin-page-body {
 .admin-modal-close {
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   border: 1px solid var(--border-color);
   background: var(--panel-bg);
   color: var(--text-secondary);
@@ -1164,7 +1164,7 @@ body.admin-page-body {
   font-family: inherit;
   background: var(--panel-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   color: var(--text-primary);
 }
 
@@ -1278,7 +1278,7 @@ body.admin-page-body {
   padding: 8px 18px;
   font-size: 0.84rem;
   font-weight: 600;
-  border-radius: var(--radius-md, 8px);
+  border-radius: 0;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1301,7 +1301,7 @@ body.admin-page-body {
   font-size: 0.68rem;
   font-weight: 700;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.2);
 }
 
@@ -1344,7 +1344,7 @@ body.admin-page-body {
 .api-config-card {
   background: var(--panel-bg, #ffffff);
   border: 1px solid var(--panel-border, #e2e8f0);
-  border-radius: var(--radius-sm, 8px);
+  border-radius: 0;
   padding: 13px 15px;
   display: flex;
   flex-direction: column;
@@ -1376,7 +1376,7 @@ body.admin-page-body {
   width: 28px;
   height: 28px;
   min-width: 28px;
-  border-radius: 6px;
+  border-radius: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1413,7 +1413,7 @@ body.admin-page-body {
   font-size: 0.65rem;
   font-weight: 700;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1464,7 +1464,7 @@ body.admin-page-body {
   font-family: inherit;
   background: var(--input-bg, #f8fafc);
   border: 1px solid var(--border-color, #cbd5e1);
-  border-radius: var(--radius-sm, 5px);
+  border-radius: 0;
   color: var(--text-primary, #0f172a);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -1507,7 +1507,7 @@ body.admin-page-body {
   font-size: 0.72rem;
   font-weight: 600;
   padding: 3px 9px;
-  border-radius: 5px;
+  border-radius: 0;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1529,7 +1529,7 @@ body.admin-page-body {
 .api-test-result {
   font-size: 0.70rem;
   padding: 4px 8px;
-  border-radius: 5px;
+  border-radius: 0;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1558,7 +1558,7 @@ body.admin-page-body {
   background: #0f172a;
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 12px 24px;
   display: flex;
   align-items: center;
@@ -1593,7 +1593,7 @@ body.admin-page-body {
   font-size: 0.78rem;
   font-weight: 600;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: 0;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -1610,7 +1610,7 @@ body.admin-page-body {
   font-size: 0.78rem;
   font-weight: 700;
   padding: 6px 16px;
-  border-radius: 6px;
+  border-radius: 0;
   cursor: pointer;
   display: flex;
   align-items: center;
