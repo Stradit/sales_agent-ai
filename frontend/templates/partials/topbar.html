@@ -1,3 +1,4 @@
+  <link rel="stylesheet" href="/css/tour.css?v=1.0">
   <header class="dash-topbar">
     <div class="topbar-brand">
       <div class="topbar-icon"><i class="fa-solid fa-sitemap"></i></div>
@@ -7,7 +8,11 @@
       </div>
     </div>
     <div class="topbar-actions">
+      <button id="topbarTourBtn" class="topbar-tour-btn" type="button" title="Interactive User Manual &amp; Page Tour" aria-label="Interactive User Manual">
+        <i class="fa-solid fa-circle-question"></i> <span class="topbar-tour-label">User Manual</span>
+      </button>
       <div id="topbarAuthWidget" class="topbar-auth-widget"></div>
       <button id="themeToggle" class="topbar-theme-btn" title="Toggle theme"><i class="fa-solid fa-moon"></i></button>
     </div>
   </header>
+  <script type="module" src="/js/modules/tour/init.js"></script>

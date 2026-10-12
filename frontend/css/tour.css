@@ -1,0 +1,381 @@
+/* ── Interactive User Manual & Guided Tour Styles ──────────────── */
+:root {
+  --doshin-tour-scrim: rgba(0, 18, 51, 0.62);
+}
+
+[data-theme="dark"] {
+  --doshin-tour-scrim: rgba(0, 5, 15, 0.78);
+}
+
+/* Scrim / Backdrop with gentle blur and desaturated greyish tone for surrounding page */
+.doshin-tour-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 23, 42, 0.44);
+  z-index: 99980;
+  opacity: 0;
+  pointer-events: none;
+  backdrop-filter: blur(2.5px) grayscale(35%);
+  -webkit-backdrop-filter: blur(2.5px) grayscale(35%);
+  transition: opacity 0.28s ease, clip-path 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.doshin-tour-backdrop.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Active toured widget/target - elevated and crystal clear */
+.doshin-tour-target-active {
+  z-index: 99986 !important;
+}
+
+/* Spotlight element highlight box */
+.doshin-tour-spotlight {
+  position: absolute;
+  z-index: 99985;
+  border-radius: 8px;
+  pointer-events: none;
+  background: transparent;
+  box-shadow: 0 0 0 3px var(--brand, #E46521), 0 6px 22px rgba(228, 101, 33, 0.25);
+  transition: top 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              left 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              width 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              height 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              border-radius 0.25s ease;
+  animation: doshinSpotlightPulse 2s infinite ease-in-out;
+}
+
+@keyframes doshinSpotlightPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px var(--brand, #E46521), 0 4px 16px rgba(228, 101, 33, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 4.5px var(--brand-light, #F0894F), 0 8px 24px rgba(228, 101, 33, 0.40);
+  }
+}
+
+/* Floating Tour Popover Card */
+.doshin-tour-popover {
+  position: absolute;
+  z-index: 99999;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--panel-bg, #FFFFFF);
+  border: 1px solid var(--border-mid, #DCE1E9);
+  border-radius: 12px;
+  box-shadow: 0 20px 45px -10px rgba(0, 18, 51, 0.35), 0 10px 20px -5px rgba(0, 18, 51, 0.2);
+  padding: 18px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  pointer-events: auto;
+  font-family: inherit;
+  color: var(--text-primary, #001233);
+}
+
+.doshin-tour-popover.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* Popover Header */
+.doshin-tour-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.doshin-tour-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.doshin-tour-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--brand-soft, #FFF7F2);
+  color: var(--brand, #E46521);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid rgba(228, 101, 33, 0.25);
+}
+
+.doshin-tour-step-counter {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted, #8D9097);
+}
+
+.doshin-tour-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #8D9097);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+.doshin-tour-close-btn:hover {
+  color: var(--text-primary, #001233);
+  background: var(--hover-bg, #F6F7FA);
+}
+
+/* Progress Bar Track */
+.doshin-tour-progress-track {
+  width: 100%;
+  height: 3px;
+  background: var(--border-color, #EEF0F5);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 0;
+}
+
+.doshin-tour-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brand, #E46521), var(--brand-light, #F0894F));
+  border-radius: 2px;
+  transition: width 0.25s ease;
+}
+
+/* Popover Content */
+.doshin-tour-title {
+  font-size: 1.02rem;
+  font-weight: 800;
+  color: var(--text-primary, #001233);
+  margin: 0;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.doshin-tour-title i {
+  color: var(--brand, #E46521);
+  font-size: 0.95em;
+}
+
+.doshin-tour-desc {
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-secondary, #4C5671);
+  margin: 0;
+}
+
+.doshin-tour-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--input-bg, #F4F6FA);
+  border-left: 3px solid var(--brand, #E46521);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.74rem;
+  color: var(--text-secondary, #4C5671);
+  line-height: 1.45;
+}
+
+.doshin-tour-tip i {
+  color: var(--brand, #E46521);
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+/* Popover Footer & Controls */
+.doshin-tour-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color, #EEF0F5);
+  margin-top: 4px;
+  gap: 12px;
+}
+
+.doshin-tour-nav-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.doshin-tour-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  vertical-align: middle;
+}
+
+.doshin-tour-btn-skip {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted, #8D9097);
+  padding: 0 10px;
+}
+.doshin-tour-btn-skip:hover {
+  color: var(--text-primary, #001233);
+  background: var(--hover-bg, #F6F7FA);
+}
+
+.doshin-tour-btn-back {
+  background: var(--panel-bg, #FFFFFF);
+  border: 1px solid var(--border-mid, #DCE1E9);
+  color: var(--text-secondary, #4C5671);
+}
+.doshin-tour-btn-back:hover {
+  background: var(--hover-bg, #F6F7FA);
+  color: var(--text-primary, #001233);
+}
+
+.doshin-tour-btn-next {
+  background: var(--brand, #E46521);
+  border: 1px solid var(--brand, #E46521);
+  color: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(228, 101, 33, 0.25);
+}
+.doshin-tour-btn-next:hover {
+  background: var(--brand-hover, #C9541A);
+  border-color: var(--brand-hover, #C9541A);
+  box-shadow: 0 4px 10px rgba(228, 101, 33, 0.35);
+}
+
+/* Arrow pointer */
+.doshin-tour-arrow {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--panel-bg, #FFFFFF);
+  border: 1px solid var(--border-mid, #DCE1E9);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.doshin-tour-popover[data-placement="bottom"] .doshin-tour-arrow {
+  top: -7px;
+  border-bottom: none;
+  border-right: none;
+}
+.doshin-tour-popover[data-placement="top"] .doshin-tour-arrow {
+  bottom: -7px;
+  border-top: none;
+  border-left: none;
+}
+.doshin-tour-popover[data-placement="right"] .doshin-tour-arrow {
+  left: -7px;
+  border-top: none;
+  border-right: none;
+}
+.doshin-tour-popover[data-placement="left"] .doshin-tour-arrow {
+  right: -7px;
+  border-bottom: none;
+  border-left: none;
+}
+
+/* ── Topbar Tour Trigger Button ───────────────────────────────── */
+.topbar-tour-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0 11px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  line-height: 1;
+}
+.topbar-tour-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+.topbar-tour-btn i {
+  color: var(--brand-light, #F0894F);
+  font-size: 0.85rem;
+}
+
+/* ── Dark Mode Overrides ───────────────────────────────────────── */
+[data-theme="dark"] .doshin-tour-backdrop {
+  background: rgba(3, 7, 18, 0.62);
+  backdrop-filter: blur(2.5px) grayscale(45%);
+  -webkit-backdrop-filter: blur(2.5px) grayscale(45%);
+}
+[data-theme="dark"] .doshin-tour-spotlight {
+  box-shadow: 0 0 0 3px var(--brand, #E46521), 0 6px 22px rgba(228, 101, 33, 0.35);
+}
+[data-theme="dark"] .doshin-tour-popover {
+  background: #0B2048;
+  border-color: #1E3A70;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65);
+}
+[data-theme="dark"] .doshin-tour-badge {
+  background: rgba(238, 125, 64, 0.15);
+  border-color: rgba(238, 125, 64, 0.3);
+}
+[data-theme="dark"] .doshin-tour-progress-track {
+  background: rgba(255, 255, 255, 0.08);
+}
+[data-theme="dark"] .doshin-tour-tip {
+  background: #061633;
+}
+[data-theme="dark"] .doshin-tour-footer {
+  border-top-color: #13295A;
+}
+[data-theme="dark"] .doshin-tour-btn-skip:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #FFFFFF;
+}
+[data-theme="dark"] .doshin-tour-btn-back {
+  background: #071A3D;
+  border-color: #1E3A70;
+  color: #C3CAD9;
+}
+[data-theme="dark"] .doshin-tour-btn-back:hover {
+  background: #0B2048;
+  color: #FFFFFF;
+}
+[data-theme="dark"] .doshin-tour-arrow {
+  background: #0B2048;
+  border-color: #1E3A70;
+}
+
+@media (max-width: 680px) {
+  .topbar-tour-btn .topbar-tour-label {
+    display: none;
+  }
+}
+

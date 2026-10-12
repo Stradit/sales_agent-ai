@@ -118,7 +118,6 @@ function renderAccountsList(query = '') {
     return `
       <button type="button" class="cc-acct-filter-account-item ${isSelected ? 'active' : ''}" data-acct-filter-id="${a.id}">
         <span class="cc-sub-acct-name">${esc(displayName)}${a.ticker ? ` <small style="opacity:0.65;font-weight:normal;">(${esc(a.ticker)})</small>` : ''}</span>
-        <span class="cc-acct-filter-check" style="display:${isSelected ? 'inline-flex' : 'none'};"><i class="fa-solid fa-check"></i></span>
       </button>
     `;
   }).join('');
@@ -249,7 +248,6 @@ function applyAccountSelection(selectedIds, updateUrl = true) {
 function updateFilterUi() {
   const btn = document.getElementById('ccAcctFilterBtn');
   const filterAllBtn = document.getElementById('ccFilterAllBtn');
-  const filterAllCheck = document.getElementById('ccFilterAllCheck');
   const tagsContainer = document.getElementById('ccSelectedAccountTags');
   const accountsList = document.getElementById('ccAcctFilterList');
 
@@ -275,19 +273,14 @@ function updateFilterUi() {
   if (filterAllBtn) {
     const isAll = (count === 0);
     filterAllBtn.classList.toggle('active', isAll);
-    if (filterAllCheck) {
-      filterAllCheck.style.display = isAll ? 'inline-flex' : 'none';
-    }
   }
 
-  // Update checkmarks in accounts list
+  // Update active state in accounts list
   if (accountsList) {
     accountsList.querySelectorAll('[data-acct-filter-id]').forEach(itemBtn => {
       const rawId = itemBtn.dataset.acctFilterId;
       const isSelected = isAccountSelected(rawId);
       itemBtn.classList.toggle('active', isSelected);
-      const check = itemBtn.querySelector('.cc-acct-filter-check');
-      if (check) check.style.display = isSelected ? 'inline-flex' : 'none';
     });
   }
 

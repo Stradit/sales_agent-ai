@@ -19,7 +19,7 @@
    orange tire the eyes in a tool people look at all day. The landing page
    re-tints its own borders orange (landing.css), like the template. */
 :root {
-  /* Brand */
+  /* Brand (Original EliteHost Orange shade) */
   --brand: #E46521;
   --brand-hover: #C9541A;
   --brand-light: #F0894F;

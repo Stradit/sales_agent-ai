@@ -131,16 +131,7 @@
   line-height: 1.25 !important;
 }
 .cc-acct-filter-check {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 18px !important;
-  height: 18px !important;
-  border-radius: 50% !important;
-  background: #10B981 !important;
-  color: #FFFFFF !important;
-  font-size: 0.65rem !important;
-  flex-shrink: 0 !important;
+  display: none !important;
 }
 .cc-acct-filter-divider {
   height: 1px !important;
@@ -209,9 +200,9 @@
   background: var(--hover-bg, #F1F5F9) !important;
 }
 .cc-acct-filter-account-item.active {
-  background: rgba(16, 185, 129, 0.08) !important;
-  border-color: rgba(16, 185, 129, 0.25) !important;
-  color: #059669 !important;
+  background: rgba(37, 99, 235, 0.08) !important;
+  border-color: rgba(37, 99, 235, 0.25) !important;
+  color: var(--brand, #2563EB) !important;
   font-weight: 600 !important;
 }
 [data-theme="dark"] .cc-acct-filter-menu {

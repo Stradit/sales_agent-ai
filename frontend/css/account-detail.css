@@ -69,8 +69,9 @@
 .acct-header { display: flex; gap: 16px; align-items: center; }
 .acct-avatar-lg {
   width: 56px; height: 56px;
-  border-radius: 0; flex-shrink: 0;
-  background: var(--brand);
+  border-radius: 10px; flex-shrink: 0;
+  background: var(--brand-gradient, var(--brand));
+  box-shadow: 0 4px 14px rgba(228, 101, 33, 0.20);
   color: #fff; font-weight: 700; font-size: 1.3rem;
   display: grid; place-items: center;
 }
