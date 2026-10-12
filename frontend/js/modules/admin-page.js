@@ -7,6 +7,7 @@ import { showToast } from './toast.js';
 import { mountCrmSettings } from './admin-crm-settings.js';
 
 initThemeToggle();
+initTopbarAuth();
 
 const esc = (s) => {
   const d = document.createElement('div');

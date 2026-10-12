@@ -2,7 +2,7 @@ import { esc } from './utils.js';
 import { logTouch } from './actions.js';
 import { loadRecentMovements, markMovementActioned } from './exec-movements.js';
 import { renderSkeleton } from '../skeleton.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { openDossier } from './drawer.js';
 import { loadMatrixAccounts } from './real-accounts.js';
 
@@ -69,18 +69,9 @@ export async function renderTimeline() {
     return;
   }
 
-  const activeAcctId = ccState.activeAccountId;
-  const activeAcctName = ccState.selectedAccountName;
-  if (activeAcctId || activeAcctName) {
-    movements = movements.filter(m => {
-      if (activeAcctId && String(m.accountId) === String(activeAcctId)) return true;
-      if (activeAcctName && m.company) {
-        const c = m.company.toLowerCase();
-        const a = activeAcctName.toLowerCase();
-        if (c.includes(a) || a.includes(c)) return true;
-      }
-      return false;
-    });
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  if (hasFilter) {
+    movements = movements.filter(m => matchesCurrentAccount(m.accountId, m.company));
   }
 
   const filter = ccState.timelineFilter || 'all';

@@ -1,11 +1,11 @@
 import { getCommandCenter, isGenerated } from './generator.js';
 import { esc, relativeTime, ageInDays } from './utils.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { createTask } from './actions.js';
+import { clearGlobalAccountFilter } from './account-filter.js';
 
 function matchesAccount(sig) {
-  if (!ccState.activeAccountId) return true;
-  return String(sig.account_id) === String(ccState.activeAccountId);
+  return matchesCurrentAccount(sig.account_id, sig.account_name);
 }
 
 export function getCategoryMeta(sig) {
@@ -77,22 +77,16 @@ function renderFilterChips() {
 function renderAccountFilterPill() {
   const wrap = document.getElementById('ccFeedAccountFilter');
   if (!wrap) return;
-  if (!ccState.activeAccountId) { wrap.innerHTML = ''; return; }
-  const acctName = ccState.selectedAccountName || 'Account';
-  wrap.innerHTML = `<button type="button" class="cc-chip cc-chip-brand cc-chip-removable" id="ccClearAccountFilter">Filtered: ${esc(acctName)} <i class="fa-solid fa-xmark"></i></button>`;
+  const count = ccState.activeAccountIds ? ccState.activeAccountIds.size : (ccState.activeAccountId ? 1 : 0);
+  if (count === 0) { wrap.innerHTML = ''; return; }
+  const label = count === 1
+    ? (ccState.selectedAccountName || 'Account')
+    : `${count} Accounts`;
+  wrap.innerHTML = `<button type="button" class="cc-chip cc-chip-brand cc-chip-removable" id="ccClearAccountFilter">Filtered: ${esc(label)} <i class="fa-solid fa-xmark"></i></button>`;
   const clearBtn = document.getElementById('ccClearAccountFilter');
   if (clearBtn) {
     clearBtn.addEventListener('click', () => {
-      const sel = document.getElementById('ccGlobalAccountSelect');
-      if (sel) {
-        sel.value = '';
-        sel.dispatchEvent(new Event('change'));
-      } else {
-        ccState.activeAccountId = null;
-        ccState.selectedAccountName = null;
-        ccState.selectedAccountObj = null;
-        renderFeed();
-      }
+      clearGlobalAccountFilter();
     });
   }
 }

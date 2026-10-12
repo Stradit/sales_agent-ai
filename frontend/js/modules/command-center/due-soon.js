@@ -1,7 +1,8 @@
 import { esc } from './utils.js';
 import { showToast } from '../toast.js';
 import { renderSkeleton } from '../skeleton.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
+import { clearGlobalAccountFilter } from './account-filter.js';
 
 function refreshTopbarBadge() {
   const badge = document.getElementById('topbarMyTasksBadge') || document.getElementById('openActionItemsBadge');
@@ -147,25 +148,21 @@ export async function renderDueSoon() {
 
   // Account filtering
   let items = allItems;
-  const activeAcctId = ccState.activeAccountId;
-  const activeAcctName = ccState.selectedAccountName;
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  const names = ccState.selectedAccountNames || [];
 
-  if (activeAcctId || activeAcctName) {
-    items = allItems.filter(i => {
-      if (activeAcctId && String(i.account_id) === String(activeAcctId)) return true;
-      if (activeAcctName && i.account_name) {
-        const c = i.account_name.toLowerCase();
-        const a = activeAcctName.toLowerCase();
-        if (c.includes(a) || a.includes(c)) return true;
-      }
-      return false;
-    });
+  if (hasFilter) {
+    items = allItems.filter(i => matchesCurrentAccount(i.account_id, i.account_name));
 
     if (filterContainer) {
+      const filterLabel = names.length === 1
+        ? names[0]
+        : (names.length > 1 ? `${names.length} Selected Accounts` : (ccState.selectedAccountName || 'Selected Accounts'));
+
       filterContainer.innerHTML = `
         <div class="cc-intel-filter-strip" style="margin-bottom: 6px;">
           <span class="cc-intel-filter-info">
-            <i class="fa-solid fa-filter"></i> Filtered by <strong>${esc(activeAcctName || 'Selected Account')}</strong> (${items.length} of ${allItems.length})
+            <i class="fa-solid fa-filter"></i> Filtered by <strong>${esc(filterLabel)}</strong> (${items.length} of ${allItems.length})
           </span>
           <button type="button" class="cc-intel-filter-clear" id="ccClearDueSoonFilter">
             Show All <i class="fa-solid fa-xmark"></i>
@@ -176,16 +173,7 @@ export async function renderDueSoon() {
       const clearBtn = document.getElementById('ccClearDueSoonFilter');
       if (clearBtn) {
         clearBtn.addEventListener('click', () => {
-          const sel = document.getElementById('ccGlobalAccountSelect');
-          if (sel) {
-            sel.value = '';
-            sel.dispatchEvent(new Event('change'));
-          } else {
-            ccState.activeAccountId = null;
-            ccState.selectedAccountName = null;
-            ccState.selectedAccountObj = null;
-            renderDueSoon();
-          }
+          clearGlobalAccountFilter();
         });
       }
     }

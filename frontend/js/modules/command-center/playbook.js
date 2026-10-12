@@ -1,12 +1,11 @@
 import { getCommandCenter, isGenerated, markPlayTasked } from './generator.js';
 import { esc, ageInDays, relativeTime } from './utils.js';
 import { createTask } from './actions.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { getCategoryMeta } from './feed.js';
 
 function matchesAccount(play) {
-  if (!ccState.activeAccountId) return true;
-  return String(play.account_id) === String(ccState.activeAccountId);
+  return matchesCurrentAccount(play.account_id, play.account_name);
 }
 
 function getPrimarySignal(item, cc) {

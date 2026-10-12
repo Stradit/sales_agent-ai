@@ -34,8 +34,14 @@ function weekRangeLabel() {
 function renderSubtitle() {
   const el = document.getElementById('ccSubtitle');
   if (!el) return;
-  if (ccState.selectedAccountName) {
-    el.innerHTML = `<span class="cc-filtered-subtitle"><i class="fa-solid fa-filter"></i> Showing intelligence filtered for <strong>${esc(ccState.selectedAccountName)}</strong></span>`;
+  const names = ccState.selectedAccountNames || [];
+  if (names.length === 1) {
+    el.innerHTML = `<span class="cc-filtered-subtitle"><i class="fa-solid fa-filter"></i> Showing intelligence filtered for <strong>${esc(names[0])}</strong></span>`;
+  } else if (names.length > 1) {
+    const formatted = names.length <= 3
+      ? names.map(n => `<strong>${esc(n)}</strong>`).join(', ')
+      : `${names.slice(0, 2).map(n => `<strong>${esc(n)}</strong>`).join(', ')} <em>(+${names.length - 2} more)</em>`;
+    el.innerHTML = `<span class="cc-filtered-subtitle"><i class="fa-solid fa-filter"></i> Showing intelligence filtered for ${formatted}</span>`;
   } else {
     const cc = getCommandCenter();
     const generated = isGenerated()

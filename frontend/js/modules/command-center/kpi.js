@@ -3,7 +3,7 @@ import { esc } from './utils.js';
 import { loadMatrixAccounts } from './real-accounts.js';
 import { loadRecentMovements } from './exec-movements.js';
 import { openDossier } from './drawer.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { renderTimeline } from './timeline.js';
 
 function sparklinePath(values, w, h) {
@@ -52,27 +52,18 @@ async function computeKpi() {
   const other = execChangesAll.length - joined - promoted;
 
   const playbookList = cc.playbook || [];
-  const activeAcctId = ccState.activeAccountId;
-  const activeAcctName = ccState.selectedAccountName;
-  const matchingPlays = activeAcctId
-    ? playbookList.filter(p => String(p.account_id) === String(activeAcctId))
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  const matchingPlays = hasFilter
+    ? playbookList.filter(p => matchesCurrentAccount(p.account_id, p.account_name))
     : playbookList;
 
   const inMotionCount = matchingPlays.filter(p => p.tasked).length || (cc.plays && cc.plays.in_motion) || 0;
   const stalledCount = (cc.plays && cc.plays.stalled) || 0;
 
-  // Filter tasks for active account if selected
+  // Filter tasks for active account(s) if selected
   let relevantTasks = dueSoonItems.filter(i => i.status === 'open' || i.status === 'in_progress');
-  if (activeAcctId || activeAcctName) {
-    relevantTasks = relevantTasks.filter(i => {
-      if (activeAcctId && String(i.account_id) === String(activeAcctId)) return true;
-      if (activeAcctName && i.account_name) {
-        const c = i.account_name.toLowerCase();
-        const a = activeAcctName.toLowerCase();
-        if (c.includes(a) || a.includes(c)) return true;
-      }
-      return false;
-    });
+  if (hasFilter) {
+    relevantTasks = relevantTasks.filter(i => matchesCurrentAccount(i.account_id, i.account_name));
   }
 
   const now = Date.now();

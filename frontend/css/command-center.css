@@ -39,57 +39,198 @@
   flex-wrap: wrap;
 }
 
-.cc-global-filter-wrap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--input-bg);
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
-}
-.cc-filter-label {
-  font-size: .72rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.cc-select-box {
+/* --- Account Filter Button & Dropdown Menu (matching Google News Subscribe style) --- */
+.cc-acct-filter-wrap {
   position: relative;
   display: inline-flex;
-  align-items: center;
 }
-.cc-global-account-select {
-  padding: 5px 24px 5px 10px;
-  font-family: inherit;
-  font-size: .78rem;
-  font-weight: 500;
-  color: var(--text-primary);
-  background: var(--panel-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 5px;
-  outline: none;
-  cursor: pointer;
-  max-width: 220px;
-  text-overflow: ellipsis;
-  transition: var(--transition);
+.cc-acct-filter-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-weight: 600 !important;
+  font-size: 0.74rem !important;
+  padding: 5px 12px !important;
+  border-radius: 6px !important;
+  transition: all 0.18s ease !important;
+  white-space: nowrap !important;
+  cursor: pointer !important;
 }
-.cc-global-account-select:hover,
-.cc-global-account-select:focus {
-  border-color: var(--brand);
+.cc-acct-filter-btn.is-filtered {
+  background: var(--brand) !important;
+  border-color: var(--brand) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3) !important;
 }
-.cc-global-account-select.has-filter {
-  border-color: var(--brand);
-  background: rgba(99, 102, 241, 0.08);
-  font-weight: 600;
-  color: var(--brand);
+.cc-acct-filter-menu {
+  position: absolute !important;
+  top: calc(100% + 6px) !important;
+  left: 0 !important;
+  width: 310px !important;
+  max-width: 90vw !important;
+  background: var(--panel-bg, #FFFFFF) !important;
+  border: 1px solid var(--border-color, #CBD5E1) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 8px 10px -6px rgba(15, 23, 42, 0.1) !important;
+  z-index: 1050 !important;
+  overflow: hidden !important;
+  animation: ccFadeSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.cc-acct-filter-menu-header {
+  padding: 9px 12px !important;
+  background: var(--bg-subtle, #F8FAFC) !important;
+  border-bottom: 1px solid var(--border-color, #E2E8F0) !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+  color: var(--text-primary, #0F172A) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+.cc-acct-filter-menu-body {
+  padding: 6px !important;
+  max-height: 290px !important;
+  overflow-y: auto !important;
+  scrollbar-width: thin !important;
+}
+.cc-acct-filter-option {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  padding: 8px 10px !important;
+  border-radius: 6px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  text-align: left !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+.cc-acct-filter-option:hover {
+  background: var(--hover-bg, #F1F5F9) !important;
+}
+.cc-acct-filter-option.active {
+  background: rgba(37, 99, 235, 0.08) !important;
+  border-color: rgba(37, 99, 235, 0.25) !important;
+}
+.cc-acct-filter-opt-info {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  min-width: 0 !important;
+}
+.cc-acct-filter-opt-title {
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  color: var(--text-primary, #0F172A) !important;
+}
+.cc-acct-filter-opt-desc {
+  font-size: 0.65rem !important;
+  color: var(--text-muted, #64748B) !important;
+  line-height: 1.25 !important;
+}
+.cc-acct-filter-check {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 18px !important;
+  height: 18px !important;
+  border-radius: 50% !important;
+  background: #10B981 !important;
+  color: #FFFFFF !important;
+  font-size: 0.65rem !important;
+  flex-shrink: 0 !important;
+}
+.cc-acct-filter-divider {
+  height: 1px !important;
+  background: var(--border-color, #E2E8F0) !important;
+  margin: 6px 4px !important;
+}
+.cc-acct-filter-search-wrap {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  margin: 4px 4px 6px !important;
+}
+.cc-af-search-icon {
+  position: absolute !important;
+  left: 8px !important;
+  font-size: 0.72rem !important;
+  color: var(--text-muted) !important;
+  pointer-events: none !important;
+}
+.cc-acct-filter-search {
+  width: 100% !important;
+  padding: 5px 10px 5px 26px !important;
+  font-family: inherit !important;
+  font-size: 0.73rem !important;
+  color: var(--text-primary) !important;
+  background: var(--input-bg) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 5px !important;
+  outline: none !important;
+  transition: border-color 0.15s ease !important;
+}
+.cc-acct-filter-search:focus {
+  border-color: var(--brand) !important;
+}
+.cc-acct-filter-label {
+  font-size: 0.66rem !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.03em !important;
+  color: var(--text-muted, #64748B) !important;
+  padding: 4px 6px 2px !important;
+}
+.cc-acct-filter-accounts-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+}
+.cc-acct-filter-account-item {
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  padding: 6px 8px !important;
+  border-radius: 5px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  text-align: left !important;
+  cursor: pointer !important;
+  font-size: 0.73rem !important;
+  font-weight: 500 !important;
+  color: var(--text-primary, #0F172A) !important;
+  transition: all 0.15s ease !important;
+}
+.cc-acct-filter-account-item:hover {
+  background: var(--hover-bg, #F1F5F9) !important;
+}
+.cc-acct-filter-account-item.active {
+  background: rgba(16, 185, 129, 0.08) !important;
+  border-color: rgba(16, 185, 129, 0.25) !important;
+  color: #059669 !important;
+  font-weight: 600 !important;
+}
+[data-theme="dark"] .cc-acct-filter-menu {
+  background: #1E293B !important;
+  border-color: #334155 !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+}
+[data-theme="dark"] .cc-acct-filter-menu-header {
+  background: #0F172A !important;
+  border-color: #334155 !important;
+  color: #F8FAFC !important;
+}
+[data-theme="dark"] .cc-acct-filter-option:hover,
+[data-theme="dark"] .cc-acct-filter-account-item:hover {
+  background: #334155 !important;
 }
 .cc-btn-clear-filter {
   position: absolute;
-  right: 6px;
+  right: 20px;
   background: transparent;
   border: none;
   font-size: .68rem;
@@ -100,10 +241,53 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  z-index: 2;
 }
 .cc-btn-clear-filter:hover {
   color: var(--danger);
   background: rgba(239, 68, 68, 0.1);
+}
+
+/* Selected Account Tag Chips */
+.cc-selected-account-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cc-account-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: var(--brand);
+  font-size: .72rem;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 12px;
+  animation: ccTagFade 0.15s ease;
+}
+@keyframes ccTagFade {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+.cc-account-tag-remove {
+  background: none;
+  border: none;
+  color: var(--brand);
+  cursor: pointer;
+  padding: 0;
+  font-size: .68rem;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.cc-account-tag-remove:hover {
+  opacity: 1;
+  transform: scale(1.15);
+  color: var(--danger);
 }
 
 .cc-customize-btn {

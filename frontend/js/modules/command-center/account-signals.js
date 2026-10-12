@@ -8,7 +8,7 @@ import { loadRealAccounts, loadMatrixAccounts } from './real-accounts.js';
 import { openDossier } from './drawer.js';
 import { esc, formatMoney } from './utils.js';
 import { renderSkeleton } from '../skeleton.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 
 async function loadEnrichedAccounts() {
   const [raw, matrix] = await Promise.all([loadRealAccounts(), loadMatrixAccounts()]);
@@ -39,18 +39,9 @@ async function renderWidget(listId, emptyMessage, computeEntries, rowHtml) {
   }
 
   let filteredAccounts = accounts;
-  const activeAcctId = ccState.activeAccountId;
-  const activeAcctName = ccState.selectedAccountName;
-  if (activeAcctId || activeAcctName) {
-    filteredAccounts = accounts.filter(a => {
-      if (activeAcctId && (a.id === activeAcctId || String(a.id) === String(activeAcctId))) return true;
-      if (activeAcctName && (a.name || a.display_name)) {
-        const n = (a.name || a.display_name).toLowerCase();
-        const sel = activeAcctName.toLowerCase();
-        if (n.includes(sel) || sel.includes(n)) return true;
-      }
-      return false;
-    });
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  if (hasFilter) {
+    filteredAccounts = accounts.filter(a => matchesCurrentAccount(a.id, a.name || a.display_name));
   }
 
   const entries = computeEntries(filteredAccounts);
@@ -417,10 +408,10 @@ function renderCoveragePieChart(accounts, activeAccountName) {
 }
 
 export async function renderCoverageGaps() {
-  const activeAcctId = ccState.activeAccountId;
-  const activeAcctName = ccState.selectedAccountName;
-  const emptyMsg = (activeAcctId || activeAcctName)
-    ? 'This account has full executive C-suite coverage mapped.'
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  const names = ccState.selectedAccountNames || [];
+  const emptyMsg = hasFilter
+    ? 'Selected accounts have full executive C-suite coverage mapped.'
     : 'Every account has at least one C-suite contact mapped.';
 
   // 1. Render the underlying gaps list
@@ -430,19 +421,12 @@ export async function renderCoverageGaps() {
   try {
     const accounts = await loadEnrichedAccounts();
     let filteredAccounts = accounts;
-    if (activeAcctId || activeAcctName) {
-      filteredAccounts = accounts.filter(a => {
-        if (activeAcctId && (a.id === activeAcctId || String(a.id) === String(activeAcctId))) return true;
-        if (activeAcctName && (a.name || a.display_name)) {
-          const n = (a.name || a.display_name).toLowerCase();
-          const sel = activeAcctName.toLowerCase();
-          if (n.includes(sel) || sel.includes(n)) return true;
-        }
-        return false;
-      });
+    if (hasFilter) {
+      filteredAccounts = accounts.filter(a => matchesCurrentAccount(a.id, a.name || a.display_name));
     }
 
-    renderCoveragePieChart(filteredAccounts, activeAcctName || (filteredAccounts.length === 1 ? (filteredAccounts[0].name || filteredAccounts[0].display_name) : null));
+    const labelName = names.length === 1 ? names[0] : (names.length > 1 ? `${names.length} Selected Accounts` : null);
+    renderCoveragePieChart(filteredAccounts, labelName);
     setupCoverageViewToggle();
   } catch (err) {
     console.error('Error rendering coverage pie chart:', err);

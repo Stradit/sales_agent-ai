@@ -2,8 +2,9 @@
 // Enterprise B2B SaaS Clean Layout — Previous Data Only, Perfectly Arranged
 import { esc } from './utils.js';
 import { renderSkeleton } from '../skeleton.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { loadRealAccounts } from './real-accounts.js';
+import { clearGlobalAccountFilter } from './account-filter.js';
 
 let objectionsPromise = null;
 
@@ -52,24 +53,17 @@ function getAccountList(item, realAccounts) {
 }
 
 function matchesActiveAccount(item, realAccounts) {
-  if (!ccState.activeAccountId) return true;
-  const activeId = String(ccState.activeAccountId);
-  const activeName = (ccState.selectedAccountName || '').toLowerCase().trim();
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  if (!hasFilter) return true;
 
   // Check personas
   for (const p of (item.personas || [])) {
-    if (p.account_id && String(p.account_id) === activeId) return true;
-    if (p.account && activeName && p.account.toLowerCase().includes(activeName)) return true;
+    if (matchesCurrentAccount(p.account_id, p.account)) return true;
   }
 
   // Check accounts
   for (const accName of (item.accounts || [])) {
-    if (activeName && (accName.toLowerCase().includes(activeName) || activeName.includes(accName.toLowerCase()))) return true;
-    const real = (realAccounts || []).find(r => String(r.id) === activeId);
-    if (real) {
-      const rn = (real.name || real.display_name || '').toLowerCase();
-      if (rn.includes(accName.toLowerCase()) || accName.toLowerCase().includes(rn)) return true;
-    }
+    if (matchesCurrentAccount(null, accName)) return true;
   }
 
   return false;
@@ -82,12 +76,14 @@ function getSeverity(count) {
 }
 
 function renderFilterBar(filteredCount, totalCount, onClearId) {
-  if (!ccState.activeAccountId) return '';
-  const acctName = ccState.selectedAccountName || 'Account';
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  if (!hasFilter) return '';
+  const names = ccState.selectedAccountNames || [];
+  const label = names.length === 1 ? names[0] : (names.length > 1 ? `${names.length} Selected Accounts` : (ccState.selectedAccountName || 'Selected Accounts'));
   return `
     <div class="cc-intel-filter-strip">
       <span class="cc-intel-filter-info">
-        <i class="fa-solid fa-filter"></i> Filtered by <strong>${esc(acctName)}</strong> (${filteredCount} of ${totalCount})
+        <i class="fa-solid fa-filter"></i> Filtered by <strong>${esc(label)}</strong> (${filteredCount} of ${totalCount})
       </span>
       <button type="button" class="cc-intel-filter-clear" id="${onClearId}">
         Show All <i class="fa-solid fa-xmark"></i>
@@ -197,16 +193,7 @@ function renderObjectionsList(items, realAccounts, emptyText) {
 
 function bindClearHandlers() {
   const clearHandler = () => {
-    const sel = document.getElementById('ccGlobalAccountSelect');
-    if (sel) {
-      sel.value = '';
-      sel.dispatchEvent(new Event('change'));
-    } else {
-      ccState.activeAccountId = null;
-      ccState.selectedAccountName = null;
-      ccState.selectedAccountObj = null;
-      renderObjections();
-    }
+    clearGlobalAccountFilter();
   };
 
   const btn1 = document.getElementById('ccClearPainFilter');

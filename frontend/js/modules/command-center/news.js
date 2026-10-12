@@ -3,9 +3,10 @@
 import { esc } from './utils.js';
 import { showToast } from '../toast.js';
 import { renderSkeleton } from '../skeleton.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { loadRealAccounts } from './real-accounts.js';
 import { createTask } from './actions.js';
+import { clearGlobalAccountFilter } from './account-filter.js';
 
 const STALE_DAYS = 7;
 const SUB_STORAGE_KEY = 'cc_news_subscriptions_v1';
@@ -341,7 +342,11 @@ export async function renderNewsFeed(overrideAccountId, forceRefresh = false) {
   // Guard against race conditions
   if (activeNewsAccountId !== targetAccountId) return;
 
-  const rawArticles = data.articles || [];
+  const hasGlobalMulti = ccState.activeAccountIds && ccState.activeAccountIds.size > 1;
+  let rawArticles = data.articles || [];
+  if (hasGlobalMulti) {
+    rawArticles = rawArticles.filter(a => matchesCurrentAccount(a.account_id, a.account_name));
+  }
   
   // Enrich articles with categories
   const articles = rawArticles.map(a => ({
@@ -351,7 +356,10 @@ export async function renderNewsFeed(overrideAccountId, forceRefresh = false) {
 
   // Determine active account label
   let filteredAccountName = null;
-  if (targetAccountId) {
+  const names = ccState.selectedAccountNames || [];
+  if (hasGlobalMulti && names.length > 0) {
+    filteredAccountName = `${names.length} Selected Accounts`;
+  } else if (targetAccountId) {
     const found = sortedAccounts.find(a => String(a.id) === String(targetAccountId));
     filteredAccountName = found ? (found.name || found.display_name) : (articles[0]?.account_name || 'Selected Account');
   }
@@ -395,6 +403,7 @@ export async function renderNewsFeed(overrideAccountId, forceRefresh = false) {
         if (clearBtn) {
           clearBtn.addEventListener('click', () => {
             if (accountSelect) accountSelect.value = '';
+            clearGlobalAccountFilter();
             renderNewsFeed(null);
           });
         }

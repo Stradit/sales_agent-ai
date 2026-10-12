@@ -6,6 +6,7 @@ import { loadRealAccounts, resolveRealAccount } from './real-accounts.js';
 import { esc } from './utils.js';
 import { renderSkeleton } from '../skeleton.js';
 import { createTask } from './actions.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 
 // Cache for lightweight summaries
 const summaryCache = new Map();
@@ -228,8 +229,13 @@ export async function renderHiringSignals(days = currentHiringDays) {
 
     const results = await Promise.all(summaryPromises);
 
+    const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+
     // Filter accounts with monitored roles in this timeframe
-    const activeOrgs = results.filter(r => r.summary && r.summary.total_roles > 0);
+    let activeOrgs = results.filter(r => r.summary && r.summary.total_roles > 0);
+    if (hasFilter) {
+      activeOrgs = activeOrgs.filter(r => matchesCurrentAccount(r.account?.id, r.account?.name || r.account?.display_name));
+    }
 
     // Update panel note with total aggregated jobs
     const totalJobsAll = activeOrgs.reduce((sum, a) => sum + (a.summary?.total_roles || 0), 0);
@@ -239,7 +245,7 @@ export async function renderHiringSignals(days = currentHiringDays) {
     }
 
     if (!activeOrgs.length) {
-      list.innerHTML = `<li class="cc-drawer-empty">No active hiring signals recorded ${days ? `in the last ${days} days` : 'in the database'}.</li>`;
+      list.innerHTML = `<li class="cc-drawer-empty">No active hiring signals recorded ${days ? `in the last ${days} days` : 'in the database'}${hasFilter ? ' for the selected account(s)' : ''}.</li>`;
       return;
     }
 

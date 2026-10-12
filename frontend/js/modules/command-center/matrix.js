@@ -1,5 +1,5 @@
 import { formatMoney } from './utils.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { openDossier } from './drawer.js';
 import { loadMatrixAccounts } from './real-accounts.js';
 import { renderSkeleton } from '../skeleton.js';
@@ -168,14 +168,25 @@ export async function renderMatrix() {
     ccState.matrixChart.destroy();
   }
 
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+
   ccState.matrixChart = new Chart(liveCanvas.getContext('2d'), {
     type: 'bubble',
     data: {
       datasets: [{
         data,
-        backgroundColor: data.map(d => colorFor(d.account.compositeScore)),
-        borderColor: data.map(d => borderFor(d.account.compositeScore)),
-        borderWidth: 2,
+        backgroundColor: data.map(d => {
+          const isMatch = !hasFilter || matchesCurrentAccount(d.account.id, d.account.name);
+          return isMatch ? colorFor(d.account.compositeScore) : 'rgba(148, 163, 184, 0.14)';
+        }),
+        borderColor: data.map(d => {
+          const isMatch = !hasFilter || matchesCurrentAccount(d.account.id, d.account.name);
+          return isMatch ? borderFor(d.account.compositeScore) : 'rgba(148, 163, 184, 0.2)';
+        }),
+        borderWidth: data.map(d => {
+          const isMatch = !hasFilter || matchesCurrentAccount(d.account.id, d.account.name);
+          return isMatch ? (hasFilter ? 3 : 2) : 1;
+        }),
         hoverBorderColor: '#0f172a',
         hoverBorderWidth: 2.5,
       }],
