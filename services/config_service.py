@@ -274,7 +274,7 @@ DEFAULT_CONFIG_SPECS: List[Dict[str, Any]] = [
         "display_name": "Sender 'From' Address",
         "is_secret": False,
         "default_val": os.getenv("SMTP_FROM", "") or os.getenv("SMTP_USERNAME", ""),
-        "extra_metadata": {"placeholder": "Sales Intelligence Alerts <alerts@company.com>"}
+        "extra_metadata": {"placeholder": "Doshin Alerts <alerts@company.com>"}
     },
 
     # 4. Security & System Limits

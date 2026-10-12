@@ -129,7 +129,7 @@ except ImportError:
 
 if FASTAPI_AVAILABLE:
     app = FastAPI(
-        title="Sales AI Enterprise Intelligence API",
+        title="Doshin API",
         description=(
             "Granular REST API for Frontend UI Tabs: "
             "Account, LOBs, Sub-LOBs, and Personas (Fetch -> Validate -> Dump)"
@@ -317,7 +317,7 @@ if FASTAPI_AVAILABLE:
                 # must never be what the caller's HTTP request is waiting on.
                 background_tasks.add_task(
                     email_sender.send_email,
-                    user.email, "Reset your Sales Intelligence password",
+                    user.email, "Reset your Doshin password",
                     f"Hi {user.full_name or user.email},\n\n"
                     "A password reset was requested for your account. If this wasn't you, "
                     "you can safely ignore this email.\n\n"
@@ -417,10 +417,10 @@ if FASTAPI_AVAILABLE:
             background_tasks.add_task(
                 email_sender.send_email,
                 new_user.email,
-                "Welcome to Sales Intelligence",
+                "Welcome to Doshin",
                 (
                     f"Hi {new_user.full_name or new_user.email},\n\n"
-                    f"An account has been created for you on Sales Intelligence by "
+                    f"An account has been created for you on Doshin by "
                     f"{current.full_name or current.email}.\n\n"
                     f"Email: {new_user.email}\nRole: {new_user.role}\n\n"
                     f"Access: {access_note}\n\n"
@@ -428,7 +428,7 @@ if FASTAPI_AVAILABLE:
                     "You'll receive a separate email shortly to set your own password.\n"
                 ),
                 html_body=email_sender.render_html(
-                    "Welcome to Sales Intelligence",
+                    "Welcome to Doshin",
                     [f"Hi {new_user.full_name or new_user.email},",
                      f"An account has been created for you by {current.full_name or current.email}.",
                      f"Email: {new_user.email}  •  Role: {new_user.role}",
@@ -446,7 +446,7 @@ if FASTAPI_AVAILABLE:
             reset_link = f"{base_url}/reset-password?token={reset_token}"
             background_tasks.add_task(
                 email_sender.send_email,
-                new_user.email, "Set your Sales Intelligence password",
+                new_user.email, "Set your Doshin password",
                 f"Hi {new_user.full_name or new_user.email},\n\n"
                 "Set your password to finish setting up your account "
                 f"(expires in {auth.RESET_TOKEN_EXPIRE_MINUTES} minutes):\n{reset_link}\n",

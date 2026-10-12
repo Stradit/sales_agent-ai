@@ -2,25 +2,21 @@ import { state } from './state.js';
 import { el, dashPeople } from './dom.js';
 import { esc, initials, getPersonasFor } from './utils.js';
 import { showToast } from './toast.js';
-import { hasDossier, openContactDrawer } from './contact-drawer.js';
+import { openContactDrawer } from './contact-drawer.js';
 import { downloadFile } from './download.js';
-import { openContactEditor } from './crm-extras.js';
 import { photoAttr } from './persona-photo.js';
-// Circular with selection.js (which imports renderPeople from here) — fine: only called on click.
-import { renderSelection } from './selection.js';
 
 export function renderContactsList(personas) {
   state.currentPersonas = personas;
   if (!personas.length) return '<div class="people-empty">No contacts match.</div>';
   return personas.slice(0, 12).map((p, idx) => {
     const tag = p.tier || p.decision_authority || (p.departments && p.departments[0]) || null;
-    const dossierReady = hasDossier(p);
     return `
       <div class="contact-card">
         <button type="button" class="contact-main" data-contact-idx="${idx}" title="View full contact details">
           <div class="contact-avatar" ${photoAttr(p)}>${esc(initials(p.name))}</div>
           <div class="contact-body">
-            <div class="contact-name">${esc(p.name || 'Unnamed')} ${dossierReady ? '<i class="fa-solid fa-star dossier-badge" title="AI call-prep dossier available"></i>' : ''}</div>
+            <div class="contact-name">${esc(p.name || 'Unnamed')}</div>
             <div class="contact-title">${esc(p.title || 'Title unknown')}</div>
             ${tag ? `<div class="contact-tags"><span class="tag">${esc(tag)}</span></div>` : ''}
           </div>
@@ -60,7 +56,6 @@ export function renderPeople(account, lob) {
       <span><i class="fa-solid fa-address-card"></i> Key Contacts</span>
       <span style="display:flex; gap:6px; align-items:center;">
         <span class="context-badge live">${personas.length} mapped</span>
-        <button type="button" class="context-badge export-btn cx-add-btn" data-add-contact="${account.id}" title="Add a contact by hand"><i class="fa-solid fa-user-plus"></i> Add</button>
         ${personas.length ? `<button type="button" class="context-badge export-btn" data-export-people="${account.id}" title="Download these contacts as Excel"><i class="fa-regular fa-file-excel"></i> Excel</button>` : ''}
       </span>
     </div>
@@ -89,21 +84,6 @@ dashPeople.addEventListener('input', function (e) {
 });
 
 dashPeople.addEventListener('click', async function (e) {
-  const addBtn = e.target.closest('[data-add-contact]');
-  if (addBtn) {
-    const account = state.accounts.find(a => a.id === Number(addBtn.dataset.addContact));
-    if (!account) return;
-    openContactEditor({
-      accountId: account.id, accountName: account.name,
-      onSaved: (c) => {
-        if (!c) return;
-        (account.personas = account.personas || []).push({ id: c.id, account_id: c.account_id, name: c.name, title: c.title,
-          email: c.email, phone: c.phone, linkedin_url: c.linkedin_url, source: 'manual' });
-        renderSelection();
-      },
-    });
-    return;
-  }
   const exportBtn = e.target.closest('[data-export-people]');
   if (exportBtn) {
     try {

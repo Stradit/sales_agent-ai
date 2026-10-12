@@ -212,7 +212,7 @@ async function init() {
 
     persona.company_name = account.name || '';
 
-    document.title = `${persona.name || 'Contact'} — Executive Profile`;
+    document.title = `${persona.name || 'Contact'} — Executive Profile | Doshin`;
     el('profilePageTitle').textContent = document.title;
 
     state.activeAccountId = accountId;

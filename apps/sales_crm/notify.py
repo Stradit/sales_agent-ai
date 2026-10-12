@@ -85,7 +85,7 @@ def enqueue(s, user_id: Optional[int], kind: str, subject: str, lines: List[str]
     url = f"{base_url()}{link}" if link and link.startswith("/") else link
     greeting = f"Hi {(u[1] or '').split(' ')[0] or 'there'},"
     body = "\n".join([greeting, ""] + lines + ([f"\n{cta_label}: {url}"] if url else []) +
-                     ["", "— StradIT Sales Intelligence", "You can turn these emails off under Email & Calendar Sync → Notifications."])
+                     ["", "— Doshin by StradIT", "You can turn these emails off under Email & Calendar Sync → Notifications."])
     try:
         import email_sender
         html = email_sender.render_html(subject, [greeting] + lines, cta_label=cta_label if url else None, cta_url=url,
@@ -283,7 +283,7 @@ def send_test(user: User = Depends(permissions.require_roles("sales_manager", "u
     import email_sender
     ok = (_sender or email_sender.send_email)(
         user.email, "StradIT notifications — test email",
-        "This is a test from StradIT Sales Intelligence. If you received it, email notifications can reach you.")
+        "This is a test from Doshin by StradIT. If you received it, email notifications can reach you.")
     status = "sent" if ok else ("logged" if not email_sender.is_configured() else "failed")
     s.execute(text("""INSERT INTO crm_notifications (user_id, to_email, kind, subject, body, status, sent_at)
                       VALUES (:u, :to, 'test', 'Test email', 'Test email', :st, now())"""), {"u": user.id, "to": user.email, "st": status})

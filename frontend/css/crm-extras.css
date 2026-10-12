@@ -19,13 +19,12 @@
   font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
 .cx-primary { background: var(--brand); border-color: var(--brand); color: #fff; }
 .cx-danger { color: var(--danger); }
-.cx-add-btn { cursor: pointer; }
 .acct-crm-row { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 8px; }
 .cx-meta { display: inline-flex; align-items: center; gap: 6px; font-size: .76rem; color: var(--text-secondary); }
 .cx-meta i { color: var(--brand); }
 .cx-meta strong { color: var(--text-primary); font-weight: 600; }
 .cx-meta select { font: inherit; font-size: .76rem; padding: 3px 6px; border: 1px solid var(--border-mid); border-radius: 5px; background: var(--panel-bg); color: var(--text-primary); }
-.role-viewer .cx-add-btn, .role-viewer [data-edit-contact] { display: none !important; }
+.role-viewer [data-edit-contact] { display: none !important; }
 
 
 /* ── Admin: CRM settings panel (js/modules/admin-crm-settings.js) ── */

@@ -105,7 +105,7 @@ class NumberedCanvas(canvas.Canvas):
         self.setFillColor(COLOR_TEXT_MUTED)
 
         # Running Top Header
-        self.drawString(18 * mm, A4[1] - 12 * mm, "CONFIDENTIAL // SALES INTELLIGENCE BRIEFING // COMPLETE EXECUTIVE DOSSIER")
+        self.drawString(18 * mm, A4[1] - 12 * mm, "CONFIDENTIAL // DOSHIN BRIEFING // COMPLETE EXECUTIVE DOSSIER")
         self.drawRightString(A4[0] - 18 * mm, A4[1] - 12 * mm, "EXECUTIVE PROFILE")
         self.setStrokeColor(COLOR_LINE)
         self.setLineWidth(0.5)
@@ -115,7 +115,7 @@ class NumberedCanvas(canvas.Canvas):
         self.line(18 * mm, 14 * mm, A4[0] - 18 * mm, 14 * mm)
         self.setFont("Helvetica", 7.5)
         today_str = datetime.now().strftime("%B %d, %Y")
-        self.drawString(18 * mm, 10 * mm, f"Sales AI Enterprise Intelligence • Verified Profile Record • {today_str}")
+        self.drawString(18 * mm, 10 * mm, f"Doshin • Turn signals into strategy • Verified Profile Record • {today_str}")
         self.drawRightString(A4[0] - 18 * mm, 10 * mm, f"Page {self._pageNumber} of {page_count}")
         self.restoreState()
 

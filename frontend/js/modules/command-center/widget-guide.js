@@ -130,7 +130,7 @@ export function initWidgetGuides() {
 
     if (titleEl) titleEl.textContent = guide.title;
     if (iconEl) iconEl.className = `${guide.icon || 'fa-solid fa-circle-info'}`;
-    if (badgeEl) badgeEl.textContent = guide.badge || 'Sales Intelligence';
+    if (badgeEl) badgeEl.textContent = guide.badge || 'Doshin';
     if (summaryEl) summaryEl.textContent = guide.summary;
     if (actionEl) actionEl.textContent = guide.actionTip;
     if (signalsEl) signalsEl.textContent = guide.signals || 'Real-time telemetry';

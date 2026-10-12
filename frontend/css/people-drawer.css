@@ -53,7 +53,6 @@
 }
 .contact-body { flex: 1; min-width: 0; }
 .contact-name { font-size: .84rem; font-weight: 700; }
-.dossier-badge { font-size: .7rem; color: var(--brand); }
 .contact-title { font-size: .72rem; color: var(--text-secondary); }
 .contact-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .tag {

@@ -80,7 +80,7 @@ def render_html(heading: str, lines: list, cta_label: str = None, cta_url: str =
              style="background:#ffffff;border:1px solid {BORDER};border-radius:12px;overflow:hidden;max-width:480px;width:100%;">
         <tr><td style="background:{BRAND};padding:20px 28px;">
           <span style="font-size:15px;font-weight:800;color:#ffffff;letter-spacing:-.01em;">
-            &#9679; Sales Intelligence
+            &#9679; Doshin
           </span>
         </td></tr>
         <tr><td style="padding:28px 28px 24px;">
@@ -90,7 +90,7 @@ def render_html(heading: str, lines: list, cta_label: str = None, cta_url: str =
           {footnote_html}
         </td></tr>
         <tr><td style="padding:16px 28px;border-top:1px solid {BORDER};">
-          <p style="margin:0;font-size:11px;color:{MUTED};">Sales Intelligence &mdash; automated account notification.</p>
+          <p style="margin:0;font-size:11px;color:{MUTED};">Doshin &mdash; turn signals into strategy. Automated account notification.</p>
         </td></tr>
       </table>
     </td></tr>
