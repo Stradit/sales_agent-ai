@@ -620,18 +620,27 @@ class PersonaCoalesceEngine:
         meta = custom_metadata or {}
 
 
-        # 1. Identity & Names
+        # 1. Identity & Names (Unmask abbreviated names via Exa/LinkedIn/FullEnrich verified match)
+        exa_verified_name = exa.get("verified_full_name") if isinstance(exa, dict) else None
+        is_input_masked = bool(
+            full_name and len(re.sub(r"[^a-zA-Z]", "", full_name.split()[-1])) == 1
+        ) if (full_name and len(full_name.split()) > 1) else False
         display_name = cls.clean_text(
-            meta.get("name") or fe.get("full_name") or li.get("fullName") or ap.get("name") or full_name
+            meta.get("name")
+            or exa_verified_name
+            or li.get("fullName")
+            or (fe.get("full_name") if not is_input_masked else (exa_verified_name or full_name))
+            or ap.get("name")
+            or full_name
         )
         first_name, last_name = cls.parse_name(display_name)
         slug_key = re.sub(r"[^a-z0-9]+", "-", f"{display_name}-{company_name}".lower()).strip("-")
 
-        # 2. Headline, Title & Hierarchy
+        # 2. Headline, Title & Hierarchy (Preserve verified input executive title over homonym FullEnrich title)
         clean_title = cls.clean_text(
-            meta.get("title") or fe.get("title") or li.get("headline") or ap.get("title") or title or "Executive"
+            meta.get("title") or title or li.get("headline") or ap.get("title") or fe.get("title") or "Executive"
         )
-        headline = cls.clean_text(fe.get("headline") or li.get("headline") or f"{clean_title} at {company_name}")
+        headline = cls.clean_text(li.get("headline") or fe.get("headline") or f"{clean_title} at {company_name}")
         seniority_raw = cls.clean_text(
             ap.get("seniority")
             or li.get("seniority")
@@ -882,8 +891,10 @@ class PersonaCoalesceEngine:
         # 9. Social Profiles & Presence Level
         linkedin_url = cls.clean_text(
             meta.get("linkedin_url")
+            or (exa.get("verified_linkedin_url") if isinstance(exa, dict) else None)
             or li.get("linkedinUrl")
             or ap.get("linkedin_url")
+            or fe.get("linkedin_url")
             or serp.get("linkedin_url")
         )
         company_clean = re.sub(r'[^a-zA-Z0-9]', '', company_name) if company_name else ""
@@ -1157,9 +1168,15 @@ class PersonaService:
         exa_data = (
             mock_connectors.get("exa")
             if mock_connectors
-            else cls._fetch_exa_person(full_name, company_name)
+            else cls._fetch_exa_person(full_name, company_name, title=title)
         )
         PersonaRawDataLakeWriter.save_raw(exa_data, "exa", full_name, company_name, run_raw_dir)
+
+        # Unmask abbreviated name if Exa verified the full executive identity
+        effective_name = (
+            (exa_data.get("verified_full_name") if isinstance(exa_data, dict) else None)
+            or full_name
+        )
 
         # Extract verified LinkedIn URL from Exa or custom parameter
         effective_linkedin = (
@@ -1170,7 +1187,7 @@ class PersonaService:
         li_data = (
             mock_connectors.get("apify_linkedin")
             if mock_connectors
-            else cls._fetch_apify_linkedin_profile(effective_linkedin, full_name, company_name)
+            else cls._fetch_apify_linkedin_profile(effective_linkedin, effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(
             li_data, "apify_linkedin", full_name, company_name, run_raw_dir
@@ -1179,26 +1196,26 @@ class PersonaService:
         tw_data = (
             mock_connectors.get("apify_twitter")
             if mock_connectors
-            else cls._fetch_apify_executive_twitter(full_name, company_name)
+            else cls._fetch_apify_executive_twitter(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(tw_data, "apify_twitter", full_name, company_name, run_raw_dir)
 
         alex_data = (
             mock_connectors.get("openalex")
             if mock_connectors
-            else cls._fetch_openalex_academic_profile(full_name, company_name)
+            else cls._fetch_openalex_academic_profile(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(alex_data, "openalex", full_name, company_name, run_raw_dir)
 
         orc_data = (
-            mock_connectors.get("orcid") if mock_connectors else cls._fetch_orcid_registry(full_name, company_name)
+            mock_connectors.get("orcid") if mock_connectors else cls._fetch_orcid_registry(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(orc_data, "orcid", full_name, company_name, run_raw_dir)
 
         sec_ins_data = (
             mock_connectors.get("sec_insider")
             if mock_connectors
-            else cls._fetch_sec_insider_trades(full_name, company_name)
+            else cls._fetch_sec_insider_trades(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(
             sec_ins_data, "sec_insider", full_name, company_name, run_raw_dir
@@ -1207,14 +1224,14 @@ class PersonaService:
         ap_data = (
             mock_connectors.get("apollo")
             if mock_connectors
-            else cls._fetch_apollo_monid_person(full_name, company_name, domain)
+            else cls._fetch_apollo_monid_person(effective_name, company_name, domain)
         )
         PersonaRawDataLakeWriter.save_raw(ap_data, "apollo", full_name, company_name, run_raw_dir)
 
         serp_data = (
             mock_connectors.get("serper")
             if mock_connectors
-            else cls._fetch_serper_executive_osint(full_name, company_name)
+            else cls._fetch_serper_executive_osint(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(serp_data, "serper", full_name, company_name, run_raw_dir)
 
@@ -1222,7 +1239,7 @@ class PersonaService:
         fec_data = (
             mock_connectors.get("openfec")
             if mock_connectors
-            else cls._fetch_openfec_donations(full_name, company_name)
+            else cls._fetch_openfec_donations(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(fec_data, "openfec", full_name, company_name, run_raw_dir)
 
@@ -1232,7 +1249,7 @@ class PersonaService:
         diffbot_data = (
             mock_connectors.get("diffbot")
             if mock_connectors
-            else cls._fetch_diffbot_person(full_name, company_name)
+            else cls._fetch_diffbot_person(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(diffbot_data, "diffbot", full_name, company_name, run_raw_dir)
 
@@ -1240,7 +1257,7 @@ class PersonaService:
         patentsview_data = (
             mock_connectors.get("patentsview")
             if mock_connectors
-            else cls._fetch_patentsview_inventor(full_name, company_name)
+            else cls._fetch_patentsview_inventor(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(patentsview_data, "patentsview", full_name, company_name, run_raw_dir)
 
@@ -1248,7 +1265,7 @@ class PersonaService:
         sec_form4_data = (
             mock_connectors.get("sec_form4_exec")
             if mock_connectors
-            else cls._fetch_sec_form4_executive(full_name, company_name, sec_cik)
+            else cls._fetch_sec_form4_executive(effective_name, company_name, sec_cik)
         )
         PersonaRawDataLakeWriter.save_raw(sec_form4_data, "sec_form4_exec", full_name, company_name, run_raw_dir)
 
@@ -1256,7 +1273,7 @@ class PersonaService:
         courtlistener_data = (
             mock_connectors.get("courtlistener_exec")
             if mock_connectors
-            else cls._fetch_courtlistener_executive(full_name, company_name)
+            else cls._fetch_courtlistener_executive(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(courtlistener_data, "courtlistener_exec", full_name, company_name, run_raw_dir)
 
@@ -1264,7 +1281,7 @@ class PersonaService:
         wikidata_data = (
             mock_connectors.get("wikidata_person")
             if mock_connectors
-            else cls._fetch_wikidata_person(full_name, company_name)
+            else cls._fetch_wikidata_person(effective_name, company_name)
         )
         PersonaRawDataLakeWriter.save_raw(wikidata_data, "wikidata_person", full_name, company_name, run_raw_dir)
 
@@ -1276,6 +1293,7 @@ class PersonaService:
             li_data.get("experience")
             or li_data.get("experiences")
             or ap_data.get("employment_history")
+            or (exa_data.get("employment_history") if isinstance(exa_data, dict) else None)
         )
 
         needs_fullenrich = (not has_verified_email or not has_direct_phone or not has_career_history)
@@ -1285,18 +1303,29 @@ class PersonaService:
             fe_data = mock_connectors["fullenrich"]
         elif needs_fullenrich:
             print(
-                f"[*] Escalating to FullEnrich for '{full_name}' "
+                f"[*] Escalating to FullEnrich for '{effective_name}' "
                 f"(missing email: {not has_verified_email}, missing phone: {not has_direct_phone}, "
                 f"missing career: {not has_career_history})..."
             )
-            fe_data = cls._fetch_fullenrich_waterfall(full_name, company_name, domain, effective_linkedin)
+            fe_data = cls._fetch_fullenrich_waterfall(effective_name, company_name, domain, effective_linkedin)
         else:
             print(
-                f"[*] Base sources provided complete contact & career intel for '{full_name}' "
+                f"[*] Base sources provided complete contact & career intel for '{effective_name}' "
                 f"- skipping FullEnrich escalation to conserve credits."
             )
 
         PersonaRawDataLakeWriter.save_raw(fe_data, "fullenrich", full_name, company_name, run_raw_dir)
+
+        # Post-FullEnrich Apify Fallback: If Apify LinkedIn was skipped initially due to missing URL,
+        # but FullEnrich discovered a verified LinkedIn URL, invoke Apify now for full profile depth
+        if not li_data and isinstance(fe_data, dict) and fe_data.get("linkedin_url") and not mock_connectors:
+            fe_li_url = fe_data.get("linkedin_url")
+            fe_name = fe_data.get("full_name") or effective_name
+            print(f"[*] [PersonaService] FullEnrich resolved LinkedIn URL ({fe_li_url}); triggering secondary Apify LinkedIn scrape...")
+            li_data = cls._fetch_apify_linkedin_profile(fe_li_url, fe_name, company_name)
+            PersonaRawDataLakeWriter.save_raw(
+                li_data, "apify_linkedin", full_name, company_name, run_raw_dir
+            )
 
         # Compile genuine OSINT text from Exa, Serper, and SEC for LLM bio/career synthesis
         intel_snippets = []
@@ -1882,10 +1911,13 @@ class PersonaService:
                     )
                     if res.ok:
                         organic = res.json().get("organic", [])
+                        first_tok = re.sub(r"[^a-z0-9]", "", full_name.split()[0].lower()) if full_name else ""
                         for o in organic:
                             link = o.get("link", "")
+                            o_title = (o.get("title") or "").lower()
                             if "linkedin.com/in/" in link and not linkedin_url:
-                                linkedin_url = link
+                                if not first_tok or first_tok in link.lower() or first_tok in o_title:
+                                    linkedin_url = link
                             if not any(x.get("link") == link for x in all_organic):
                                 all_organic.append(o)
                 except Exception as e:
@@ -2002,15 +2034,31 @@ Source Intel Snippets:
         }
 
     @classmethod
-    def _fetch_exa_person(cls, full_name: str, company_name: str) -> Dict[str, Any]:
-        """Queries Exa AI for executive professional footprint and extracts verified LinkedIn URL, work history, and education."""
+    def _fetch_exa_person(
+        cls, full_name: str, company_name: str, title: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Queries Exa AI for executive professional footprint and extracts verified LinkedIn URL, unmasked name, work history, and education."""
         if not config.EXA_API_KEY:
             return {}
         headers = {"x-api-key": config.EXA_API_KEY, "content-type": "application/json"}
+
+        # Executive name tokens for strict identity verification
+        name_parts = [p.strip() for p in full_name.split() if p.strip()]
+        target_first = re.sub(r"[^a-z0-9]", "", name_parts[0].lower()) if name_parts else ""
+        raw_last = name_parts[-1].lower() if len(name_parts) > 1 else target_first
+        clean_last = re.sub(r"[^a-z0-9]", "", raw_last)
+        is_abbreviated_last = len(clean_last) == 1
+
+        # Include executive title when last name is abbreviated or for disambiguation
+        query_str = (
+            f"{full_name} {title} {company_name}"
+            if (title and is_abbreviated_last)
+            else f"{full_name} {company_name}"
+        )
         payload = {
-            "query": f"{full_name} {company_name}",
+            "query": query_str,
             "category": "people",
-            "num_results": 3,
+            "num_results": 5,
             "contents": {"text": {"max_characters": 1000}},
         }
         session = PersonaServiceHTTPClient.get_session()
@@ -2023,11 +2071,17 @@ Source Intel Snippets:
                 results = data.get("results", [])
                 linkedin_url = None
 
-                # Executive name tokens for strict identity verification
-                name_parts = [p.strip() for p in full_name.split() if p.strip()]
-                target_first = name_parts[0].lower() if name_parts else ""
-                target_last = name_parts[-1].lower() if len(name_parts) > 1 else target_first
-                company_token = re.sub(r"[^a-z0-9]", "", company_name.lower().split(",")[0].replace("inc", ""))
+                # Strip corporate legal stop-words so "The Vanguard Group, Inc." -> "vanguard"
+                stop_words = {
+                    "the", "group", "inc", "incorporated", "llc", "ltd", "limited",
+                    "corp", "corporation", "company", "co", "holdings", "plc", "sa", "ag"
+                }
+                comp_words = [
+                    re.sub(r"[^a-z0-9]", "", w)
+                    for w in company_name.lower().replace(",", " ").split()
+                ]
+                core_words = [w for w in comp_words if w and w not in stop_words]
+                company_token = "".join(core_words) if core_words else re.sub(r"[^a-z0-9]", "", company_name.lower())
 
                 for r in results:
                     url = r.get("url", "")
@@ -2039,36 +2093,64 @@ Source Intel Snippets:
                         if not (isinstance(ent, dict) and ent.get("type") == "person"):
                             continue
                         props = ent.get("properties", {})
-                        p_name = (props.get("name") or "").lower()
-                        p_last = (props.get("lastName") or "").lower()
-                        p_first = (props.get("firstName") or "").lower()
+                        p_name_raw = props.get("name") or ""
+                        p_name = p_name_raw.lower()
+                        p_last = re.sub(r"[^a-z0-9]", "", (props.get("lastName") or "").lower())
+                        p_first = re.sub(r"[^a-z0-9]", "", (props.get("firstName") or "").lower())
 
-                        # Strict Identity Verification: Last name and first name must match
-                        last_match = bool(target_last and (target_last == p_last or target_last in p_name or target_last in r_title))
-                        first_match = bool(target_first and (target_first == p_first or target_first in p_name or target_first in r_title))
+                        # Strict Identity Verification: First name and last name (or initial if masked) must match
+                        first_match = bool(
+                            target_first
+                            and (
+                                target_first == p_first
+                                or p_first.startswith(target_first)
+                                or target_first in p_name
+                                or target_first in r_title
+                            )
+                        )
+                        if is_abbreviated_last:
+                            last_match = bool(
+                                clean_last
+                                and (
+                                    p_last.startswith(clean_last)
+                                    or any(
+                                        re.sub(r"[^a-z0-9]", "", tok).startswith(clean_last)
+                                        for tok in p_name.split()[1:]
+                                    )
+                                )
+                            )
+                        else:
+                            last_match = bool(
+                                clean_last
+                                and (clean_last == p_last or clean_last in p_name or clean_last in r_title)
+                            )
 
                         if not (last_match and first_match):
                             continue
 
-                        # Strict Corporate Verification: Ensure person actually worked at or is associated with the company
+                        # Strict Corporate Verification: Bidirectional token check against workHistory and text
                         wh_comps = []
                         for wh in props.get("workHistory", []):
                             if isinstance(wh, dict):
                                 c_obj = wh.get("company")
                                 c_name = c_obj.get("name") if isinstance(c_obj, dict) else (str(c_obj) if c_obj else "")
-                                wh_comps.append(re.sub(r"[^a-z0-9]", "", c_name.lower()))
+                                c_clean = re.sub(r"[^a-z0-9]", "", c_name.lower())
+                                if c_clean:
+                                    wh_comps.append(c_clean)
 
                         corp_match = bool(
                             not company_token
-                            or any(company_token in c for c in wh_comps)
-                            or (company_token in r_text)
-                            or (company_token in r_title)
+                            or any((company_token in c or c in company_token) for c in wh_comps if len(c) >= 3)
+                            or (company_token in re.sub(r"[^a-z0-9]", "", r_text))
+                            or (company_token in re.sub(r"[^a-z0-9]", "", r_title))
                         )
                         if not corp_match:
                             continue
 
                         if "linkedin.com/in/" in url and not linkedin_url:
                             linkedin_url = url
+                        if p_name_raw and not data.get("verified_full_name"):
+                            data["verified_full_name"] = p_name_raw
 
                         if props.get("educationHistory") and not data.get("education_history"):
                             edu_list = []
