@@ -36,12 +36,12 @@
   <form class="pt-card pt-form" id="ptForm" hidden autocomplete="off">
     <h2>Submit an introduction</h2>
     <div class="pt-grid">
-      <label>Company<input id="ptCompany" required minlength="2" maxlength="200" placeholder="e.g. BNY"></label>
-      <label>Contact name<input id="ptContact" required minlength="2" maxlength="200" placeholder="Full name"></label>
-      <label>Their title <span>(optional)</span><input id="ptTitle" maxlength="200" placeholder="e.g. Chief Data Officer"></label>
-      <label>Their work email <span>(optional)</span><input id="ptEmail" type="email" maxlength="255" placeholder="name@company.com"></label>
+      <label><span>Company<span class="in-req" aria-hidden="true">*</span></span><input id="ptCompany" required minlength="2" maxlength="200" placeholder="e.g. BNY"></label>
+      <label><span>Contact name<span class="in-req" aria-hidden="true">*</span></span><input id="ptContact" required minlength="2" maxlength="200" placeholder="Full name"></label>
+      <label><span>Their title <span>(optional)</span></span><input id="ptTitle" maxlength="200" placeholder="e.g. Chief Data Officer"></label>
+      <label><span>Their work email <span>(optional)</span></span><input id="ptEmail" type="email" maxlength="255" placeholder="name@company.com"></label>
     </div>
-    <label>Why this introduction? <span>(how you know them, what they need)</span>
+    <label><span>Why this introduction?<span class="in-req" aria-hidden="true">*</span> <span>(how you know them, what they need)</span></span>
       <textarea id="ptContext" required minlength="10" maxlength="4000" rows="4"></textarea></label>
     <div class="pt-form-foot"><span class="pt-muted">Only you and the StradIT team can see what you submit.</span>
       <button type="button" class="pt-btn pt-ghost" id="ptCancel">Cancel</button>

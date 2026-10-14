@@ -62,18 +62,18 @@
 <div class="dl-modal-wrap" id="inModal" hidden>
   <form class="dl-modal" id="inNewForm" role="dialog" aria-modal="true" aria-labelledby="inNewTitle" autocomplete="off" novalidate>
     <header><h2 id="inNewTitle">New introduction</h2><button type="button" class="dl-icon" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark"></i></button></header>
-    <label>Introduced by (connector)<span class="in-req" aria-hidden="true">*</span><select id="inNewConnector" required aria-required="true" aria-describedby="inNewConnectorErr"></select>
+    <label><span>Introduced by (connector)<span class="in-req" aria-hidden="true">*</span></span><select id="inNewConnector" required aria-required="true" aria-describedby="inNewConnectorErr"></select>
       <span class="in-err" id="inNewConnectorErr" hidden></span></label>
     <button type="button" class="in-link" id="inNewConnectorToggle"><i class="fa-solid fa-plus"></i> Add a new connector</button>
     <div class="dl-row in-newconn" id="inNewConnectorBox" hidden>
-      <label class="dl-grow">Name<span class="in-req" aria-hidden="true">*</span><input id="inNcName" maxlength="200" placeholder="Person or firm" aria-required="true" aria-describedby="inNcNameErr">
+      <label class="dl-grow"><span>Name<span class="in-req" aria-hidden="true">*</span></span><input id="inNcName" maxlength="200" placeholder="Person or firm" aria-required="true" aria-describedby="inNcNameErr">
         <span class="in-err" id="inNcNameErr" hidden></span></label>
       <label>Kind<select id="inNcKind"><option value="partner">Partner</option><option value="advisor">Advisor</option><option value="employee">Employee</option><option value="customer">Customer</option><option value="other">Other</option></select></label>
       <label class="dl-grow">Organisation<input id="inNcOrg" maxlength="200"></label>
     </div>
-    <label>Account<span class="in-req" aria-hidden="true">*</span><select id="inNewAccount" required aria-required="true" aria-describedby="inNewAccountErr"></select>
+    <label><span>Account<span class="in-req" aria-hidden="true">*</span></span><select id="inNewAccount" required aria-required="true" aria-describedby="inNewAccountErr"></select>
       <span class="in-err" id="inNewAccountErr" hidden></span></label>
-    <label>Contact being introduced<span class="in-req" id="inNewContactReq" aria-hidden="true" hidden>*</span>
+    <label><span>Contact being introduced<span class="in-req" id="inNewContactReq" aria-hidden="true" hidden>*</span></span>
       <span class="in-suggest-wrap">
         <input id="inNewContactSearch" placeholder="Type to search people at this account…" role="combobox" aria-autocomplete="list"
                aria-expanded="false" aria-controls="inNewContactList" aria-describedby="inNewContactErr">

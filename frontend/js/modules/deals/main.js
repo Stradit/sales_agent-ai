@@ -162,6 +162,33 @@ async function moveDeal(id, stage, extra = {}) {
   } catch (err) { showToast(err.message); }
 }
 
+function canStep(d, s) {
+  if (!d || !OPEN_STAGES.includes(d.stage) || s === d.stage) return false;
+  return Math.abs(OPEN_STAGES.indexOf(s) - OPEN_STAGES.indexOf(d.stage)) === 1;
+}
+
+async function moveToStage(target, dealId = null) {
+  const d = dealId ? st.deals.find(x => x.id === dealId) : st.deal;
+  if (!d || target === d.stage) return;
+  const from = OPEN_STAGES.indexOf(d.stage);
+  const to = OPEN_STAGES.indexOf(target);
+  if (from >= 0 && to >= 0) {
+    if (Math.abs(to - from) !== 1) { showToast('Move one stage at a time'); return; }
+    if (to < from) {
+      if (!st.deal || st.deal.id !== d.id) await openDeal(d.id);
+      const targetLabel = (st.meta.stages.find(x => x.key === target) || {}).label || target;
+      const reason = await askReason(`Why move back to ${targetLabel}? (required)`, 'Move back', false);
+      if (reason) {
+        if (st.deal && st.deal.id === d.id) patchDeal({ stage: target, reason });
+        else moveDeal(d.id, target, { reason });
+      }
+      return;
+    }
+  }
+  if (st.deal && st.deal.id === d.id) patchDeal({ stage: target });
+  else moveDeal(d.id, target);
+}
+
 // ── Deal room ────────────────────────────────────────────────────────────────
 function field(label, input, wide = false) { return `<label class="dl-field${wide ? ' dl-field-wide' : ''}">${label}${input}</label>`; }
 
@@ -183,7 +210,8 @@ function renderRoom() {
       </div>
       <div class="dl-stepper" role="group" aria-label="Stage">${OPEN_STAGES.map((s, i) => {
         const lbl = st.meta.stages.find(x => x.key === s).label;
-        return `<button type="button" class="dl-step${i < idx ? ' done' : ''}${s === d.stage ? ' current' : ''}" data-stage-step="${s}" aria-current="${s === d.stage ? 'step' : 'false'}">${esc(lbl)}</button>`;
+        const allowed = canStep(d, s);
+        return `<button type="button" class="dl-step${i < idx ? ' done' : ''}${s === d.stage ? ' current' : ''}" data-stage-step="${s}" aria-current="${s === d.stage ? 'step' : 'false'}"${allowed ? '' : ' disabled'}${!allowed && s !== d.stage && OPEN_STAGES.includes(d.stage) ? ' title="Move one stage at a time"' : ''}>${esc(lbl)}</button>`;
       }).join('')}</div>
       ${OPEN_STAGES.includes(d.stage) ? `<div class="dl-close-btns">
           ${canWin(d) ? '<button type="button" class="dl-btn" data-close-deal="won"><i class="fa-solid fa-trophy"></i> Mark won</button>'
@@ -424,7 +452,10 @@ function wireRoom() {
     const t = e.target;
     if (t.closest('[data-close-room]')) { closeRoom(); return; }
     const step = t.closest('[data-stage-step]');
-    if (step && step.dataset.stageStep !== st.deal.stage) { patchDeal({ stage: step.dataset.stageStep }); return; }
+    if (step && step.dataset.stageStep !== st.deal.stage) {
+      if (!step.disabled) moveToStage(step.dataset.stageStep);
+      return;
+    }
     const close = t.closest('[data-close-deal]');
     if (close) {
       if (close.dataset.closeDeal === 'lost') {
@@ -581,14 +612,20 @@ function wireRoom() {
 }
 
 // Small inline prompts instead of window.prompt/confirm (keyboard- and screen-reader friendly)
-function askReason() {
+function askReason(placeholder = 'Why was it lost? (required)', okLabel = 'Mark lost', isDanger = true) {
   return new Promise((resolve) => {
     const foot = $('dlRoom').querySelector('.dl-close-btns');
-    foot.innerHTML = `<input id="dlLostReason" maxlength="500" placeholder="Why was it lost? (required)" style="flex:1" aria-label="Lost reason">
-      <button type="button" class="dl-btn dl-btn-danger" id="dlLostGo">Mark lost</button><button type="button" class="dl-btn" id="dlLostCancel">Cancel</button>`;
-    $('dlLostReason').focus();
-    $('dlLostGo').onclick = () => { const v = $('dlLostReason').value.trim(); if (!v) { showToast('Please add a reason'); return; } resolve(v); };
+    if (!foot) { resolve(null); return; }
+    foot.innerHTML = `<input id="dlLostReason" maxlength="500" placeholder="${esc(placeholder)}" style="flex:1;min-width:180px" aria-label="${esc(placeholder)}">
+      <button type="button" class="dl-btn ${isDanger ? 'dl-btn-danger' : 'dl-btn-primary'}" id="dlLostGo">${esc(okLabel)}</button><button type="button" class="dl-btn" id="dlLostCancel">Cancel</button>`;
+    const input = $('dlLostReason');
+    input.focus();
+    $('dlLostGo').onclick = () => { const v = input.value.trim(); if (!v) { showToast('Please add a reason'); input.focus(); return; } resolve(v); };
     $('dlLostCancel').onclick = () => { renderRoom(); resolve(null); };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); $('dlLostGo').click(); }
+      if (e.key === 'Escape') { e.stopPropagation(); $('dlLostCancel').click(); }
+    };
   });
 }
 
@@ -664,8 +701,9 @@ function wireBoard() {
     e.preventDefault();
     col.classList.remove('drop-hover');
     const d = st.deals.find(x => x.id === st.dragId);
-    if (d && d.stage !== col.dataset.stage) moveDeal(d.id, col.dataset.stage);
+    const id = st.dragId;
     st.dragId = null;
+    if (d && d.stage !== col.dataset.stage) moveToStage(col.dataset.stage, id);
   });
   document.addEventListener('click', (e) => {
     const c = e.target.closest('.dl-card');
@@ -678,10 +716,14 @@ function wireBoard() {
     if (c && e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
       const d = st.deals.find(x => x.id === Number(c.dataset.deal));
       const i = OPEN_STAGES.indexOf(d.stage) + (e.key === 'ArrowRight' ? 1 : -1);
-      if (i >= 0 && i < OPEN_STAGES.length) { e.preventDefault(); moveDeal(d.id, OPEN_STAGES[i]); }
+      if (i >= 0 && i < OPEN_STAGES.length) { e.preventDefault(); moveToStage(OPEN_STAGES[i], d.id); }
     }
-    if (e.key === 'Escape' && !$('dlRoom').hidden) closeRoom();
-    if (e.key === 'Escape' && !$('dlModal').hidden) $('dlModal').hidden = true;
+    if (e.key === 'Escape') {
+      if (!$('dlModal').hidden) {
+        if (st.newDirty) showToast('Unsaved deal — use Cancel to discard it');
+        else closeNewDeal();
+      } else if (!$('dlRoom').hidden) closeRoom();
+    }
   });
   $('dlOverlay').addEventListener('click', closeRoom);
 }
@@ -707,17 +749,30 @@ async function openNewDeal() {
   $('dlNewForm').reset();
   $('dlNewBusinessLine').innerHTML = '<option value="">— Not set —</option>'
     + (st.meta.business_lines || []).map(b => `<option value="${b.id}"${String(b.id) === $('dlBusinessLine').value ? ' selected' : ''}>${esc(b.name)}</option>`).join('');
+  st.newDirty = false;
   $('dlModal').hidden = false;
   $('dlNewName').focus();
 }
 
+function closeNewDeal() {
+  $('dlModal').hidden = true;
+  st.newDirty = false;
+}
+
 function wireNewDeal() {
   $('dlNew').addEventListener('click', openNewDeal);
+  // Only the Close / Cancel buttons dismiss the form — a stray click outside must not lose the input.
   $('dlModal').addEventListener('click', (e) => {
-    if (e.target === $('dlModal') || e.target.closest('[data-close-modal]')) $('dlModal').hidden = true;
+    if (e.target.closest('[data-close-modal]')) closeNewDeal();
     const chip = e.target.closest('[data-new-offering]');
-    if (chip) { chip.classList.toggle('on'); chip.setAttribute('aria-pressed', chip.classList.contains('on')); }
+    if (chip) {
+      chip.classList.toggle('on');
+      chip.setAttribute('aria-pressed', chip.classList.contains('on'));
+      st.newDirty = true;
+    }
   });
+  $('dlNewForm').addEventListener('input', () => { st.newDirty = true; });
+  $('dlNewForm').addEventListener('change', () => { st.newDirty = true; });
   $('dlNewForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = {
@@ -730,7 +785,7 @@ function wireNewDeal() {
     };
     try {
       const d = await api('', { method: 'POST', body });
-      $('dlModal').hidden = true;
+      closeNewDeal();
       showToast('Deal created — add the buying committee next');
       await loadDeals();
       st.tab = 'committee';

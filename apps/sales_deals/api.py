@@ -299,6 +299,7 @@ class DealPatch(BaseModel):
     next_step_due: Optional[date] = None
     stage: Optional[str] = None
     lost_reason: Optional[str] = Field(None, max_length=500)
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 class StakeholderIn(BaseModel):
@@ -487,6 +488,7 @@ def update_deal(deal_id: int, body: DealPatch, user: User = Depends(auth.get_cur
     changes = body.model_dump(exclude_unset=True)
     warnings: List[str] = []
     new_stage = changes.pop("stage", None)
+    reason = (changes.pop("reason", None) or "").strip()
     if "offerings" in changes:
         changes["offerings"] = [o for o in changes["offerings"] or [] if o in OFFERINGS]
     if "currency" in changes and changes["currency"]:
@@ -518,18 +520,24 @@ def update_deal(deal_id: int, body: DealPatch, user: User = Depends(auth.get_cur
             raise HTTPException(400, "Move the deal to Proposal or later before marking it won.")
         if new_stage == "lost" and not (changes.get("lost_reason") or deal.get("lost_reason")):
             raise HTTPException(400, "Please give a reason when marking a deal as lost.")
-        # Soft gate: moving forward past unfinished exit criteria is allowed but flagged (README §21.2)
-        if new_stage in STAGES and deal["stage"] in STAGES and STAGES.index(new_stage) > STAGES.index(deal["stage"]):
-            open_items = s.execute(text("""SELECT label FROM deal_checklist WHERE deal_id = :d AND stage = :s AND NOT done
-                                           ORDER BY ordinal"""), {"d": deal_id, "s": deal["stage"]}).scalars().all()
-            if open_items:
-                warnings.append(f"Moved on with {len(open_items)} open {STAGE_LABEL[deal['stage']]} item(s): " + "; ".join(open_items))
+        if new_stage in STAGES and deal["stage"] in STAGES:
+            step = STAGES.index(new_stage) - STAGES.index(deal["stage"])
+            if abs(step) > 1:
+                raise HTTPException(400, "Move one stage at a time.")
+            if step == -1 and not reason:
+                raise HTTPException(400, "Please give a reason for moving back a stage.")
+            if step > 0:
+                open_items = s.execute(text("""SELECT label FROM deal_checklist WHERE deal_id = :d AND stage = :s AND NOT done
+                                               ORDER BY ordinal"""), {"d": deal_id, "s": deal["stage"]}).scalars().all()
+                if open_items:
+                    warnings.append(f"Moved on with {len(open_items)} open {STAGE_LABEL[deal['stage']]} item(s): " + "; ".join(open_items))
         s.execute(text("UPDATE deals SET stage = :st, stage_changed_at = now(), updated_at = now() WHERE id = :d"),
                   {"st": new_stage, "d": deal_id})
         s.execute(text("INSERT INTO deal_stage_history (deal_id, from_stage, to_stage, changed_by) VALUES (:d, :f, :t, :u)"),
                   {"d": deal_id, "f": deal["stage"], "t": new_stage, "u": user.id})
+        stage_reason = (changes.get("lost_reason") or deal.get("lost_reason")) if new_stage == "lost" else reason
         _log(s, deal_id, user.id, "stage", f"{STAGE_LABEL[deal['stage']]} → {STAGE_LABEL[new_stage]}"
-             + (f" (reason: {changes.get('lost_reason') or deal.get('lost_reason')})" if new_stage == "lost" else ""))
+             + (f" (reason: {stage_reason})" if stage_reason else ""))
     _sync_auto_checks(s, deal_id, user.id)
     s.commit()
     out = _deal_payload(s, _get_deal_row(s, deal_id, user), full=True)

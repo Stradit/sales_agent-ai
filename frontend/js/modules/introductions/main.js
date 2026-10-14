@@ -253,7 +253,7 @@ function renderRoom() {
       <div class="in-convert" id="inConvert" hidden></div>
 
       <div class="dl-grid">
-        ${i.account_id ? `<div class="dl-field dl-field-wide">Contact${NEEDS_CONTACT.includes(i.next_status) || NEEDS_CONTACT.includes(i.status) ? '<span class="in-req" aria-hidden="true">*</span>' : ''}
+        ${i.account_id ? `<div class="dl-field dl-field-wide"><span>Contact${NEEDS_CONTACT.includes(i.next_status) || NEEDS_CONTACT.includes(i.status) ? '<span class="in-req" aria-hidden="true">*</span>' : ''}</span>
           <span class="in-suggest-wrap"><input id="inPersonSearch" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="inPersonList"
             aria-label="${i.persona_name ? 'Change contact' : 'Choose contact'}" placeholder="${i.persona_name ? 'Change contact — type a name…' : 'Search people at this account…'}" ${ro || converted ? 'disabled' : ''}>
             <ul class="in-suggest" id="inPersonList" role="listbox" aria-label="Matching contacts" hidden></ul></span>
@@ -634,7 +634,7 @@ function renderConnectors() {
   const linkCell = () => {
     if (st.partnersState === 'loading' || st.partnersState === 'idle') return '<span class="in-muted"><i class="fa-solid fa-spinner fa-spin"></i> Loading partner logins…</span>';
     if (st.partnersState === 'error') return '<span class="in-muted">Couldn’t load partner logins. <button type="button" class="in-link" data-retry-partners>Retry</button></span>';
-    if (!freePartners.length) return '<span class="in-muted">No free partner logins. <a class="in-link" href="/admin">Create one</a></span>';
+    if (!freePartners.length) return '<span class="in-muted">No unlinked partner accounts found — <a class="in-link" href="/admin">create one in Admin</a></span>';
     return `<select data-link-login aria-label="Link partner login"><option value="">Link a partner login…</option>${freePartners.map(u =>
       `<option value="${u.id}">${esc(u.full_name || u.email)}</option>`).join('')}</select>`;
   };

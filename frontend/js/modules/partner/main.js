@@ -79,12 +79,12 @@ function editForm(i) {
   return `<form class="pt-detail pt-form pt-edit" data-edit-form="${i.id}" autocomplete="off" novalidate>
     <h2>Edit introduction</h2>
     <div class="pt-grid">
-      <label>Company<input name="account_name" required minlength="2" maxlength="200" value="${esc(i.account_name || '')}"></label>
-      <label>Contact name<input name="contact_name" required minlength="2" maxlength="200" value="${esc(i.contact_name || '')}"></label>
-      <label>Their title <span>(optional)</span><input name="contact_title" maxlength="200" value="${esc(i.contact_title || '')}"></label>
-      <label>Their work email <span>(optional)</span><input name="contact_email" type="email" maxlength="255" value="${esc(i.contact_email || '')}"></label>
+      <label><span>Company<span class="in-req" aria-hidden="true">*</span></span><input name="account_name" required minlength="2" maxlength="200" value="${esc(i.account_name || '')}"></label>
+      <label><span>Contact name<span class="in-req" aria-hidden="true">*</span></span><input name="contact_name" required minlength="2" maxlength="200" value="${esc(i.contact_name || '')}"></label>
+      <label><span>Their title <span>(optional)</span></span><input name="contact_title" maxlength="200" value="${esc(i.contact_title || '')}"></label>
+      <label><span>Their work email <span>(optional)</span></span><input name="contact_email" type="email" maxlength="255" value="${esc(i.contact_email || '')}"></label>
     </div>
-    <label>Why this introduction?<textarea name="context" required minlength="10" maxlength="4000" rows="4">${esc(i.context || '')}</textarea></label>
+    <label><span>Why this introduction?<span class="in-req" aria-hidden="true">*</span></span><textarea name="context" required minlength="10" maxlength="4000" rows="4">${esc(i.context || '')}</textarea></label>
     <div class="pt-form-foot"><span class="pt-muted">The StradIT team is told what you changed.</span>
       <button type="button" class="pt-btn pt-ghost" data-edit-cancel>Cancel</button>
       <button type="submit" class="pt-btn pt-primary"><i class="fa-solid fa-check"></i> Save changes</button></div>

@@ -41,6 +41,7 @@
 .pt-form[hidden] { display: none; }
 .pt-form label { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; }
 .pt-form label span { font-weight: 400; color: var(--text-muted); }
+.pt-form label > span:first-child { font-weight: 600; color: var(--text-secondary); display: inline-flex; align-items: baseline; gap: 3px; }
 .pt-form input, .pt-form textarea, .pt-note input { font: inherit; font-size: .86rem; padding: 8px 10px; border: 1px solid var(--border-mid); border-radius: 0;
   background: var(--panel-bg); color: var(--text-primary); }
 .pt-form input:focus, .pt-form textarea:focus, .pt-note input:focus { outline: 0; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-muted); }

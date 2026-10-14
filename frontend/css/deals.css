@@ -70,7 +70,7 @@
 
 /* Drawer (deal room) */
 .dl-overlay { position: fixed; inset: 0; background: rgba(20, 22, 40, .35); z-index: 960; }
-.dl-room { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); z-index: 970; background: var(--panel-bg);
+.dl-room { position: fixed; top: 0; right: 0; bottom: 0; width: min(800px, 90vw); z-index: 970; background: var(--panel-bg);
   box-shadow: var(--shadow-modal); display: flex; flex-direction: column; animation: dl-in .18s ease-out; }
 @keyframes dl-in { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
 .dl-room-head { padding: 16px 18px 10px; border-bottom: 1px solid var(--border-color); }
@@ -87,7 +87,9 @@
 .dl-step:first-child { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%); border-radius: 0; }
 .dl-step.done { background: var(--brand-soft); color: var(--brand); }
 .dl-step.current { background: var(--brand); color: #fff; }
-.dl-step:hover:not(.current) { background: var(--brand-muted); color: var(--brand); }
+.dl-step:hover:not(.current):not(:disabled) { background: var(--brand-muted); color: var(--brand); }
+.dl-step:disabled { cursor: not-allowed; opacity: 0.55; }
+.dl-step:disabled:hover { background: var(--badge-bg); color: var(--text-secondary); }
 .dl-close-btns { display: flex; gap: 6px; margin-top: 8px; }
 .dl-close-btns .dl-btn { padding: 5px 10px; font-size: .75rem; }
 .dl-warn { margin-top: 10px; padding: 8px 10px; border-radius: 0; background: rgba(255, 184, 34, .12); color: var(--text-primary); font-size: .78rem; }

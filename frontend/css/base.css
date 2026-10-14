@@ -18,4 +18,5 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 0; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
+/* Required field asterisk */
+.in-req { color: var(--danger, #FF0003) !important; font-weight: 700; margin-left: 3px; display: inline; }

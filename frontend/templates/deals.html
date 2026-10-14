@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/shell.css?v=3.0">
   <link rel="stylesheet" href="css/people-drawer.css?v=3.0">
   <link rel="stylesheet" href="css/action-items.css?v=3.0">
-  <link rel="stylesheet" href="css/deals.css?v=1.4">
+  <link rel="stylesheet" href="css/deals.css?v=1.6">
   <link rel="stylesheet" href="css/activity-timeline.css?v=1.0">
   <link rel="stylesheet" href="css/elitehost.css?v=1.0">
 </head>
@@ -55,9 +55,9 @@
 <div class="dl-modal-wrap" id="dlModal" hidden>
   <form class="dl-modal" id="dlNewForm" role="dialog" aria-modal="true" aria-labelledby="dlNewTitle" autocomplete="off">
     <header><h2 id="dlNewTitle">New deal</h2><button type="button" class="dl-icon" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark"></i></button></header>
-    <label>Account<select id="dlNewAccount" required></select></label>
+    <label><span>Account<span class="in-req" aria-hidden="true">*</span></span><select id="dlNewAccount" required></select></label>
     <label>Business line<select id="dlNewBusinessLine"></select></label>
-    <label>Deal name<input id="dlNewName" required maxlength="200" placeholder="e.g. BNY — Applied AI governance pilot"></label>
+    <label><span>Deal name<span class="in-req" aria-hidden="true">*</span></span><input id="dlNewName" required maxlength="200" placeholder="e.g. BNY — Applied AI governance pilot"></label>
     <div class="dl-row">
       <label>Value<input id="dlNewValue" type="number" min="0" step="1000" placeholder="250000"></label>
       <label>Currency<select id="dlNewCurrency"><option>USD</option><option>EUR</option><option>GBP</option><option>INR</option></select></label>
@@ -89,6 +89,6 @@
 {% include "partials/drawer.html" %}
 
 {% include "partials/copilot-dock.html" %}
-<script type="module" src="js/modules/deals/main.js?v=1.8"></script>
+<script type="module" src="js/modules/deals/main.js?v=2.0"></script>
 </body>
 </html>
