@@ -1623,3 +1623,32 @@ body.admin-page-body {
   background: #0052db;
   border-color: #0052db;
 }
+
+/* ── Roles & Permissions tab ─────────────────────────────────── */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.role-note { font-size: .74rem; color: var(--text-muted); }
+.role-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.role-card { border: 1px solid var(--panel-border); background: var(--content-bg); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.role-card-head { display: flex; gap: 10px; align-items: center; }
+.role-card-head h3 { margin: 0; font-size: .95rem; color: var(--text-primary); }
+.role-card-icon { width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); }
+.role-count { border: 0; background: none; padding: 0; margin-top: 2px; font: inherit; font-size: .72rem; color: var(--text-secondary); cursor: pointer; }
+.role-count:hover, .role-count:focus-visible { color: var(--brand); text-decoration: underline; outline: 0; }
+.role-count i { font-size: .62rem; }
+.role-summary { margin: 0; font-size: .8rem; line-height: 1.5; color: var(--text-primary); }
+.role-block h4 { margin: 0 0 4px; font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); display: flex; gap: 6px; align-items: center; }
+.role-block h4 i { color: var(--brand); }
+.role-block p, .role-block li { font-size: .78rem; line-height: 1.5; color: var(--text-primary); margin: 0; }
+.role-block ul { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.role-limits h4 i { color: var(--danger); }
+.role-limits li { color: var(--text-secondary); }
+.role-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: .7rem; }
+.role-matrix th[scope="row"] { font-weight: 500; color: var(--text-primary); min-width: 240px; text-align: left; }
+.role-matrix thead th { white-space: nowrap; }
+.role-matrix .role-group th { background: var(--input-bg); font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
+.role-cell > span { display: inline-flex; align-items: center; gap: 5px; font-size: .74rem; white-space: nowrap; }
+.role-cell.yes > span, .role-cell.yes i { color: var(--success); }
+.role-cell.no > span { color: var(--text-muted); }
+.role-cell.team i, .role-cell.scoped i, .role-cell.own i { color: var(--brand); }
+.role-cell.read i { color: var(--warning); }
+.role-matrix-wrap { border: 0; }

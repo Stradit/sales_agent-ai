@@ -142,6 +142,13 @@ def team_rows(s, only_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     return rows
 
 
+@router.get("/roles")
+def roles_guide(user: User = Depends(permissions.require_roles("sales_manager", "user", "viewer"))):
+    """What each role is for and what it can reach (Admin → Roles & permissions)."""
+    from apps.sales_crm import role_guide
+    return role_guide.guide(auth.ROLE_LABELS)
+
+
 @router.get("/team")
 def team(user: User = Depends(permissions.require_roles("sales_manager")), s=Depends(_session)):
     """super_admin: everyone. sales_manager: themself + their reports."""

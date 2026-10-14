@@ -22,6 +22,7 @@ let currentFilter = 'all';
 let searchQuery = '';
 let activeAdminTab = 'users';
 let apiConfigsCache = [];
+let rolesGuideCache = null;   // GET /api/crm/roles (apps/sales_crm/role_guide.py)
 let dirtyConfigs = {};
 
 // CRM roles + team (apps/sales_crm/README.md §5). 'user' is the Sales Rep role.
@@ -477,6 +478,9 @@ function renderAdminTabsNav() {
         <i class="bi bi-people-fill"></i> User Directory & Access Control
         <span class="admin-tab-badge">${usersCache.length}</span>
       </button>
+      <button type="button" class="admin-tab-btn ${activeAdminTab === 'roles' ? 'active' : ''}" data-admin-tab="roles">
+        <i class="fa-solid fa-user-shield"></i> Roles & Permissions
+      </button>
       <button type="button" class="admin-tab-btn ${activeAdminTab === 'api-config' ? 'active' : ''}" data-admin-tab="api-config">
         <i class="bi bi-sliders"></i> API & Model Configuration
       </button>
@@ -485,6 +489,63 @@ function renderAdminTabsNav() {
       </button>
     </div>
   `;
+}
+
+// ── Roles & permissions guide ───────────────────────────────────────────────
+const ACCESS_ICON = { yes: 'fa-circle-check', no: 'fa-circle-minus', scoped: 'fa-building', team: 'fa-people-group',
+  own: 'fa-user', read: 'fa-eye' };
+
+async function loadRolesGuide() {
+  if (rolesGuideCache) return;
+  const res = await fetch('/api/crm/roles');
+  if (!res.ok) throw new Error(`Couldn't load the roles guide (${res.status})`);
+  rolesGuideCache = await res.json();
+}
+
+function renderRolesPanel() {
+  const g = rolesGuideCache;
+  if (!g) return '<div class="admin-panel"><div class="admin-panel-body">Couldn’t load the roles guide.</div></div>';
+  const count = (key) => usersCache.filter(u => u.role === key && u.is_active !== false).length;
+  const label = Object.fromEntries(g.roles.map(r => [r.key, r.label]));
+  const cards = g.roles.map(r => `
+    <article class="role-card" aria-labelledby="role-${r.key}">
+      <header class="role-card-head">
+        <span class="role-card-icon"><i class="fa-solid ${esc(r.icon)}"></i></span>
+        <div><h3 id="role-${r.key}">${esc(r.label)}</h3>
+          <button type="button" class="role-count" data-role-users="${r.key}" title="Show these users">${count(r.key)} active user${count(r.key) === 1 ? '' : 's'} <i class="fa-solid fa-arrow-right"></i></button></div>
+      </header>
+      <p class="role-summary">${esc(r.summary)}</p>
+      <div class="role-block"><h4><i class="fa-solid fa-database"></i> Data access</h4><p>${esc(r.data_scope)}</p></div>
+      <div class="role-block"><h4><i class="fa-solid fa-list-check"></i> Responsibilities</h4>
+        <ul>${r.responsibilities.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
+      ${r.limits.length ? `<div class="role-block role-limits"><h4><i class="fa-solid fa-ban"></i> Can't</h4>
+        <ul>${r.limits.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+    </article>`).join('');
+  const cell = (row, role) => {
+    const v = row.access[role];
+    const note = (row.notes || {})[role];
+    const text = note || g.access_labels[v] || v;
+    return `<td class="role-cell ${esc(v)}"><span title="${esc(text)}"><i class="fa-solid ${ACCESS_ICON[v] || 'fa-circle'}" aria-hidden="true"></i>
+      <span>${esc(text)}</span></span></td>`;
+  };
+  const matrix = `<div class="admin-table-wrap role-matrix-wrap"><table class="admin-table role-matrix">
+    <caption class="sr-only">What each role can do</caption>
+    <thead><tr><th scope="col">Capability</th>${g.order.map(k => `<th scope="col">${esc(label[k] || k)}</th>`).join('')}</tr></thead>
+    <tbody>${g.capabilities.map(grp => `<tr class="role-group"><th colspan="${g.order.length + 1}" scope="colgroup">${esc(grp.group)}</th></tr>
+      ${grp.items.map(row => `<tr><th scope="row">${esc(row.label)}</th>${g.order.map(k => cell(row, k)).join('')}</tr>`).join('')}`).join('')}
+    </tbody></table></div>`;
+  const legend = Object.entries(g.access_labels).map(([k, l]) => `<span class="role-cell ${esc(k)}"><span><i class="fa-solid ${ACCESS_ICON[k]}" aria-hidden="true"></i> ${esc(l)}</span></span>`).join('');
+  return `
+    <div class="admin-panel">
+      <div class="admin-panel-header"><div class="admin-panel-title"><i class="fa-solid fa-user-shield"></i> Roles & responsibilities</div>
+        <span class="role-note">Change someone's role in User Directory. The app enforces these rules; this page describes them.</span></div>
+      <div class="admin-panel-body"><div class="role-cards">${cards}</div></div>
+    </div>
+    <div class="admin-panel" style="margin-top:16px;">
+      <div class="admin-panel-header"><div class="admin-panel-title"><i class="fa-solid fa-table-cells"></i> Access by role</div>
+        <div class="role-legend">${legend}</div></div>
+      <div class="admin-panel-body" style="padding:0;">${matrix}</div>
+    </div>`;
 }
 
 function findConfig(key) {
@@ -1071,6 +1132,9 @@ async function loadAndRender() {
         </div>
       </div>
     `;
+  } else if (activeAdminTab === 'roles') {
+    try { await loadRolesGuide(); } catch (err) { console.error(err); }
+    tabContentHtml = renderRolesPanel();
   } else if (activeAdminTab === 'api-config') {
     tabContentHtml = renderApiConfigPanel();
   } else if (activeAdminTab === 'audit') {
@@ -1121,6 +1185,16 @@ function wireEvents() {
       }
 
       activeAdminTab = targetTab;
+      await loadAndRender();
+    });
+  });
+
+  // Roles guide: "N active users" jumps to the User Directory filtered by that role
+  main.querySelectorAll('[data-role-users]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      activeAdminTab = 'users';
+      currentFilter = btn.dataset.roleUsers;
+      searchQuery = '';
       await loadAndRender();
     });
   });

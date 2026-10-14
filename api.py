@@ -2249,7 +2249,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"10-K Chunking failed: {str(e)}")
 
-    @account_router.post("/patents")
+    @account_router.post("/patents", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_full_patents(req: PatentsRequest):
         """
         [Full Patent Text Extractor]:
@@ -2260,7 +2260,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Patent extraction failed: {str(e)}")
 
-    @account_router.post("/sec-exhibit-21")
+    @account_router.post("/sec-exhibit-21", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_sec_exhibit_21_subsidiaries(req: Sec10kRequest):
         """
         [SEC EDGAR Exhibit 21 (Subsidiaries of Registrant) Extractor]:
@@ -2272,7 +2272,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Exhibit 21 extraction failed: {str(e)}")
 
-    @account_router.post("/gleif")
+    @account_router.post("/gleif", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_gleif_ownership_tree(req: PatentsRequest):
         """
         [GLEIF Corporate Ownership Graph Resolver]:
@@ -2284,7 +2284,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"GLEIF extraction failed: {str(e)}")
 
-    @account_router.post("/wikipedia")
+    @account_router.post("/wikipedia", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_wikipedia_intel(req: PatentsRequest):
         """
         [Wikipedia & DBpedia Open Knowledge Graph Extractor]:
@@ -2295,7 +2295,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Wikipedia extraction failed: {str(e)}")
 
-    @account_router.post("/fec")
+    @account_router.post("/fec", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_fec_political_intel(req: PatentsRequest):
         """
         [FEC Federal Election Commission Political Giving API]:
@@ -2306,7 +2306,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"FEC extraction failed: {str(e)}")
 
-    @account_router.post("/diffbot")
+    @account_router.post("/diffbot", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_diffbot_intel(req: AccountFetchRequest):
         """
         [Diffbot Knowledge Graph (DKG) Enhancer]:
@@ -6108,6 +6108,8 @@ if FASTAPI_AVAILABLE:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
                 if assignee.role in ("super_admin", "admin"):
                     raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in auth.READ_ONLY_ROLES:
+                    raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
             item = ActionItem(
                 account_id=account_id, persona_id=body.persona_id, title=body.title,
                 description=body.description, priority=body.priority,
@@ -6159,6 +6161,8 @@ if FASTAPI_AVAILABLE:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
                 if assignee.role in ("super_admin", "admin"):
                     raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in auth.READ_ONLY_ROLES:
+                    raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
             elif user.role == "user":
                 assigned_id = user.id
 
@@ -6238,6 +6242,8 @@ if FASTAPI_AVAILABLE:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
                 if assignee.role in ("super_admin", "admin"):
                     raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in auth.READ_ONLY_ROLES:
+                    raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
 
             reassigned = body.assigned_to_id is not None and body.assigned_to_id != item.assigned_to_id
             if body.assigned_to_id is not None:

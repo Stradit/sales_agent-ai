@@ -275,6 +275,8 @@ def main() -> int:
                           VALUES (:d, :id, 'Matrix forecast deal', :a, :u, 'intro', 'pipeline', 1, :ec)"""),
                   {"d": date.today() - timedelta(days=1), "id": fdid, "a": a_in, "u": rep, "ec": date.today()})
         s.commit()
+        check("rep skips a deal stage", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"stage": "proposal"}), 400)
+        check("rep advances deal to discovery", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"stage": "discovery"}), 200)
         check("rep advances deal", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"stage": "proposal"}), 200)
         ch = check("rep reads changes", c.get("/api/forecast/changes", headers=H["rep"], params={"period": per}), 200).json()
         kinds = {x["type"] for x in ch["changes"] if x["deal_id"] == fdid}

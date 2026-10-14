@@ -74,7 +74,12 @@ def _login_smoke(client):
                   ("rep: deals list", "user", "GET", "/api/deals", 200),
                   ("rep: database download", "user", "GET", "/api/database/download", 403),
                   ("rep: pipeline runs", "user", "GET", "/api/pipeline/runs", 403),
-                  ("rep: partner portal", "user", "GET", "/api/partner/introductions", 403)]
+                  ("rep: partner portal", "user", "GET", "/api/partner/introductions", 403),
+                  ("rep: paid data fetch (Diffbot)", "user", "POST", "/api/account/diffbot", 403),
+                  ("rep: data fetch (GLEIF)", "user", "POST", "/api/account/gleif", 403),
+                  ("rep: team list", "user", "GET", "/api/crm/team", 403),
+                  ("rep: roles guide", "user", "GET", "/api/crm/roles", 200),
+                  ("partner: roles guide", "partner", "GET", "/api/crm/roles", 403)]
         for label, role, method, path, want in checks:
             r = client.request(method, path, headers=tokens.get(role, {}), json={} if method != "GET" else None)
             out.append((label, r.status_code, want))
