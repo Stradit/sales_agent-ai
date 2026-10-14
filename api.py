@@ -6219,7 +6219,8 @@ if FASTAPI_AVAILABLE:
                 item.title = body.title
             if body.description is not None:
                 item.description = body.description
-            if body.due_date is not None:
+            # Sent explicitly as null/"" clears the date; left out keeps it.
+            if "due_date" in body.model_fields_set:
                 item.due_date = _parse_due_date(body.due_date)
             if body.persona_id is not None:
                 persona = (

@@ -15,6 +15,7 @@ const preview = new URLSearchParams(location.search).get('connector_id');
 const q = preview ? `?connector_id=${encodeURIComponent(preview)}` : '';
 let intros = [];
 let openId = null;
+let editId = null;
 
 async function api(path, opts = {}) {
   const sep = path.includes('?') ? '&' : '?';
@@ -46,7 +47,7 @@ function renderKpis() {
 
 function eventsHtml(events) {
   return `<ul class="pt-events">${events.map(e => `<li><span class="pt-dot ${e.kind}"></span><div>
-    ${e.kind === 'note' ? esc(e.note) : `${e.to_label ? `<strong>${esc(STEP_LABEL[e.to_status] || e.to_label)}</strong>` : ''}${e.note ? ` — ${esc(e.note)}` : ''}`}
+    ${e.kind === 'note' ? esc(e.note) : `${e.to_label ? `<strong>${esc(STEP_LABEL[e.to_status] || e.to_label)}</strong>` : ''}${e.note ? `${e.to_label ? ' — ' : ''}${esc(e.note)}` : ''}`}
     <small>${esc(e.by)} · ${esc(day(e.at))}</small></div></li>`).join('')}</ul>`;
 }
 
@@ -59,14 +60,35 @@ function card(i, detail) {
         <small>Updated ${esc(day(i.updated_at))}</small><i class="fa-solid fa-chevron-down"></i></div>
     </button>
     ${stepper(i)}
-    ${openId === i.id ? `<div class="pt-detail">
+    ${openId === i.id && editId === i.id ? editForm(i) : ''}
+    ${openId === i.id && editId !== i.id ? `<div class="pt-detail">
       ${i.context ? `<p class="pt-context"><strong>Your note:</strong> ${esc(i.context)}</p>` : ''}
+      ${preview ? '' : i.editable
+        ? `<div class="pt-detail-actions"><button type="button" class="pt-btn" data-edit="${i.id}"><i class="fa-solid fa-pen"></i> Edit introduction</button></div>`
+        : (['proposed', 'requested', 'accepted', 'intro_made', 'meeting_held'].includes(i.status)
+          ? '<p class="pt-muted"><i class="fa-solid fa-lock"></i> StradIT is working on this introduction, so its details are locked. Send an update below if something changed.</p>' : '')}
       <p class="pt-muted">${i.stradit_contact ? `Your StradIT contact: <strong>${esc(i.stradit_contact)}</strong>` : 'A StradIT team member will pick this up shortly.'}</p>
       ${detail ? eventsHtml(detail.events) : '<p class="pt-muted">Loading…</p>'}
       ${preview ? '' : `<form class="pt-note" data-note="${i.id}"><input maxlength="2000" placeholder="Add an update for the StradIT team…" aria-label="Add a note">
         <button type="submit" class="pt-btn pt-primary">Send</button></form>`}
     </div>` : ''}
   </article>`;
+}
+
+function editForm(i) {
+  return `<form class="pt-detail pt-form pt-edit" data-edit-form="${i.id}" autocomplete="off" novalidate>
+    <h2>Edit introduction</h2>
+    <div class="pt-grid">
+      <label>Company<input name="account_name" required minlength="2" maxlength="200" value="${esc(i.account_name || '')}"></label>
+      <label>Contact name<input name="contact_name" required minlength="2" maxlength="200" value="${esc(i.contact_name || '')}"></label>
+      <label>Their title <span>(optional)</span><input name="contact_title" maxlength="200" value="${esc(i.contact_title || '')}"></label>
+      <label>Their work email <span>(optional)</span><input name="contact_email" type="email" maxlength="255" value="${esc(i.contact_email || '')}"></label>
+    </div>
+    <label>Why this introduction?<textarea name="context" required minlength="10" maxlength="4000" rows="4">${esc(i.context || '')}</textarea></label>
+    <div class="pt-form-foot"><span class="pt-muted">The StradIT team is told what you changed.</span>
+      <button type="button" class="pt-btn pt-ghost" data-edit-cancel>Cancel</button>
+      <button type="submit" class="pt-btn pt-primary"><i class="fa-solid fa-check"></i> Save changes</button></div>
+  </form>`;
 }
 
 let detailCache = {};
@@ -90,9 +112,29 @@ async function load() {
 
 async function openIntro(id) {
   openId = openId === id ? null : id;
+  editId = null;
   renderList();
   if (!openId) return;
   try { detailCache[id] = await api(`/introductions/${id}`); renderList(); } catch (err) { showToast(err.message); }
+}
+
+async function saveEdit(form) {
+  if (!form.reportValidity()) return;
+  const id = Number(form.dataset.editForm);
+  const v = (n) => form.elements[n].value.trim();
+  const btn = form.querySelector('[type="submit"]');
+  btn.disabled = true;
+  try {
+    const out = await api(`/introductions/${id}`, { method: 'PATCH', body: {
+      account_name: v('account_name'), contact_name: v('contact_name'), contact_title: v('contact_title') || null,
+      contact_email: v('contact_email') || null, context: v('context'),
+    } });
+    detailCache[id] = out;
+    intros = intros.map(x => (x.id === id ? { ...x, ...out } : x));
+    editId = null;
+    renderList();
+    showToast('Saved — the StradIT team has been told');
+  } catch (err) { showToast(err.message); btn.disabled = false; }
 }
 
 function wire() {
@@ -113,10 +155,19 @@ function wire() {
   });
   $('ptList').addEventListener('click', (e) => {
     const t = e.target.closest('[data-toggle]');
-    if (t) openIntro(Number(t.dataset.toggle));
+    if (t) { openIntro(Number(t.dataset.toggle)); return; }
+    const ed = e.target.closest('[data-edit]');
+    if (ed) {
+      editId = Number(ed.dataset.edit); renderList();
+      const first = $('ptList').querySelector('[data-edit-form] input');
+      if (first) first.focus();
+      return;
+    }
+    if (e.target.closest('[data-edit-cancel]')) { editId = null; renderList(); }
   });
   $('ptList').addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (e.target.dataset.editForm) { saveEdit(e.target); return; }
     const id = Number(e.target.dataset.note);
     const input = e.target.querySelector('input');
     if (!input.value.trim()) return;

@@ -24,6 +24,8 @@ router = APIRouter(prefix="/api/deals", tags=["Deals pipeline"])
 
 STAGES = ["intro", "discovery", "proposal", "pilot", "contract"]
 CLOSED = ["won", "lost"]
+# A deal can only be marked won once there is a proposal on the table.
+WON_FROM = ["proposal", "pilot", "contract"]
 STAGE_LABEL = {"intro": "Intro", "discovery": "Discovery", "proposal": "Proposal", "pilot": "Pilot",
                "contract": "Contract", "won": "Won", "lost": "Lost"}
 ROLES = ["champion", "economic_buyer", "technical_evaluator", "influencer", "blocker", "user"]
@@ -258,8 +260,10 @@ def _deal_payload(s, deal: Dict[str, Any], full: bool = False) -> Dict[str, Any]
             SELECT a.id, a.kind, a.text, a.created_at, coalesce(u.full_name, u.email) AS by FROM deal_activity a
             LEFT JOIN users u ON u.id = a.user_id WHERE a.deal_id = :d ORDER BY a.created_at DESC LIMIT 100"""), {"d": did}).mappings()]
         out["tasks"] = [dict(r) for r in s.execute(text("""
-            SELECT id, title, status, priority, due_date FROM action_items WHERE deal_id = :d
-            ORDER BY (status IN ('done','cancelled')), due_date NULLS LAST"""), {"d": did}).mappings()]
+            SELECT t.id, t.title, t.status, t.priority, t.due_date, t.assigned_to_id,
+                   coalesce(u.full_name, u.email) AS assignee
+            FROM action_items t LEFT JOIN users u ON u.id = t.assigned_to_id WHERE t.deal_id = :d
+            ORDER BY (t.status IN ('done','cancelled')), t.due_date NULLS LAST, t.id"""), {"d": did}).mappings()]
     return out
 
 
@@ -326,7 +330,7 @@ class TaskIn(BaseModel):
 def meta(s=Depends(_session)):
     bls = [dict(r) for r in s.execute(text("SELECT id, key, name FROM business_lines WHERE active ORDER BY sort, name")).mappings()]
     return {"stages": [{"key": k, "label": STAGE_LABEL[k]} for k in STAGES + CLOSED], "roles": ROLES,
-            "business_lines": bls,
+            "won_from": WON_FROM, "business_lines": bls,
             "offerings": [{"key": k, "label": v} for k, v in OFFERINGS.items()],
             "checklist": {k: [{"key": a, "label": b} for a, b in v] for k, v in CHECKLIST.items()}}
 
@@ -510,6 +514,8 @@ def update_deal(deal_id: int, body: DealPatch, user: User = Depends(auth.get_cur
     if new_stage and new_stage != deal["stage"]:
         if new_stage not in STAGES + CLOSED:
             raise HTTPException(400, "Unknown stage.")
+        if new_stage == "won" and deal["stage"] not in WON_FROM:
+            raise HTTPException(400, "Move the deal to Proposal or later before marking it won.")
         if new_stage == "lost" and not (changes.get("lost_reason") or deal.get("lost_reason")):
             raise HTTPException(400, "Please give a reason when marking a deal as lost.")
         # Soft gate: moving forward past unfinished exit criteria is allowed but flagged (README §21.2)
@@ -600,14 +606,18 @@ def add_task(deal_id: int, body: TaskIn, user: User = Depends(auth.get_current_u
     deal = _get_deal_row(s, deal_id, user)
     if body.priority not in ("high", "medium", "low"):
         raise HTTPException(400, "priority must be high, medium or low")
-    s.execute(text("""INSERT INTO action_items (account_id, persona_id, title, status, priority, due_date,
+    # Created assigned to the author; the page reassigns through PATCH /api/action-items/{id},
+    # which owns the "assigned to you" email.
+    task_id = s.execute(text("""INSERT INTO action_items (account_id, persona_id, title, status, priority, due_date,
                                                 assigned_to_id, created_by_id, source, source_ref_id, deal_id, created_at, updated_at)
-                      VALUES (:a, :p, :t, 'open', :pr, :due, :u, :u, 'deal', :d, :d, now(), now())"""),
+                      VALUES (:a, :p, :t, 'open', :pr, :due, :u, :u, 'deal', :d, :d, now(), now()) RETURNING id"""),
               {"a": deal["account_id"], "p": body.persona_id, "t": body.title.strip(), "pr": body.priority,
-               "due": body.due_date, "u": user.id, "d": deal_id})
+               "due": body.due_date, "u": user.id, "d": deal_id}).scalar()
     _log(s, deal_id, user.id, "field", f"Task added: {body.title.strip()}")
     s.commit()
-    return _deal_payload(s, _get_deal_row(s, deal_id, user), full=True)
+    out = _deal_payload(s, _get_deal_row(s, deal_id, user), full=True)
+    out["task_id"] = task_id
+    return out
 
 
 @router.get("/{deal_id}/candidates")

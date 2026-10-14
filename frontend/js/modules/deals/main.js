@@ -18,7 +18,13 @@ const ROLE_LABEL = { champion: 'Champion', economic_buyer: 'Economic buyer', tec
 const ACTIVITY_ICON = { note: 'fa-comment', stage: 'fa-diagram-next', checklist: 'fa-list-check', stakeholder: 'fa-user-plus',
   field: 'fa-pen', created: 'fa-flag' };
 
-const st = { meta: null, deals: [], summary: {}, accounts: [], deal: null, tab: 'toolkit', dragId: null, tk: null, tkKey: '' };
+const PRIORITIES = ['high', 'medium', 'low'];
+
+const st = { meta: null, deals: [], summary: {}, accounts: [], deal: null, tab: 'toolkit', dragId: null, tk: null, tkKey: '',
+  me: null, users: null, editTask: null };
+
+// Mirrors WON_FROM in apps/sales_deals/api.py: no "won" before a proposal is on the table.
+const canWin = (d) => ((st.meta && st.meta.won_from) || ['proposal', 'pilot', 'contract']).includes(d.stage);
 
 async function api(path, opts = {}) {
   const res = await fetch(`/api/deals${path}`, {
@@ -180,7 +186,8 @@ function renderRoom() {
         return `<button type="button" class="dl-step${i < idx ? ' done' : ''}${s === d.stage ? ' current' : ''}" data-stage-step="${s}" aria-current="${s === d.stage ? 'step' : 'false'}">${esc(lbl)}</button>`;
       }).join('')}</div>
       ${OPEN_STAGES.includes(d.stage) ? `<div class="dl-close-btns">
-          <button type="button" class="dl-btn" data-close-deal="won"><i class="fa-solid fa-trophy"></i> Mark won</button>
+          ${canWin(d) ? '<button type="button" class="dl-btn" data-close-deal="won"><i class="fa-solid fa-trophy"></i> Mark won</button>'
+            : '<span class="dl-hint"><i class="fa-solid fa-lock"></i> Mark won unlocks at Proposal</span>'}
           <button type="button" class="dl-btn dl-btn-danger" data-close-deal="lost"><i class="fa-solid fa-circle-xmark"></i> Mark lost</button></div>`
         : `<div class="dl-warn">This deal is <strong>${esc(d.stage_label)}</strong>${d.lost_reason ? ` — ${esc(d.lost_reason)}` : ''}. <button type="button" class="dl-btn" data-stage-step="contract">Reopen</button></div>`}
     </div>
@@ -257,16 +264,15 @@ function renderRoom() {
       </div>
 
       <div class="dl-pane${st.tab === 'tasks' ? ' active' : ''}" role="tabpanel">
-        <form class="dl-add-row" id="dlTaskForm" style="margin-top:0">
-          <input id="dlTaskTitle" maxlength="500" placeholder="New task — e.g. Send the governance one-pager" aria-label="Task title" required>
-          <input id="dlTaskDue" type="date" aria-label="Due date">
-          <select id="dlTaskPriority" aria-label="Priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
-          <button type="submit" class="dl-btn dl-btn-primary">Add task</button>
+        <form class="dl-task-form" id="dlTaskForm">
+          <label class="dl-task-title">New task<input id="dlTaskTitle" maxlength="500" placeholder="e.g. Send the governance one-pager" required></label>
+          <label>Due<input id="dlTaskDue" type="date"></label>
+          <label>Priority<select id="dlTaskPriority">${priorityOptions('medium')}</select></label>
+          <label>Assignee<select id="dlTaskAssignee">${assigneeOptions(st.me && st.me.id)}</select></label>
+          <div class="dl-task-submit"><button type="submit" class="dl-btn dl-btn-primary"><i class="fa-solid fa-plus"></i> Add task</button></div>
         </form>
-        ${d.tasks.map(t => `<div class="dl-task${['done', 'cancelled'].includes(t.status) ? ' done' : ''}">
-          <span>${esc(t.title)}</span><span class="dl-pill">${esc(t.priority)}</span><span class="dl-pill">${esc(t.status.replace('_', ' '))}</span>
-          ${t.due_date ? `<span class="${isOverdue(t.due_date) && !['done', 'cancelled'].includes(t.status) ? 'dl-overdue' : ''}" style="margin-left:auto;font-size:.72rem">${esc(dateLabel(t.due_date))}</span>` : ''}</div>`).join('')
-          || '<p style="font-size:.8rem;color:var(--text-muted)">No tasks yet. Tasks added here also appear on <a href="/tasks">My Tasks</a>.</p>'}
+        ${d.tasks.length ? `<ul class="dl-task-list">${d.tasks.map(taskRow).join('')}</ul>`
+          : '<p class="dl-task-empty">No tasks yet. Tasks added here also appear on <a href="/tasks">My Tasks</a>.</p>'}
       </div>
     </div>
     <div class="dl-room-foot">
@@ -279,6 +285,60 @@ function renderRoom() {
     mountTimeline($('dlTimeline'), { objectType: 'deal', objectId: d.id, accountId: d.account_id, dealId: d.id,
       onChange: () => { api(`/${d.id}`).then(fresh => { if (st.deal && st.deal.id === fresh.id) { st.deal.tasks = fresh.tasks; st.deal.health = fresh.health; } loadDeals(); }).catch(() => {}); } });
   }
+}
+
+// ── Tasks ────────────────────────────────────────────────────────────────────
+const isClosedTask = (t) => ['done', 'cancelled'].includes(t.status);
+const priorityOptions = (sel) => PRIORITIES.map(p => `<option value="${p}"${p === sel ? ' selected' : ''}>${p[0].toUpperCase()}${p.slice(1)}</option>`).join('');
+
+function assigneeOptions(sel) {
+  const people = [...(st.users || [])];
+  if (st.me && !people.some(u => u.id === st.me.id)) people.unshift({ id: st.me.id, name: st.me.full_name || st.me.email });
+  return people.map(u => `<option value="${u.id}"${u.id === sel ? ' selected' : ''}>${esc(u.id === (st.me && st.me.id) ? `${u.name} (me)` : u.name)}</option>`).join('');
+}
+
+function taskRow(t) {
+  const closed = isClosedTask(t);
+  if (st.editTask === t.id) {
+    return `<li class="dl-task" data-task="${t.id}"><span></span><form class="dl-task-edit" data-task-edit="${t.id}">
+      <label class="dl-task-title">Task<input name="title" maxlength="500" value="${esc(t.title)}" required></label>
+      <label>Due<input name="due_date" type="date" value="${t.due_date ? String(t.due_date).slice(0, 10) : ''}"></label>
+      <label>Priority<select name="priority">${priorityOptions(t.priority)}</select></label>
+      <label>Assignee<select name="assigned_to_id">${assigneeOptions(t.assigned_to_id)}</select></label>
+      <footer><button type="button" class="dl-btn" data-task-cancel>Cancel</button><button type="submit" class="dl-btn dl-btn-primary">Save</button></footer>
+    </form></li>`;
+  }
+  const overdue = t.due_date && !closed && isOverdue(t.due_date);
+  return `<li class="dl-task${closed ? ' done' : ''}" data-task="${t.id}">
+    <input type="checkbox" data-task-done="${t.id}"${t.status === 'done' ? ' checked' : ''} aria-label="${t.status === 'done' ? 'Reopen' : 'Complete'}: ${esc(t.title)}">
+    <div><div class="dl-task-name">${esc(t.title)}</div>
+      <div class="dl-task-meta">
+        <span class="dl-pill ${esc(t.priority)}">${esc(t.priority)}</span>
+        ${t.status === 'in_progress' || t.status === 'cancelled' ? `<span class="dl-pill">${esc(t.status.replace('_', ' '))}</span>` : ''}
+        ${t.due_date ? `<span class="${overdue ? 'dl-overdue' : ''}"><i class="fa-regular fa-calendar"></i> ${overdue ? 'Overdue · ' : ''}${esc(dateLabel(t.due_date))}</span>` : ''}
+        <span class="dl-task-who" title="Assignee">${t.assignee ? `<span class="dl-avatar" aria-hidden="true">${esc(initials(t.assignee))}</span>${esc(t.assignee)}` : '<i class="fa-regular fa-user"></i> Unassigned'}</span>
+      </div></div>
+    <div class="dl-task-actions">${closed ? '' : `<button type="button" class="dl-icon" data-task-editbtn="${t.id}" aria-label="Edit ${esc(t.title)}"><i class="fa-solid fa-pen"></i></button>`}</div>
+  </li>`;
+}
+
+async function loadUsers() {
+  if (st.users) return;
+  try { st.users = ((await (await fetch('/api/users')).json()).users) || []; } catch { st.users = []; }
+}
+
+// Task edits go through the shared action-items API (it owns access checks and the "assigned to you" email).
+async function patchTask(id, body) {
+  const res = await fetch(`/api/action-items/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `Couldn't update the task (${res.status})`);
+  return data;
+}
+
+async function refreshDeal() {
+  const fresh = await api(`/${st.deal.id}`);
+  if (st.deal && st.deal.id === fresh.id) { st.deal = fresh; renderRoom(); }
+  loadDeals();
 }
 
 function openStages() { return (st.meta ? st.meta.stages : []).filter(s => OPEN_STAGES.includes(s.key)); }
@@ -421,14 +481,33 @@ function wireRoom() {
       return;
     }
     if (t.closest('[data-export]')) { downloadFile(`/api/deals/${st.deal.id}/export`, 'deal.xlsx').catch(err => showToast(err.message)); return; }
+    const editBtn = t.closest('[data-task-editbtn]');
+    if (editBtn) {
+      await loadUsers();
+      st.editTask = Number(editBtn.dataset.taskEditbtn); renderRoom();
+      const input = room.querySelector('[data-task-edit] input[name="title"]');
+      if (input) input.focus();
+      return;
+    }
+    if (t.closest('[data-task-cancel]')) { st.editTask = null; renderRoom(); return; }
     if (t.closest('[data-delete]')) {
-      if (!await confirmInline('Delete this deal? Its tasks stay on My Tasks.')) return;
+      if (!await confirmDelete(st.deal)) return;
       try { await api(`/${st.deal.id}`, { method: 'DELETE' }); closeRoom(); loadDeals(); showToast('Deal deleted'); }
       catch (err) { showToast(err.message); }
     }
   });
   room.addEventListener('change', async (e) => {
     const t = e.target;
+    if (t.dataset.taskDone) {
+      t.disabled = true;
+      try {
+        await patchTask(Number(t.dataset.taskDone), { status: t.checked ? 'done' : 'open' });
+        showToast(t.checked ? 'Task completed' : 'Task reopened');
+        await refreshDeal();
+      } catch (err) { showToast(err.message); t.checked = !t.checked; t.disabled = false; }
+      return;
+    }
+    if (t.closest('[data-task-edit]')) return;
     if (t.dataset.med) { saveQualification(t.dataset.med, t.value.trim()); return; }
     if (t.dataset.field) {
       const v = (t.type === 'number' || t.dataset.field === 'business_line_id') ? (t.value === '' ? null : Number(t.value)) : (t.value || null);
@@ -463,9 +542,36 @@ function wireRoom() {
       catch (err) { showToast(err.message); }
     } else if (e.target.id === 'dlTaskForm') {
       const body = { title: $('dlTaskTitle').value.trim(), due_date: $('dlTaskDue').value || null, priority: $('dlTaskPriority').value };
-      if (!body.title) return;
-      try { st.deal = await api(`/${st.deal.id}/tasks`, { method: 'POST', body }); renderRoom(); loadDeals(); showToast('Task added — also on My Tasks'); }
-      catch (err) { showToast(err.message); }
+      if (!body.title) { $('dlTaskTitle').focus(); return; }
+      const assignee = Number($('dlTaskAssignee').value) || null;
+      try {
+        const out = await api(`/${st.deal.id}/tasks`, { method: 'POST', body });
+        st.deal = out;
+        if (assignee && st.me && assignee !== st.me.id && out.task_id) {
+          try { await patchTask(out.task_id, { assigned_to_id: assignee }); st.deal = await api(`/${st.deal.id}`); }
+          catch (err) { showToast(`Task added, but not reassigned: ${err.message}`); }
+        }
+        renderRoom(); loadDeals(); showToast('Task added — also on My Tasks');
+      } catch (err) { showToast(err.message); }
+    } else if (e.target.matches('[data-task-edit]')) {
+      const f = e.target;
+      const id = Number(f.dataset.taskEdit);
+      const cur = st.deal.tasks.find(x => x.id === id);
+      const title = f.elements.title.value.trim();
+      if (!title) { f.elements.title.focus(); return; }
+      const body = {};
+      if (title !== cur.title) body.title = title;
+      if (f.elements.priority.value !== cur.priority) body.priority = f.elements.priority.value;
+      const due = f.elements.due_date.value;
+      if (due !== String(cur.due_date || '').slice(0, 10)) body.due_date = due || null;   // empty clears it
+      const who = Number(f.elements.assigned_to_id.value) || null;
+      if (who && who !== cur.assigned_to_id) body.assigned_to_id = who;
+      try {
+        if (Object.keys(body).length) await patchTask(id, body);
+        st.editTask = null;
+        await refreshDeal();
+        if (Object.keys(body).length) showToast('Task updated');
+      } catch (err) { showToast(err.message); }
     }
   });
   document.addEventListener('click', (e) => {
@@ -486,15 +592,46 @@ function askReason() {
   });
 }
 
-function confirmInline(text) {
+// A real dialog, focus on Cancel, and Delete armed only after a beat — so a double-click on the
+// drawer's Delete button can't go straight through.
+function confirmDelete(d) {
   return new Promise((resolve) => {
-    const foot = $('dlRoom').querySelector('.dl-room-foot');
-    const prev = foot.innerHTML;
-    foot.innerHTML = `<span style="font-size:.82rem;align-self:center">${esc(text)}</span>
-      <button type="button" class="dl-btn dl-btn-danger" id="dlYes" style="margin-left:auto">Delete</button><button type="button" class="dl-btn" id="dlNo">Cancel</button>`;
-    $('dlNo').focus();
-    $('dlYes').onclick = () => resolve(true);
-    $('dlNo').onclick = () => { foot.innerHTML = prev; resolve(false); };
+    const wrap = $('dlConfirm');
+    const yes = $('dlConfirmYes');
+    const no = $('dlConfirmNo');
+    const opener = document.activeElement;
+    $('dlConfirmText').innerHTML = `<strong>${esc(d.name)}</strong> at ${esc(d.account_name)}${d.value_amount != null ? ` · ${esc(money(d.value_amount, d.currency))}` : ''}`;
+    yes.disabled = true;
+    wrap.hidden = false;
+    no.focus();
+    const arm = setTimeout(() => { yes.disabled = false; }, 600);
+    const done = (ok) => {
+      clearTimeout(arm);
+      wrap.hidden = true;
+      yes.onclick = null; no.onclick = null;
+      wrap.removeEventListener('keydown', onKey, true);
+      if (!ok && opener && opener.focus) opener.focus();
+      resolve(ok);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
+      if (e.key === 'Tab') { e.preventDefault(); (document.activeElement === no && !yes.disabled ? yes : no).focus(); }
+    };
+    wrap.addEventListener('keydown', onKey, true);
+    yes.onclick = () => done(true);
+    no.onclick = () => done(false);
+  });
+}
+
+function wireBack() {
+  // Go back to wherever the user came from in this app; a direct visit falls back to Accounts.
+  $('dlBack').addEventListener('click', (e) => {
+    let internal = false;
+    try {
+      const ref = document.referrer ? new URL(document.referrer) : null;
+      internal = !!ref && ref.origin === location.origin && ref.pathname !== location.pathname && !ref.pathname.startsWith('/login');
+    } catch { /* ignore */ }
+    if (internal && history.length > 1) { e.preventDefault(); history.back(); }
   });
 }
 
@@ -622,9 +759,11 @@ async function init() {
     const b = e.target.closest('[data-deal-open]');
     if (b) openDeal(Number(b.dataset.dealOpen));
   });
+  wireBack();
   wireBoard();
   wireRoom();
   wireNewDeal();
+  loadUsers().then(() => { if (st.deal && st.tab === 'tasks') renderRoom(); });
   await loadDeals();
   if (params.get('deal')) openDeal(Number(params.get('deal')));
   if (params.get('new') === '1') openNewDeal();
@@ -633,5 +772,6 @@ async function init() {
 initThemeToggle();
 initTopbarAuth().then((user) => {
   if (!user) { document.body.style.display = 'none'; location.replace(`/login?next=${encodeURIComponent(location.pathname + location.search)}`); return; }
+  st.me = user;
   init();
 });

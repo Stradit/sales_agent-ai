@@ -67,3 +67,38 @@
 .in-newconn[hidden] { display: none; }
 
 @media (max-width: 640px) { .in-view-head { flex-direction: column; } .in-tab { padding: 8px 10px; } }
+
+/* Drawer: wider than the deal room (it carries history + activity side by side). */
+#inRoom.dl-room { width: min(800px, 90vw); }
+
+/* Stage guidance + outcomes */
+.dl-step:disabled { cursor: not-allowed; }
+.in-stage-box { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border-color); background: var(--content-bg); font-size: .8rem; }
+.in-stage-box h4 { margin: 0 0 6px; font-size: .74rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
+.in-checklist { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 3px; }
+.in-checklist li { display: flex; gap: 7px; align-items: baseline; color: var(--text-primary); }
+.in-checklist .fa-circle-check { color: var(--success); }
+.in-checklist .fa-circle-exclamation { color: var(--warning); }
+.in-stage-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.in-stage-actions .in-inline-input { flex: 1 1 220px; }
+.in-lock { margin-top: 10px; font-size: .78rem; color: var(--text-secondary); }
+
+/* Required fields + inline errors */
+.in-req { color: var(--danger); margin-left: 2px; }
+.in-err { display: block; color: var(--danger); font-size: .74rem; font-weight: 500; margin-top: 3px; }
+.dl-modal [aria-invalid="true"] { border-color: var(--danger) !important; }
+
+/* Contact suggestions */
+.in-suggest-wrap { position: relative; }
+.in-suggest { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin: 2px 0 0; padding: 4px 0; list-style: none;
+  max-height: 240px; overflow-y: auto; background: var(--panel-bg); border: 1px solid var(--border-mid); box-shadow: 0 8px 20px rgba(0, 0, 0, .12); }
+.in-suggest[hidden] { display: none; }
+.in-suggest li { padding: 7px 10px; cursor: pointer; font-size: .82rem; color: var(--text-primary); }
+.in-suggest li small { display: block; color: var(--text-muted); font-size: .72rem; }
+.in-suggest li[aria-selected="true"], .in-suggest li:hover { background: var(--brand-muted); }
+.in-suggest .in-suggest-empty { cursor: default; color: var(--text-muted); }
+.in-chosen { font-size: .76rem; color: var(--text-secondary); margin-top: 3px; }
+
+/* Partner visibility */
+.in-share-note { font-size: .74rem; color: var(--text-secondary); max-width: 220px; text-align: right; }
+.in-vis { margin-left: 6px; font-size: .72rem; }

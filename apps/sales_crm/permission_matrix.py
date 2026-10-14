@@ -158,9 +158,28 @@ def main() -> int:
         check("partner uses internal intro API", c.get("/api/crm/introductions", headers=H["partner"]), 403)
         check("rep declines without reason", c.patch(f"/api/crm/introductions/{iid}", headers=H["rep"], json={"status": "declined"}), 400)
         check("rep sets converted directly", c.patch(f"/api/crm/introductions/{iid}", headers=H["rep"], json={"status": "converted"}), 400)
-        check("rep moves to intro made", c.patch(f"/api/crm/introductions/{iid}", headers=H["rep"], json={"status": "intro_made"}), 200)
-        check("rep adds internal note", c.post(f"/api/crm/introductions/{iid}/notes", headers=H["rep"],
-                                               json={"text": "INTERNAL-ONLY budget is tight", "partner_visible": False}), 200)
+        mv = lambda status, **kw: c.patch(f"/api/crm/introductions/{iid}", headers=H["rep"], json={"status": status, **kw})  # noqa: E731
+        check("rep skips a stage", mv("intro_made"), 400)
+        check("rep moves to requested", mv("requested"), 200)
+        check("rep moves to accepted", mv("accepted"), 200)
+        check("rep converts before meeting held", c.post(f"/api/crm/introductions/{iid}/convert", headers=H["rep"], json={}), 400)
+        check("rep moves back without reason", mv("requested"), 400)
+        check("rep moves back with reason", mv("requested", reason="Contact asked to wait"), 200)
+        check("rep moves forward again", mv("accepted"), 200)
+        check("rep moves to intro made", mv("intro_made"), 200)
+        check("rep moves to meeting held", mv("meeting_held"), 200)
+        r = check("rep adds internal note", c.post(f"/api/crm/introductions/{iid}/notes", headers=H["rep"],
+                                                   json={"text": "INTERNAL-ONLY budget is tight", "partner_visible": False}), 200)
+        note_id = max(e["id"] for e in r.json()["events"] if e["kind"] == "note")
+        status_ev = next(e["id"] for e in r.json()["events"] if e["kind"] == "status")
+        check("viewer shares a note", c.patch(f"/api/crm/introductions/{iid}/events/{note_id}", headers=H["viewer"],
+                                              json={"partner_visible": True}), 403)
+        check("rep toggles a status event", c.patch(f"/api/crm/introductions/{iid}/events/{status_ev}", headers=H["rep"],
+                                                    json={"partner_visible": False}), 400)
+        check("rep shares then hides a note", c.patch(f"/api/crm/introductions/{iid}/events/{note_id}", headers=H["rep"],
+                                                      json={"partner_visible": True}), 200)
+        check("rep makes the note internal again", c.patch(f"/api/crm/introductions/{iid}/events/{note_id}", headers=H["rep"],
+                                                           json={"partner_visible": False}), 200)
         r = check("rep converts intro", c.post(f"/api/crm/introductions/{iid}/convert", headers=H["rep"],
                                                json={"value_amount": 200000, "name": "Matrix intro deal"}), 200)
         conv = r.json()
@@ -172,6 +191,8 @@ def main() -> int:
         results.append(("deal sourced by intro", 1 if dd.get("source") == "introduction" and (dd.get("introduction") or {}).get("id") == iid else 0, 1))
         results.append(("contact added to committee", 1 if any(x["persona_id"] == persona for x in dd.get("stakeholders", [])) else 0, 1))
         check("convert twice", c.post(f"/api/crm/introductions/{iid}/convert", headers=H["rep"], json={}), 400)
+        check("converted intro moves back", mv("meeting_held", reason="oops"), 400)
+        check("deal marked won at intro stage", c.patch(f"/api/deals/{conv.get('deal_id')}", headers=H["rep"], json={"stage": "won"}), 400)
         att = check("attribution report", c.get("/api/crm/introductions/attribution", headers=H["rep"]), 200).json()
         row = next((x for x in att["connectors"] if x["id"] == conn_id), {})
         results.append(("attributed pipeline = 100,000", 1 if row.get("attributed_pipeline") == 100000.0 else 0, 1))
@@ -194,6 +215,22 @@ def main() -> int:
         tri = c.get(f"/api/crm/introductions/{r.json().get('id')}", headers=H["outsider"]).json()
         results.append(("unmatched submission in triage for all reps", 1 if tri.get("needs_triage") else 0, 1))
         check("partner reads other partner's intro id", c.get(f"/api/partner/introductions/{iid + 100000}", headers=H["partner"]), 404)
+        # partner edits: own submission while Submitted/Requested only; never staff-logged or later-stage intros
+        sid = sub.get("id")
+        r = check("partner edits own submission", c.patch(f"/api/partner/introductions/{sid}", headers=H["partner"],
+                  json={"contact_title": "Chief Data Officer", "context": "Knows their CIO well — met again last week"}), 200)
+        ed = r.json()
+        results.append(("edit saved and shown as typed", 1 if ed.get("contact_title") == "Chief Data Officer"
+                        and ed.get("account_name") == acct_name and ed.get("editable") else 0, 1))
+        results.append(("edit logged for partner", 1 if any(e["kind"] == "field" and "contact title" in (e["note"] or "")
+                                                            for e in ed.get("events", [])) else 0, 1))
+        check("partner blanks the company", c.patch(f"/api/partner/introductions/{sid}", headers=H["partner"], json={"account_name": ""}), 422)
+        check("partner edits staff-logged intro", c.patch(f"/api/partner/introductions/{iid}", headers=H["partner"], json={"context": "x" * 20}), 400)
+        check("rep uses partner edit", c.patch(f"/api/partner/introductions/{sid}", headers=H["rep"], json={"context": "x" * 20}), 403)
+        check("partner edits other partner's intro id", c.patch(f"/api/partner/introductions/{sid + 100000}", headers=H["partner"],
+                                                                json={"context": "x" * 20}), 404)
+        s.execute(text("UPDATE introductions SET status = 'accepted' WHERE id = :i"), {"i": sid}); s.commit()
+        check("partner edits after Accepted", c.patch(f"/api/partner/introductions/{sid}", headers=H["partner"], json={"context": "x" * 20}), 400)
 
         # ── M2 forecasting ──
         from datetime import date, timedelta

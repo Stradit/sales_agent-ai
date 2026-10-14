@@ -10,12 +10,23 @@
 .pt-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
 .pt-hero h1 { margin: 0 0 4px; font-size: 1.45rem; color: var(--text-primary); }
 .pt-hero p { margin: 0; color: var(--text-secondary); font-size: .88rem; }
-.pt-btn { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border-mid); border-radius: 0; padding: 8px 14px;
-  font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer; background: var(--panel-bg); color: var(--text-primary); }
+/* One button system: same height, padding, border width and vertical alignment everywhere
+   (hero, form footers, note row, top bar). Variants only change colours. */
+.pt-btn { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 38px; padding: 0 16px; margin: 0; border: 1px solid var(--border-mid); border-radius: 0;
+  font: inherit; font-size: .84rem; font-weight: 600; line-height: 1; white-space: nowrap; vertical-align: middle;
+  cursor: pointer; background: var(--panel-bg); color: var(--text-primary); text-decoration: none;
+  transition: background-color .15s, border-color .15s, color .15s; }
+.pt-btn i { font-size: .82rem; line-height: 1; }
+.pt-btn:hover { border-color: var(--brand); color: var(--brand); }
+.pt-btn:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--brand-muted); }
+.pt-btn:disabled { opacity: .55; cursor: not-allowed; }
 .pt-primary { background: var(--brand); border-color: var(--brand); color: #fff; }
-.pt-primary:hover { background: var(--brand-hover); }
-.pt-ghost { background: transparent; color: inherit; border-color: rgba(255, 255, 255, .35); }
-.pt-form .pt-ghost { color: var(--text-primary); border-color: var(--border-mid); }
+.pt-primary:hover { background: var(--brand-hover); border-color: var(--brand-hover); color: #fff; }
+.pt-ghost { background: transparent; color: var(--text-primary); border-color: var(--border-mid); }
+.pt-ghost:hover { background: var(--brand-muted); }
+.pt-top .pt-ghost { color: #fff; border-color: rgba(255, 255, 255, .35); }
+.pt-top .pt-ghost:hover { background: rgba(255, 255, 255, .1); border-color: rgba(255, 255, 255, .6); color: #fff; }
 .pt-preview { background: rgba(255, 184, 34, .14); border: 1px solid rgba(255, 184, 34, .4); color: var(--text-primary); border-radius: 0;
   padding: 9px 12px; font-size: .82rem; margin-bottom: 14px; }
 .pt-preview[hidden] { display: none; }
@@ -34,7 +45,7 @@
   background: var(--panel-bg); color: var(--text-primary); }
 .pt-form input:focus, .pt-form textarea:focus, .pt-note input:focus { outline: 0; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-muted); }
 .pt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 12px; }
-.pt-form-foot { display: flex; align-items: center; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.pt-form-foot { display: flex; align-items: center; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
 .pt-form-foot .pt-muted { margin-right: auto; }
 .pt-muted { color: var(--text-muted); font-size: .8rem; }
 .pt-empty { text-align: center; padding: 34px 16px; color: var(--text-secondary); }
@@ -69,10 +80,13 @@
 .pt-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--brand); margin-top: 5px; }
 .pt-dot.note { background: var(--warning); }
 .pt-dot.converted { background: var(--success); }
-.pt-note { display: flex; gap: 8px; }
-.pt-note input { flex: 1; }
+.pt-note { display: flex; align-items: center; gap: 8px; }
+.pt-note input { flex: 1; box-sizing: border-box; height: 38px; }
+.pt-detail-actions { display: flex; justify-content: flex-end; margin: 4px 0 8px; }
+.pt-edit { margin: 0; }
 @media (max-width: 600px) { .pt-top { padding: 10px 14px; } .pt-intro-head { flex-direction: column; } .pt-intro-meta { align-items: flex-start; } }
 
 .pt-hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.pt-mail { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--text-secondary); cursor: pointer; }
+.pt-mail { display: inline-flex; align-items: center; gap: 6px; height: 38px; font-size: .8rem; color: var(--text-secondary); cursor: pointer; }
+.pt-mail input { margin: 0; accent-color: var(--brand); }
 .pt-mail[hidden] { display: none; }

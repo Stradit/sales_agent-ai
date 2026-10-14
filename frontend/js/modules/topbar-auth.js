@@ -159,6 +159,8 @@ function render() {
     const tasksBtn = document.getElementById('topbarMyTasksBtn');
     if (tasksBtn) {
       tasksBtn.addEventListener('click', async () => {
+        // Pages without the drawer partial (CRM pages) go to the full task list instead.
+        if (!document.getElementById('myTasksDrawer')) { window.location.href = '/tasks'; return; }
         openMyTasksDrawer();
         const html = await renderMyTasksPanel();
         const body = document.getElementById('myTasksDrawerBody');

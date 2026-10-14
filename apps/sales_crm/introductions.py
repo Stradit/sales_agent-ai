@@ -6,8 +6,12 @@ Partner API   /api/partner/*  — a partner (role 'partner', linked via connecto
               view of them: no deal value, no internal notes, no other connectors.
 
 Status flow: proposed → requested → accepted → intro_made → meeting_held → converted
-             (+ declined / stale). 'converted' is only reachable through /convert, which
-             creates or links a deal and sets the attribution % (intro → connector → setting, 50).
+             (+ declined / stale). Manual moves (check_transition): one stage at a time; forward
+             needs that stage's criteria (STAGE_NEEDS); back, reopen and stale need a reason.
+             'converted' is only reachable through /convert, from meeting_held, which creates or
+             links a deal and sets the attribution % (intro → connector → setting, 50).
+             Logging a meeting (activities.py) may still move an intro straight to meeting_held:
+             a meeting that happened is evidence, not a skipped stage.
 Nothing here uses AI requests.
 """
 
@@ -36,6 +40,46 @@ STATUS_TS = {"requested": "requested_at", "accepted": "accepted_at", "intro_made
              "meeting_held": "meeting_at", "converted": "converted_at"}
 CONNECTOR_KINDS = ["partner", "advisor", "employee", "customer", "other"]
 STALE_DAYS = 30
+# What an introduction needs before it may ENTER a stage (manual moves).
+STAGE_NEEDS = {"accepted": ("contact",), "intro_made": ("account", "contact"), "meeting_held": ("account", "contact")}
+NEED_LABEL = {"account": "link it to an account", "contact": "choose the contact being introduced"}
+
+
+def missing_for(target: str, has_account: bool, has_contact: bool) -> List[str]:
+    have = {"account": has_account, "contact": has_contact}
+    return [NEED_LABEL[n] for n in STAGE_NEEDS.get(target, ()) if not have[n]]
+
+
+def check_transition(cur: str, new: str, *, has_account: bool, has_contact: bool,
+                     reason: Optional[str] = None, reopen_to: Optional[str] = None) -> None:
+    """Raise HTTPException(400) unless a MANUAL status change from cur to new is allowed."""
+    reason = (reason or "").strip()
+    if new not in STATUSES:
+        raise HTTPException(400, "Unknown status.")
+    if new == "converted":
+        raise HTTPException(400, "Use Convert to create or link the deal.")
+    if cur == "converted":
+        raise HTTPException(400, "A converted introduction can't change status — change the deal instead.")
+    if new in ("declined", "stale"):
+        if not reason:
+            raise HTTPException(400, f"Please give a reason for marking it {STATUS_LABEL[new].lower()}.")
+        return
+    if cur in ("declined", "stale"):                       # reopening
+        if not reason:
+            raise HTTPException(400, "Please give a reason for reopening this introduction.")
+        expected = reopen_to if reopen_to in OPEN_STATUSES else "proposed"
+        if new != expected:
+            raise HTTPException(400, f"Reopen it at {STATUS_LABEL[expected]}, the stage it was closed from.")
+        return
+    step = STATUSES.index(new) - STATUSES.index(cur)
+    if abs(step) > 1:
+        raise HTTPException(400, "Move one stage at a time.")
+    if step == -1 and not reason:
+        raise HTTPException(400, "Please give a reason for moving back a stage.")
+    if step == 1:
+        missing = missing_for(new, has_account, has_contact)
+        if missing:
+            raise HTTPException(400, f"Before moving to {STATUS_LABEL[new]}: " + " and ".join(missing) + ".")
 
 
 def _session():
@@ -80,7 +124,8 @@ def internal_view(r: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": r["id"], "status": r["status"], "status_label": STATUS_LABEL[r["status"]],
         "connector": {"id": r["connector_id"], "name": r["connector_name"], "kind": r["connector_kind"],
-                      "organisation": r["connector_org"], "has_login": r["connector_user_id"] is not None},
+                      "organisation": r["connector_org"], "has_login": r["connector_user_id"] is not None,
+                      "default_attribution_pct": _num(r["connector_default_pct"])},
         "account_id": r["account_id"], "account_name": r["account_name"], "persona_id": r["persona_id"],
         "persona_name": r["persona_name"], "persona_title": r["persona_title"],
         "submitted": {"account_name": r["submitted_account_name"], "contact_name": r["submitted_contact_name"],
@@ -99,14 +144,22 @@ def internal_view(r: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# Partners may correct what they submitted until StradIT starts acting on it.
+PARTNER_EDITABLE = ("proposed", "requested")
+
+
 def partner_view(r: Dict[str, Any]) -> Dict[str, Any]:
-    """Field-level rule (README §5.2): stage + dates only — no value, no attribution, no internal notes."""
+    """Field-level rule (README §5.2): stage + dates only — no value, no attribution, no internal notes.
+    A partner's own submission is shown as they typed it, never as matched in StradIT's database."""
     deal_stage = r["deal_stage"]
+    submitted = r["submitted_account_name"] is not None
     return {
         "id": r["id"], "status": r["status"], "status_label": STATUS_LABEL[r["status"]],
-        "account_name": r["account_name"] or r["submitted_account_name"],
-        "contact_name": r["persona_name"] or r["submitted_contact_name"],
-        "contact_title": r["persona_title"] or r["submitted_contact_title"],
+        "account_name": r["submitted_account_name"] or r["account_name"],
+        "contact_name": r["submitted_contact_name"] or r["persona_name"],
+        "contact_title": (r["submitted_contact_title"] if submitted else None) or r["persona_title"],
+        "contact_email": r["submitted_contact_email"] if submitted else None,
+        "editable": submitted and r["status"] in PARTNER_EDITABLE,
         "context": r["context"], "stradit_contact": r["owner_name"],
         "requested_at": r["requested_at"], "intro_made_at": r["intro_made_at"], "meeting_at": r["meeting_at"],
         "converted_at": r["converted_at"], "created_at": r["created_at"], "updated_at": r["updated_at"],
@@ -301,11 +354,16 @@ class IntroPatch(BaseModel):
     next_step: Optional[str] = Field(None, max_length=500)
     attribution_pct: Optional[float] = Field(None, ge=0, le=100)
     closed_reason: Optional[str] = Field(None, max_length=500)
+    reason: Optional[str] = Field(None, max_length=500)   # moving back, reopening, marking stale, changing the contact
 
 
 class NoteIn(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
     partner_visible: bool = False
+
+
+class EventVisibilityIn(BaseModel):
+    partner_visible: bool
 
 
 class ConvertIn(BaseModel):
@@ -371,6 +429,9 @@ def list_intros(status: Optional[str] = None, connector_id: Optional[int] = None
 def create_intro(body: IntroIn, user: User = Depends(permissions.require_write), s=Depends(_session)):
     if body.status not in OPEN_STATUSES:
         raise HTTPException(400, "A new introduction must start in an open status.")
+    missing = missing_for(body.status, body.account_id is not None, body.persona_id is not None)
+    if missing:
+        raise HTTPException(400, f"To start at {STATUS_LABEL[body.status]}: " + " and ".join(missing) + ".")
     if not s.execute(text("SELECT 1 FROM connectors WHERE id = :c AND active"), {"c": body.connector_id}).scalar():
         raise HTTPException(400, "Unknown or inactive connector.")
     owner = body.owner_user_id or user.id
@@ -403,33 +464,43 @@ def create_intro(body: IntroIn, user: User = Depends(permissions.require_write),
 def attribution(business_line_id: Optional[int] = None, since: Optional[str] = None,
                 user: User = Depends(permissions.require_roles("sales_manager", "user", "viewer")), s=Depends(_session)):
     """Sourced pipeline / won revenue per connector (README §2.2 'Attribution')."""
+    # USD value: the stored conversion, else the amount only when the deal is already in USD.
+    # Non-USD deals without an exchange rate are left out (and reported), never summed at face value.
+    usd = "(CASE WHEN d.amount_usd IS NOT NULL THEN d.amount_usd WHEN coalesce(d.currency, 'USD') = 'USD' THEN d.value_amount END)"
+    # A converted intro always stores its %; fall back to the connector, then the org default, so a
+    # cleared value can't silently drop the deal from attributed totals.
+    pct = "coalesce(i.attribution_pct, c.default_attribution_pct, CAST(:default_pct AS numeric))"
     rows = _q(s, """
         SELECT c.id, c.name, c.kind, c.organisation,
                count(i.id) AS intros,
                count(i.id) FILTER (WHERE i.status = ANY(:open)) AS open,
                count(i.id) FILTER (WHERE i.status IN ('intro_made','meeting_held','converted')) AS intros_made,
                count(i.id) FILTER (WHERE i.status = 'converted') AS converted,
-               coalesce(sum(coalesce(d.amount_usd, d.value_amount)) FILTER (WHERE d.stage NOT IN ('won','lost')), 0) AS sourced_pipeline,
-               coalesce(sum(coalesce(d.amount_usd, d.value_amount)) FILTER (WHERE d.stage = 'won'), 0) AS sourced_won,
-               coalesce(sum(coalesce(d.amount_usd, d.value_amount) * i.attribution_pct / 100) FILTER (WHERE d.stage NOT IN ('won','lost')), 0) AS attributed_pipeline,
-               coalesce(sum(coalesce(d.amount_usd, d.value_amount) * i.attribution_pct / 100) FILTER (WHERE d.stage = 'won'), 0) AS attributed_won,
-               coalesce(array_remove(array_agg(DISTINCT d.currency) FILTER (WHERE d.value_amount IS NOT NULL AND d.amount_usd IS NULL), NULL),
-                        '{}') AS currencies
+               coalesce(sum({usd}) FILTER (WHERE d.stage NOT IN ('won','lost')), 0) AS sourced_pipeline,
+               coalesce(sum({usd}) FILTER (WHERE d.stage = 'won'), 0) AS sourced_won,
+               coalesce(sum({usd} * {pct} / 100) FILTER (WHERE d.stage NOT IN ('won','lost')), 0) AS attributed_pipeline,
+               coalesce(sum({usd} * {pct} / 100) FILTER (WHERE d.stage = 'won'), 0) AS attributed_won,
+               count(d.id) FILTER (WHERE d.value_amount IS NOT NULL AND {usd} IS NULL) AS unconverted_deals,
+               coalesce(array_remove(array_agg(DISTINCT d.currency) FILTER (WHERE d.value_amount IS NOT NULL AND {usd} IS NULL), NULL),
+                        '{{}}') AS currencies
         FROM connectors c
         JOIN introductions i ON i.connector_id = c.id AND (i.account_id = ANY(:acl) OR i.account_id IS NULL)
              AND (CAST(:bl AS int) IS NULL OR i.business_line_id = :bl)
              AND (CAST(:since AS date) IS NULL OR i.created_at >= CAST(:since AS date))
         LEFT JOIN deals d ON d.id = i.deal_id
-        GROUP BY c.id ORDER BY sourced_won DESC, sourced_pipeline DESC, intros DESC""",
-        open=OPEN_STATUSES, acl=auth.account_scope(s, user), bl=business_line_id, since=since)
+        GROUP BY c.id ORDER BY sourced_won DESC, sourced_pipeline DESC, intros DESC""".format(usd=usd, pct=pct),
+        open=OPEN_STATUSES, acl=auth.account_scope(s, user), bl=business_line_id, since=since,
+        default_pct=default_attribution(s))
     for r in rows:
         for k in ("sourced_pipeline", "sourced_won", "attributed_pipeline", "attributed_won"):
             r[k] = round(float(r[k]), 2)
         r["conversion_rate"] = round(r["converted"] / r["intros"] * 100, 1) if r["intros"] else 0.0
     cur = sorted({c for r in rows for c in r["currencies"]})
+    skipped = sum(r.pop("unconverted_deals") for r in rows)
     return {"connectors": rows, "currencies": cur,
-            "note": ("All values in USD. Deals in " + ", ".join(cur) + " have no exchange rate yet and count at face value.")
-            if cur else None}
+            "note": (f"All values in USD. {skipped} deal{'s' if skipped != 1 else ''} in " + ", ".join(cur)
+                     + " ha" + ("ve" if skipped != 1 else "s") + " no exchange rate yet and " + ("are" if skipped != 1 else "is")
+                     + " not included — add the rate under Forecast → Exchange rates.") if skipped else None}
 
 
 def _xlsx_response(content: bytes, name: str) -> Response:
@@ -478,9 +549,23 @@ def run_maintenance(user: User = Depends(auth.require_role("super_admin")), s=De
 @router.get("/introductions/{intro_id}")
 def get_intro(intro_id: int, user: User = Depends(permissions.require_roles("sales_manager", "user", "viewer")),
               s=Depends(_session)):
-    out = internal_view(_load_internal(s, user, intro_id))
+    row = _load_internal(s, user, intro_id)
+    out = internal_view(row)
     out["events"] = _events(s, intro_id)
+    has_contact = row["persona_id"] is not None or bool(row["submitted_contact_name"])
+    nxt = STATUSES[STATUSES.index(row["status"]) + 1] if row["status"] in OPEN_STATUSES[:-1] else None
+    out["next_status"] = nxt
+    out["next_missing"] = missing_for(nxt, row["account_id"] is not None, has_contact) if nxt else []
+    out["can_convert"] = row["status"] == "meeting_held" and row["account_id"] is not None
+    out["reopen_to"] = _reopen_target(s, intro_id, row["status"]) if row["status"] in ("declined", "stale") else None
     return out
+
+
+def _reopen_target(s, intro_id: int, closed_status: str) -> str:
+    prev = s.execute(text("""SELECT from_status FROM introduction_events
+                             WHERE introduction_id = :i AND kind = 'status' AND to_status = :c
+                             ORDER BY at DESC, id DESC LIMIT 1"""), {"i": intro_id, "c": closed_status}).scalar()
+    return prev if prev in OPEN_STATUSES else "proposed"
 
 
 @router.patch("/introductions/{intro_id}")
@@ -488,6 +573,17 @@ def update_intro(intro_id: int, body: IntroPatch, user: User = Depends(permissio
     cur = _load_internal(s, user, intro_id)
     ch = body.model_dump(exclude_unset=True)
     new_status = ch.pop("status", None)
+    reason = (ch.pop("reason", None) or "").strip() or None
+    if new_status and new_status != cur["status"]:      # validate before writing anything
+        check_transition(cur["status"], new_status,
+                         has_account=cur["account_id"] is not None or ch.get("account_id") is not None,
+                         has_contact=(ch["persona_id"] if "persona_id" in ch else cur["persona_id"]) is not None
+                         or bool(cur["submitted_contact_name"]),
+                         reason=ch.get("closed_reason") if new_status == "declined" else reason,
+                         reopen_to=_reopen_target(s, intro_id, cur["status"]) if cur["status"] in ("declined", "stale") else None)
+    contact_change = "persona_id" in ch and ch["persona_id"] != cur["persona_id"]
+    if contact_change and cur["persona_id"] is not None and cur["status"] not in ("proposed",) and not reason:
+        raise HTTPException(400, "Please give a reason for changing the contact on an introduction in progress.")
     _check_refs(s, user, ch.get("account_id"), ch.get("persona_id") if "persona_id" in ch else None,
                 ch.get("business_line_id"), ch.get("owner_user_id"))
     if "persona_id" in ch and ch["persona_id"] is not None and "account_id" not in ch:
@@ -508,24 +604,31 @@ def update_intro(intro_id: int, body: IntroPatch, user: User = Depends(permissio
         _event(s, intro_id, user.id, "field", note="Linked to an account in StradIT's system", partner_visible=False)
     if "attribution_pct" in ch:
         _event(s, intro_id, user.id, "field", note=f"Attribution set to {ch['attribution_pct']}%", partner_visible=False)
+    if contact_change:
+        new_name = s.execute(text("SELECT coalesce(full_name, display_name) FROM personas WHERE id = :p"),
+                             {"p": ch["persona_id"]}).scalar() if ch["persona_id"] else None
+        msg = (f"Contact changed from {cur['persona_name']} to {new_name or 'nobody'}" if cur["persona_id"]
+               else f"Contact set to {new_name}")
+        _event(s, intro_id, user.id, "field", note=msg + (f" — {reason}" if reason else ""), partner_visible=False)
+    if "next_step" in ch and (ch["next_step"] or None) != (cur["next_step"] or None) and ch["next_step"]:
+        stage = STATUS_LABEL[new_status or cur["status"]]
+        _event(s, intro_id, user.id, "field", note=f"Next step ({stage}): {ch['next_step']}", partner_visible=False)
     if new_status and new_status != cur["status"]:
-        if new_status not in STATUSES:
-            raise HTTPException(400, "Unknown status.")
-        if new_status == "converted":
-            raise HTTPException(400, "Use Convert to create or link the deal.")
-        if cur["status"] == "converted":
-            raise HTTPException(400, "A converted introduction can't change status — change the deal instead.")
-        if new_status == "declined" and not (ch.get("closed_reason") or cur["closed_reason"]):
-            raise HTTPException(400, "Please give a reason when declining an introduction.")
-        if new_status in OPEN_STATUSES and (cur["account_id"] is None and "account_id" not in ch) \
-                and STATUSES.index(new_status) >= STATUSES.index("intro_made"):
-            raise HTTPException(400, "Link the introduction to an account first.")
         s.execute(text("UPDATE introductions SET status = :st, updated_at = now() WHERE id = :i"), {"st": new_status, "i": intro_id})
         if new_status in STATUS_TS:
             s.execute(text(f"UPDATE introductions SET {STATUS_TS[new_status]} = coalesce({STATUS_TS[new_status]}, now()) WHERE id = :i"),
                       {"i": intro_id})
         _event(s, intro_id, user.id, "status", note=ch.get("closed_reason") if new_status == "declined" else None,
                from_status=cur["status"], to_status=new_status)
+        if reason and new_status != "declined":
+            # Internal: why it went back / was reopened / was parked. Partners only see the status move.
+            what = ("Reopened" if cur["status"] in ("declined", "stale") else
+                    "Marked stale" if new_status == "stale" else "Moved back")
+            _event(s, intro_id, user.id, "note", note=f"{what}: {reason}", partner_visible=False)
+        if new_status == "stale":
+            s.execute(text("UPDATE introductions SET closed_reason = :r WHERE id = :i"), {"r": reason, "i": intro_id})
+        if cur["status"] in ("declined", "stale"):
+            s.execute(text("UPDATE introductions SET closed_reason = NULL WHERE id = :i"), {"i": intro_id})
     s.commit()
     return get_intro(intro_id, user, s)
 
@@ -538,14 +641,33 @@ def add_intro_note(intro_id: int, body: NoteIn, user: User = Depends(permissions
     return get_intro(intro_id, user, s)
 
 
+@router.patch("/introductions/{intro_id}/events/{event_id}")
+def set_event_visibility(intro_id: int, event_id: int, body: EventVisibilityIn, user: User = Depends(permissions.require_write),
+                         s=Depends(_session)):
+    """Share a note with the partner, or make it internal again. Only notes can change; status moves
+    and system events keep their visibility."""
+    _load_internal(s, user, intro_id)
+    kind = s.execute(text("SELECT kind FROM introduction_events WHERE id = :e AND introduction_id = :i"),
+                     {"e": event_id, "i": intro_id}).scalar()
+    if kind is None:
+        raise HTTPException(404, "Event not found.")
+    if kind != "note":
+        raise HTTPException(400, "Only notes can be shared or made internal.")
+    s.execute(text("UPDATE introduction_events SET partner_visible = :v WHERE id = :e"), {"v": body.partner_visible, "e": event_id})
+    s.commit()
+    return get_intro(intro_id, user, s)
+
+
 @router.post("/introductions/{intro_id}/convert")
 def convert_intro(intro_id: int, body: ConvertIn, user: User = Depends(permissions.require_write), s=Depends(_session)):
     from apps.sales_deals import api as deals_api
     cur = _load_internal(s, user, intro_id)
     if cur["status"] == "converted":
         raise HTTPException(400, "Already converted.")
-    if cur["status"] in ("declined",):
+    if cur["status"] in ("declined", "stale"):
         raise HTTPException(400, "Reopen the introduction before converting it.")
+    if cur["status"] != "meeting_held":
+        raise HTTPException(400, "Convert an introduction once the meeting has been held.")
     if cur["account_id"] is None:
         raise HTTPException(400, "Link the introduction to an account first.")
     if body.deal_id:
@@ -608,6 +730,14 @@ class PartnerIntroIn(BaseModel):
     contact_email: Optional[str] = Field(None, max_length=255)
     contact_title: Optional[str] = Field(None, max_length=200)
     context: str = Field(..., min_length=10, max_length=4000)
+
+
+class PartnerIntroPatch(BaseModel):
+    account_name: Optional[str] = Field(None, min_length=2, max_length=200)
+    contact_name: Optional[str] = Field(None, min_length=2, max_length=200)
+    contact_email: Optional[str] = Field(None, max_length=255)
+    contact_title: Optional[str] = Field(None, max_length=200)
+    context: Optional[str] = Field(None, min_length=10, max_length=4000)
 
 
 class PartnerNoteIn(BaseModel):
@@ -674,6 +804,70 @@ def partner_submit(body: PartnerIntroIn, connector_id: Optional[int] = None, use
                       f"Their note: “{body.context.strip()[:400]}”"], key=f"triage:{iid}")
     s.commit()
     return partner_get(iid, connector_id, user, s)
+
+
+@partner_router.patch("/introductions/{intro_id}")
+def partner_edit(intro_id: int, body: PartnerIntroPatch, connector_id: Optional[int] = None,
+                 user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    """A partner corrects their own submission while it is still Submitted / Requested. Only the
+    submitted_* fields and context change; a link StradIT already made to an account or contact is
+    kept, and the team is told what changed so they can re-check it."""
+    if connector_id:
+        raise HTTPException(403, "Introductions can't be edited in preview.")
+    c = _connector_for(s, user, None)
+    rows = _q(s, BASE_SQL + " WHERE i.id = :i AND i.connector_id = :c", i=intro_id, c=c["id"])
+    if not rows:
+        raise HTTPException(404, "Introduction not found.")
+    cur = rows[0]
+    if cur["submitted_account_name"] is None:
+        raise HTTPException(400, "This introduction was logged by the StradIT team — send them an update instead.")
+    if cur["status"] not in PARTNER_EDITABLE:
+        raise HTTPException(400, "StradIT is already working on this introduction, so its details are locked — send an update instead.")
+    fields = {"account_name": "submitted_account_name", "contact_name": "submitted_contact_name",
+              "contact_email": "submitted_contact_email", "contact_title": "submitted_contact_title", "context": "context"}
+    label = {"account_name": "company", "contact_name": "contact name", "contact_email": "contact email",
+             "contact_title": "contact title", "context": "note"}
+    new: Dict[str, Any] = {}
+    for k, v in body.model_dump(exclude_unset=True).items():
+        v = (v or "").strip() or None
+        if k in ("account_name", "contact_name", "context") and not v:
+            raise HTTPException(400, f"The {label[k]} can't be empty.")
+        if v != cur[fields[k]]:
+            new[k] = v
+    if not new:
+        return partner_get(intro_id, None, user, s)
+    acct, persona = cur["account_id"], cur["persona_id"]
+    if acct is None:   # still in triage: match the edited details quietly, like a new submission
+        name = new.get("account_name", cur["submitted_account_name"])
+        acct = s.execute(text("""SELECT id FROM accounts WHERE lower(display_name) = lower(:n) OR lower(legal_name) = lower(:n)
+                                 OR lower(:n) = ANY(SELECT lower(x) FROM unnest(coalesce(aliases, '{}')) x) LIMIT 1"""),
+                         {"n": name}).scalar()
+    email = new.get("contact_email", cur["submitted_contact_email"])
+    if acct and persona is None and email:
+        persona = s.execute(text("SELECT id FROM personas WHERE account_id = :a AND lower(email) = lower(:e) LIMIT 1"),
+                            {"a": acct, "e": email}).scalar()
+    if persona and persona != cur["persona_id"] and s.execute(text(
+            """SELECT 1 FROM introductions WHERE connector_id = :c AND persona_id = :p AND id <> :i
+               AND status NOT IN ('declined','stale')"""), {"c": c["id"], "p": persona, "i": intro_id}).scalar():
+        raise HTTPException(409, "You already have an open introduction for this contact.")
+    sets = ", ".join(f"{fields[k]} = :{k}" for k in new)
+    s.execute(text(f"UPDATE introductions SET {sets}, account_id = :acct, persona_id = :per, updated_at = now() WHERE id = :i"),
+              {**new, "acct": acct, "per": persona, "i": intro_id})
+    changed = [label[k] for k in new]
+    _event(s, intro_id, user.id, "field", note="Details updated: " + ", ".join(changed), partner_visible=True)
+    linked = cur["account_id"] is not None
+    lines = [f"{c['name']} edited their introduction to {cur['submitted_contact_name']} at {cur['submitted_account_name']}:"]
+    for k, v in new.items():
+        old = cur[fields[k]]
+        lines.append(f"{label[k].capitalize()}: “{(old or '—')[:200]}” → “{(v or '—')[:200]}”")
+    if linked and ({"account_name", "contact_name", "contact_email"} & new.keys()):
+        lines.append("It's already linked in the CRM — check the linked account and contact still match.")
+    from apps.sales_crm import notify
+    _notify_internal(s, intro_id, [cur["owner_user_id"]] if cur["owner_user_id"] else notify.internal_triagers(s, acct),
+                     "partner_note", f"{c['name']} edited an introduction: {new.get('contact_name', cur['submitted_contact_name'])}",
+                     lines, key=f"partner_edit:{intro_id}:{s.execute(text('SELECT max(id) FROM introduction_events WHERE introduction_id = :i'), {'i': intro_id}).scalar()}")
+    s.commit()
+    return partner_get(intro_id, None, user, s)
 
 
 @partner_router.post("/introductions/{intro_id}/notes")
