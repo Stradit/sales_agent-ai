@@ -1,0 +1,5 @@
+# Files that run on Linux must keep LF line endings, whatever the checkout OS
+*.sh text eol=lf
+Dockerfile text eol=lf
+deploy/** text eol=lf
+*.yml text eol=lf

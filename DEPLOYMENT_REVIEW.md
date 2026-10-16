@@ -53,10 +53,10 @@ notifications, M365 capture) already use Postgres advisory locks, so restarts an
 Each phase ends with something we can check. We do them in order; nothing touches AWS until Phase 3.
 
 ### Phase 0 — Decisions (you)
-- [ ] Domain name for the app (for TLS, `SITE_URL`, `APP_BASE_URL`, M365 redirect URI)
+- [ ] Domain name for the app (for TLS, `SITE_URL`, `APP_BASE_URL`, M365 redirect URI) — **you have one; name still needed**
 - [x] AWS region: **us-east-1 (N. Virginia)**
-- [ ] Source DB to migrate from (the one in today's `.env`?) and an acceptable downtime window
-- [ ] Deploy access: SSM (recommended, no open SSH) or SSH
+- [x] Data: **copy the current database** (the one in today's `.env`) — downtime window still to agree
+- [x] Deploy access: **SSH key** (user `deploy`; restrict port 22 as far as practical)
 - [ ] Is `apps/content_pipeline` deployed too? (default: no)
 
 ### Phase 1 — Make the image correct (local, no AWS)
@@ -64,14 +64,15 @@ Each phase ends with something we can check. We do them in order; nothing touche
 - [x] Dockerfile: non-root user, `--proxy-headers`, 1 worker, `HEALTHCHECK` (B3, W6)
 - [x] First admin from env only, no password in code (B8)
 - [x] Add `GET /api/health` (DB ping) — already on route_audit's public list (W5)
-- [ ] Build the image and run it against a database with `AUTH_ENFORCED=true`; log in, open Deals, ask the Copilot (W11) — **blocked locally: WSL isn't installed, so Docker Desktop can't run Linux containers**
+- [ ] Build the image and run it against a database with `AUTH_ENFORCED=true` (W11) — runs in GitHub Actions: `.github/workflows/docker-build.yml` (WSL isn't installed locally)
 
 ### Phase 2 — Production config files (in repo)
-- [ ] `deploy/docker-compose.prod.yml` — one `web` service, `127.0.0.1:8000`, `/opt/salesai/data/output` volume (B2, W9)
-- [ ] `deploy/.env.production.example` — complete variable list, no secrets (B4, B5, W4)
-- [ ] `deploy/nginx/salesai.conf` — HTTP→HTTPS redirect, TLS server, streaming location (B6)
-- [ ] `deploy/setup_server.sh` — Docker, nginx, certbot, swap, data dirs (idempotent)
-- [ ] `deploy/remote_deploy.sh` — pull, schema init, start, health check, roll back to previous tag on failure
+- [x] `deploy/docker-compose.prod.yml` — one `web` service, `127.0.0.1:8000`, `/opt/salesai/data/output` volume (B2, W9)
+- [x] `deploy/.env.production.example` — complete variable list, no secrets (B4, B5, W4)
+- [x] `deploy/nginx/salesai.conf` — HTTP→HTTPS redirect, TLS server, streaming location (B6)
+- [x] `deploy/setup_server.sh` — Docker, nginx, certbot, AWS CLI, swap, data dirs, `deploy` user (idempotent)
+- [x] `deploy/remote_deploy.sh` — ECR login, pull, start, health check, roll back to the previous image on failure
+- [x] `.gitattributes` — LF line endings for scripts, Dockerfile and deploy files
 
 ### Phase 3 — AWS foundation (console, guided)
 - [ ] Security groups (W7), RDS PG16 + `pg_trgm`, EC2 t3.medium + Elastic IP, ECR repo
