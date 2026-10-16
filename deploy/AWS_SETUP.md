@@ -71,7 +71,14 @@ At your DNS provider: **A record** `<your-domain>` → `EC2_HOST`. Check from yo
 ## Step 7 — GitHub → AWS login (OIDC, no stored AWS keys)
 1. IAM → Identity providers → **Add provider** → OpenID Connect · URL `https://token.actions.githubusercontent.com` · Audience `sts.amazonaws.com`.
 2. IAM → Roles → **Create role** → **Web identity** → that provider, audience `sts.amazonaws.com`, GitHub organization **`Stradit`**, repository **`sales_agent-ai`**. Name **`salesai-github-deploy`**.
-3. Edit its **trust policy** so only the `production` environment can use it:
+3. Edit its **trust policy** so only the `production` environment can use it.
+   **This repo uses GitHub's immutable subject claims** (on automatically for repositories created
+   or renamed after 2026-07-15), so the subject includes the owner and repository IDs. Copy the exact
+   prefix from GitHub → repo **Settings → Actions → OIDC → "Default subject claim prefix"** and
+   append `:environment:production`. For this repo it is
+   `repo:Stradit@249769092/sales_agent-ai@1345900452:environment:production`.
+   (The plain `repo:Stradit/sales_agent-ai:…` form never matches → "Not authorized to perform
+   sts:AssumeRoleWithWebIdentity".) The deploy workflow's "Show the OIDC claims" step prints the value too.
 ```json
 {
   "Version": "2012-10-17",
@@ -82,7 +89,7 @@ At your DNS provider: **A record** `<your-domain>` → `EC2_HOST`. Check from yo
     "Condition": {
       "StringEquals": {
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub": "repo:Stradit/sales_agent-ai:environment:production"
+        "token.actions.githubusercontent.com:sub": "repo:Stradit@249769092/sales_agent-ai@1345900452:environment:production"
       }
     }
   }]

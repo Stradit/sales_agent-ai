@@ -53,7 +53,7 @@ notifications, M365 capture) already use Postgres advisory locks, so restarts an
 Each phase ends with something we can check. We do them in order; nothing touches AWS until Phase 3.
 
 ### Phase 0 — Decisions (you)
-- [ ] Domain name for the app (for TLS, `SITE_URL`, `APP_BASE_URL`, M365 redirect URI) — **you have one; name still needed**
+- [x] Domain: **doshin.stradit.com** → Elastic IP 54.166.60.149 (DNS verified 2026-10-16)
 - [x] AWS region: **us-east-1 (N. Virginia)**
 - [x] Data: **copy the current database** (the one in today's `.env`) — downtime window still to agree
 - [x] Deploy access: **SSH key** (user `deploy`; restrict port 22 as far as practical)
