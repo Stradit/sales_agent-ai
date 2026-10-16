@@ -17,6 +17,12 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 )
+# Name the driver explicitly. Newer SQLAlchemy releases default plain "postgresql://" to psycopg
+# (v3), which isn't installed — and the Copilot ingest uses psycopg2-only APIs (execute_values).
+for _prefix in ("postgresql://", "postgres://"):
+    if DATABASE_URL.startswith(_prefix):
+        DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len(_prefix):]
+        break
 
 # Monid.ai Gateway
 MONID_API_KEY = os.getenv("MONID_API_KEY", "")

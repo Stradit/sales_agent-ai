@@ -98,7 +98,8 @@ def main():
     accounts_url = os.getenv("ACCOUNTS_DATABASE_URL")
     if not accounts_url:
         sales_ai_config = _load_config("sales_ai_config", REPO_ROOT / "config.py")
-        accounts_url = sales_ai_config.DATABASE_URL
+        # config names the SQLAlchemy driver ("postgresql+psycopg2://"); psycopg2.connect wants the plain form
+        accounts_url = sales_ai_config.DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://", 1)
 
     target_keys = _fetch_target_keys(targets_url)
     account_keys = _fetch_account_keys(accounts_url)

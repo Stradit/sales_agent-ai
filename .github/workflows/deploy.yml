@@ -58,7 +58,12 @@ jobs:
           for v in AWS_DEPLOY_ROLE_ARN ECR_REPOSITORY_URI EC2_HOST SITE_URL; do
             [ -n "${!v}" ] || missing="$missing $v"
           done
-          [ -z "$missing" ] || { echo "Missing environment variables:$missing"; exit 1; }
+          if [ -n "$missing" ]; then
+            echo "Missing:$missing"
+            echo "Add them under Settings → Environments → production → Environment VARIABLES (not secrets)."
+            echo "Values stored as secrets can't be passed between jobs, so the deploy would fail later."
+            exit 1
+          fi
         env:
           AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
@@ -120,8 +125,11 @@ jobs:
 
       - name: Public health check
         run: |
+          # While the site runs on its bare IP the certificate is self-signed: skip verification then.
+          host="$(echo "${{ vars.SITE_URL }}" | sed -E 's#^https?://([^/:]+).*#\1#')"
+          insecure=""; echo "$host" | grep -Eq '^[0-9]+(\.[0-9]+){3}$' && insecure="-k"
           for i in $(seq 1 12); do
-            if curl -fsS --max-time 10 "${{ vars.SITE_URL }}/api/health"; then echo; exit 0; fi
+            if curl -fsS $insecure --max-time 10 "${{ vars.SITE_URL }}/api/health"; then echo; exit 0; fi
             sleep 5
           done
           echo "Public health check failed"; exit 1
