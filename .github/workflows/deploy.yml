@@ -85,6 +85,10 @@ jobs:
         # Prints only the claims the role's trust policy compares (never the token itself),
         # so a trust-policy mismatch can be fixed by copying the exact "sub" value.
         run: |
+          echo "commit           = ${GITHUB_SHA::12} (branch ${GITHUB_REF_NAME})"
+          echo "role to assume   = ${{ vars.AWS_DEPLOY_ROLE_ARN }}"
+          echo "region           = $AWS_REGION"
+          echo "--- token claims (the role's trust policy must match sub and aud) ---"
           tok=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
                 "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | python3 -c 'import sys,json; print(json.load(sys.stdin)["value"])')
           printf '%s' "$tok" | cut -d. -f2 | python3 -c '
