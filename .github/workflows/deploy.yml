@@ -64,6 +64,17 @@ jobs:
             echo "Values stored as secrets can't be passed between jobs, so the deploy would fail later."
             exit 1
           fi
+          # Catch the usual mix-ups before AWS retries for minutes
+          echo "$AWS_DEPLOY_ROLE_ARN" | grep -Eq '^arn:aws:iam::[0-9]{12}:role/.+' || {
+            echo "AWS_DEPLOY_ROLE_ARN must be a ROLE ARN (arn:aws:iam::<account>:role/salesai-github-deploy)."
+            echo "Got: $AWS_DEPLOY_ROLE_ARN"
+            echo "Copy it from IAM → Roles → salesai-github-deploy → ARN (not from Identity providers)."
+            exit 1; }
+          echo "$ECR_REPOSITORY_URI" | grep -Eq '^[0-9]{12}\.dkr\.ecr\.us-east-1\.amazonaws\.com/[a-z0-9._/-]+$' || {
+            echo "ECR_REPOSITORY_URI must look like <account>.dkr.ecr.us-east-1.amazonaws.com/sales-ai (no tag). Got: $ECR_REPOSITORY_URI"
+            exit 1; }
+          echo "$SITE_URL" | grep -Eq '^https://[^/]+$' || {
+            echo "SITE_URL must be https://<host> with no trailing slash. Got: $SITE_URL"; exit 1; }
         env:
           AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
