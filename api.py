@@ -156,7 +156,10 @@ if FASTAPI_AVAILABLE:
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
-        return Response(status_code=204)
+        icon = Path(__file__).resolve().parent / "frontend" / "assets" / "brand" / "favicon-32.png"
+        if not icon.exists():
+            return Response(status_code=204)
+        return FileResponse(icon, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
 
     @app.on_event("startup")
     def on_startup():
@@ -7540,6 +7543,38 @@ if FASTAPI_AVAILABLE:
             "Pragma": "no-cache",
             "Expires": "0",
         }
+
+        # ── SEO: public URL, robots.txt, sitemap.xml (favicon: top of the file) ──────────────
+        # Only the landing page is public; everything else sits behind sign-in, so crawlers
+        # are pointed at "/" and kept out of the app. SITE_URL (else APP_BASE_URL) is the
+        # public origin used for canonical / Open Graph links; set it in production.
+        def _site_url(request: Request) -> str:
+            base = (os.getenv("SITE_URL") or os.getenv("APP_BASE_URL") or "").strip()
+            return (base or str(request.base_url)).rstrip("/")
+
+        templates.env.globals["site_url"] = _site_url
+
+        @app.get("/robots.txt", include_in_schema=False)
+        async def robots_txt(request: Request):
+            base = _site_url(request)
+            body = ("User-agent: *\n"
+                    "Allow: /$\n"             # the landing page only (not /?account= deep links)
+                    "Allow: /assets/\nAllow: /css/\nAllow: /js/\n"   # so crawlers can render it
+                    "Disallow: /\n\n"
+                    f"Sitemap: {base}/sitemap.xml\n")
+            return Response(body, media_type="text/plain", headers={"Cache-Control": "public, max-age=3600"})
+
+        @app.get("/sitemap.xml", include_in_schema=False)
+        async def sitemap_xml(request: Request):
+            base = _site_url(request)
+            landing = frontend_dir / "templates" / "landing.html"
+            lastmod = datetime.fromtimestamp(landing.stat().st_mtime, tz=timezone.utc).date().isoformat()
+            body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+                    f"  <url><loc>{base}/</loc><lastmod>{lastmod}</lastmod>"
+                    "<changefreq>monthly</changefreq><priority>1.0</priority></url>\n"
+                    "</urlset>\n")
+            return Response(body, media_type="application/xml", headers={"Cache-Control": "public, max-age=3600"})
 
         @app.get("/", response_class=HTMLResponse, include_in_schema=False)
         async def dashboard_home(request: Request):

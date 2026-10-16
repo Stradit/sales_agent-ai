@@ -3,14 +3,92 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Doshin | Turn signals into strategy</title>
-  <meta name="description" content="Account research, buying committees, AI call-prep and a grounded sales copilot — built from public filings, news and enrichment sources.">
+  {% set base = site_url(request) %}
+  <title>Doshin — Turn signals into strategy | AI sales intelligence</title>
+  <meta name="description" content="Doshin turns public filings, news and enrichment data into account research, buying committees, AI call-prep and a cited sales copilot for B2B sales teams.">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="{{ base }}/">
+  <meta name="theme-color" content="#001233">
+  <meta name="application-name" content="Doshin">
+
+  <!-- Icons -->
+  <link rel="icon" href="/assets/brand/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon.ico" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png">
+
+  <!-- Open Graph / social previews -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Doshin">
+  <meta property="og:url" content="{{ base }}/">
+  <meta property="og:title" content="Doshin — Turn signals into strategy">
+  <meta property="og:description" content="AI account research, buying committees, call-prep and a cited sales copilot for B2B sales teams.">
+  <meta property="og:image" content="{{ base }}/assets/brand/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Doshin — Turn signals into strategy">
+  <meta property="og:locale" content="en_US">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Doshin — Turn signals into strategy">
+  <meta name="twitter:description" content="AI account research, buying committees, call-prep and a cited sales copilot for B2B sales teams.">
+  <meta name="twitter:image" content="{{ base }}/assets/brand/og-image.png">
+  <meta name="twitter:image:alt" content="Doshin — Turn signals into strategy">
+
+  <!-- Structured data (FAQ answers mirror the FAQ section below word for word) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "{{ base }}/#organization",
+        "name": "Doshin",
+        "url": "{{ base }}/",
+        "logo": "{{ base }}/assets/brand/apple-touch-icon.png",
+        "slogan": "Turn signals into strategy"
+      },
+      {
+        "@type": "WebSite",
+        "@id": "{{ base }}/#website",
+        "name": "Doshin",
+        "url": "{{ base }}/",
+        "publisher": { "@id": "{{ base }}/#organization" },
+        "inLanguage": "en"
+      },
+      {
+        "@type": "SoftwareApplication",
+        "name": "Doshin",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "url": "{{ base }}/",
+        "description": "Account research, buying committees, AI call-prep and a cited sales copilot for enterprise sales teams, built from public filings, news and enrichment sources.",
+        "publisher": { "@id": "{{ base }}/#organization" }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "{{ base }}/#faq",
+        "mainEntity": [
+          { "@type": "Question", "name": "Where does the account data come from?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Public and licensed sources: SEC EDGAR filings, GLEIF ownership records, Crunchbase, Diffbot, USPTO patents, Google News and enrichment providers. Each research run records which sources it used." } },
+          { "@type": "Question", "name": "Will I see personal phone numbers or emails?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. Only work email and phone details are shown. Personal emails and direct mobile numbers are removed on the server before any page receives them." } },
+          { "@type": "Question", "name": "Can the copilot make things up?",
+            "acceptedAnswer": { "@type": "Answer", "text": "It answers from your team's indexed research and cites the records it used. When the evidence isn't there, it says so instead of guessing." } },
+          { "@type": "Question", "name": "Who can see which accounts?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Access is granted per account. Reps see the accounts they are assigned; administrators manage access and roles from the admin console." } },
+          { "@type": "Question", "name": "How fresh is the information?",
+            "acceptedAnswer": { "@type": "Answer", "text": "News, posts and job listings are refreshed by scheduled scrapes, and the Command Center flags when a feed hasn't been updated recently." } }
+        ]
+      }
+    ]
+  }
+  </script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="css/tokens.css?v=5.0">
-  <link rel="stylesheet" href="css/landing.css?v=1.0">
+  <link rel="stylesheet" href="css/landing.css?v=1.1">
 </head>
 <body class="lp">
 
@@ -61,7 +139,7 @@
           <button type="submit" class="lp-btn lp-btn-primary">Research <i class="fa-solid fa-arrow-right"></i></button>
         </form>
       </div>
-      <img class="lp-hero-art" src="/assets/elitehost/banner-hero-02.svg" alt="" width="460" height="460">
+      <img class="lp-hero-art" src="/assets/elitehost/banner-hero-02.svg" alt="" width="460" height="460" fetchpriority="high">
     </div>
   </section>
 
@@ -127,15 +205,15 @@
         <ul class="lp-list">
           <li>
             <span class="lp-list-icon"><i class="fa-solid fa-layer-group"></i></span>
-            <div><h4>Multi-source research</h4><p>Crunchbase, Diffbot, GLEIF, SEC EDGAR, USPTO and news, merged into one record.</p></div>
+            <div><h3>Multi-source research</h3><p>Crunchbase, Diffbot, GLEIF, SEC EDGAR, USPTO and news, merged into one record.</p></div>
           </li>
           <li>
             <span class="lp-list-icon"><i class="fa-solid fa-clipboard-check"></i></span>
-            <div><h4>Quality-scored, human-approved</h4><p>Every run is graded and staged; your team validates it before it is saved.</p></div>
+            <div><h3>Quality-scored, human-approved</h3><p>Every run is graded and staged; your team validates it before it is saved.</p></div>
           </li>
           <li>
             <span class="lp-list-icon"><i class="fa-solid fa-user-shield"></i></span>
-            <div><h4>Work contacts only</h4><p>Personal emails and mobile numbers are filtered out before they reach a browser.</p></div>
+            <div><h3>Work contacts only</h3><p>Personal emails and mobile numbers are filtered out before they reach a browser.</p></div>
           </li>
         </ul>
       </div>
@@ -151,15 +229,15 @@
         <ul class="lp-list">
           <li>
             <span class="lp-list-icon"><i class="fa-solid fa-ranking-star"></i></span>
-            <div><h4>Priority signal feed</h4><p>Executive moves, hiring themes and news, scored by urgency and fit.</p></div>
+            <div><h3>Priority signal feed</h3><p>Executive moves, hiring themes and news, scored by urgency and fit.</p></div>
           </li>
           <li>
             <span class="lp-list-icon"><i class="fa-solid fa-list-check"></i></span>
-            <div><h4>This week's playbook</h4><p>Turn any signal into a task with an owner and a due date in one click.</p></div>
+            <div><h3>This week's playbook</h3><p>Turn any signal into a task with an owner and a due date in one click.</p></div>
           </li>
           <li>
             <span class="lp-list-icon"><i class="fa-solid fa-magnifying-glass"></i></span>
-            <div><h4>Find anything fast</h4><p>Press Ctrl+F for accounts, people, business units, deals and signals.</p></div>
+            <div><h3>Find anything fast</h3><p>Press Ctrl+F for accounts, people, business units, deals and signals.</p></div>
           </li>
         </ul>
       </div>
@@ -250,19 +328,19 @@
       <p class="lp-footer-about">Account research, buying committees and AI call-prep for enterprise sales teams.</p>
     </div>
     <div>
-      <h4>Platform</h4>
+      <h2>Platform</h2>
       <a href="#platform">Capabilities</a>
       <a href="#research">Research</a>
       <a href="#command-center">Command Center</a>
       <a href="#copilot">Copilot</a>
     </div>
     <div>
-      <h4>Help</h4>
+      <h2>Help</h2>
       <a href="#faq">FAQ</a>
       <a href="/reset-password">Reset password</a>
     </div>
     <div>
-      <h4>Account</h4>
+      <h2>Account</h2>
       <a href="/login">Sign in</a>
     </div>
   </div>
