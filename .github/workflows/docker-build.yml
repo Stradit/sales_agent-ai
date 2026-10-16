@@ -1,7 +1,7 @@
 name: Docker image build & smoke test
 
 # Builds the production image on a Linux runner and starts it against a throwaway
-# Postgres 16 with production-like settings (AUTH_ENFORCED=true, background loops off,
+# Postgres 18 with production-like settings (AUTH_ENFORCED=true, background loops off,
 # no outbound email). Proves the image starts, creates its schema on an empty DB,
 # answers /api/health, serves the public pages and lets the seeded admin sign in.
 # Nothing is pushed anywhere. See DEPLOYMENT_REVIEW.md, Phase 1.
@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:16
+        image: postgres:18
         env:
           POSTGRES_USER: salesai
           POSTGRES_PASSWORD: smoke-test-only

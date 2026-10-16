@@ -20,7 +20,7 @@ wrong, then the plan we'll work through, phase by phase.
 | B5 | **Saved API keys become unreadable.** Keys saved on the Admin page are encrypted with `CONFIG_ENCRYPTION_KEY`, falling back to `JWT_SECRET_KEY`. The plan generates a new JWT secret, so keys copied from the current DB can't be decrypted. | `services/config_service.py` L36 | Set `CONFIG_ENCRYPTION_KEY` to the value the current DB was encrypted with; never change it afterwards |
 | B6 | **No HTTPS.** Port 443 is opened but nginx only listens on 80; no certificate step. Login cookies are `Secure` only when `COOKIE_SECURE=true`, which the plan never sets. | `deploy/nginx` section, `api.py` L148 | certbot step + `COOKIE_SECURE=true` |
 | B8 | **A known admin login in the code.** On startup, an empty database gets a super admin whose email and password were written in `db/create_tables.py` — a public login on a fresh production DB. | `db/create_tables.py` `seed_default_admin_if_missing` | ✅ Fixed: the first admin now comes only from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` (12+ chars); unset = skipped |
-| B7 | **No data migration.** The current DB (`DATABASE_URL` in `.env`, Neon or local) holds the accounts, personas, CRM data and RAG ledger. The plan creates an empty RDS. | `config.py`, `.env` | `pg_dump` → `pg_restore` step, then Chroma rebuild |
+| B7 | **No data migration.** The current DB (`DATABASE_URL` in `.env` → local PostgreSQL 18.4, 268 MB, 59 tables) holds the accounts, personas, CRM data and RAG ledger. The plan creates an empty RDS. | `config.py`, `.env` | `pg_dump` → `pg_restore` step, then Chroma rebuild |
 
 ### Wrong or misleading (would cause confusion or silent problems)
 
@@ -40,7 +40,7 @@ wrong, then the plan we'll work through, phase by phase.
 | W12 | `apps/content_pipeline` is a separate app with its own Dockerfile — the plan doesn't say whether it's deployed. | Decide (out of scope unless you say so) |
 
 ### Correct as written ✅
-RDS Postgres 16 private + SG reference; `pg_trgm` is the only extension needed; t3.medium sizing
+RDS Postgres private + SG reference — but **version 18, not 16** (the source DB is PostgreSQL 18.4); `pg_trgm` is the only extension the app needs (`vector` is installed locally but unused and left out of the dump); t3.medium sizing
 (once there's 1 worker and no Celery/Redis); persisting `/app/output` (Chroma lives in `output/chroma`);
 nginx `proxy_buffering off` for streaming — the stream route is `/api/copilot/chat/stream`, which the
 `location /api/copilot/chat` prefix does match; background loops (sync, stale intros, forecast snapshot,
@@ -75,18 +75,19 @@ Each phase ends with something we can check. We do them in order; nothing touche
 - [x] `.gitattributes` — LF line endings for scripts, Dockerfile and deploy files
 
 ### Phase 3 — AWS foundation (console, guided)
-- [ ] Security groups (W7), RDS PG16 + `pg_trgm`, EC2 t3.medium + Elastic IP, ECR repo
+- [ ] Security groups (W7), RDS **PG18** + `pg_trgm`, EC2 t3.medium + Elastic IP, ECR repo
 - [ ] GitHub OIDC role (ECR push + SSM send-command), EC2 instance role (SSM)
 - [ ] DNS A record → Elastic IP
 
 ### Phase 4 — CI/CD
-- [ ] `.github/workflows/deploy.yml`: tests → build → push to ECR (tag = commit SHA) → deploy via SSM → health check
-- [ ] GitHub `production` environment with the `ENV_FILE` secret and required reviewer
+- [x] `.github/workflows/deploy.yml`: tests → build → push to ECR (tag = commit SHA) → deploy via SSH → health check
+- [ ] GitHub `production` environment: 4 variables, 3 secrets, required reviewer (`deploy/AWS_SETUP.md`, Phase 4)
 
 ### Phase 5 — Data migration + first deploy
-- [ ] `pg_dump` the source DB → `pg_restore` into RDS (B7); verify row counts
+- [x] Scripts: `deploy/dump_local_db.sh` (this PC) and `deploy/restore_db.sh` (EC2, before the first deploy) with row-count checks
+- [ ] Run them (B7). Production reads only `DATABASE_URL` → RDS: no Neon or local-database settings
 - [ ] First deploy; certbot certificate; `COOKIE_SECURE=true`
-- [ ] Rebuild Chroma from the ledger via Admin → Copilot pipeline "Sync now"; check `cli stats`
+- [ ] Rebuild Chroma: Admin → Copilot pipeline → **Full re-embed** (a normal sync trusts the copied ledger and would leave the new store empty)
 
 ### Phase 6 — Go-live checks
 - [ ] Log in as each role (route_audit-style checks against prod), partner portal, SEO (`/robots.txt`, `/sitemap.xml`, social preview)

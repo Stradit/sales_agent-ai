@@ -29,9 +29,10 @@ EC2 → Security Groups → **Create security group**, default VPC, twice:
 
 **`salesai-rds-sg`** — inbound: PostgreSQL 5432, source = **`salesai-ec2-sg`** (pick the group, not an IP).
 
-## Step 2 — RDS PostgreSQL 16
+## Step 2 — RDS PostgreSQL 18
 RDS → **Create database** → Standard create:
-- Engine **PostgreSQL**, version **16.x** (latest 16)
+- Engine **PostgreSQL**, version **18.x** (latest 18). Today's database is PostgreSQL 18.4, and an 18 dump
+  doesn't reliably restore into an older version — if the console doesn't offer 18, stop and tell me.
 - Template **Production** → then change: Single-AZ (Multi-AZ doubles the cost; add later if needed)
 - DB instance identifier `salesai-db` · Master username `saadmin` · **Self managed** password (save it in your password manager)
 - Instance class **db.t4g.small** (burstable)
@@ -124,8 +125,7 @@ Checks on the server:
 ```bash
 docker --version && aws --version && nginx -t
 aws ecr describe-repositories --region us-east-1 --repository-names sales-ai   # proves the instance role works
-sudo apt-get install -y postgresql-client-16 && \
-  psql "postgresql://saadmin@<RDS_ENDPOINT>:5432/sales_ai?sslmode=require" -c 'select version()'   # proves EC2 → RDS
+sudo docker run --rm -it postgres:18 psql "postgresql://saadmin@<RDS_ENDPOINT>:5432/sales_ai?sslmode=require" -c 'select version()'   # proves EC2 → RDS (asks for the password)
 curl -sI https://<your-domain> | head -1    # 502 is expected until the first deploy
 ```
 From your PC: `ssh -i ~/.ssh/salesai_deploy deploy@<EC2_HOST> docker ps` must work (that's how GitHub will log in).
