@@ -97,9 +97,29 @@ jobs:
             done
             if grep -Eq '^AUTH_ENFORCED=true$' /tmp/envcheck; then ok AUTH_ENFORCED true; else bad AUTH_ENFORCED "must be exactly AUTH_ENFORCED=true"; fi
             if grep -Eq '^COOKIE_SECURE=true$' /tmp/envcheck; then ok COOKIE_SECURE true; else bad COOKIE_SECURE "must be COOKIE_SECURE=true (served over HTTPS)"; fi
-            grep -Eq '^DATABASE_URL=postgres(ql)?://[^@]+@.+' /tmp/envcheck || bad DATABASE_URL "doesn't look like postgresql://user:password@host:5432/db"
+            # DATABASE_URL shape — explained without printing the value
+            dburl="$(grep -E '^DATABASE_URL=' /tmp/envcheck | head -1 | cut -d= -f2-)"
+            case "$dburl" in
+              \"*|\'*) bad DATABASE_URL "remove the quotes around the value (Docker keeps them)";;
+              postgresql://*|postgres://*|postgresql+psycopg2://*)
+                rest="${dburl#*://}"
+                case "$rest" in *@*) ;; *) bad DATABASE_URL "no user:password@ part — expected postgresql://saadmin:<password>@<rds-endpoint>:5432/sales_ai?sslmode=require";; esac
+                dbhost="$(echo "$rest" | sed -E 's#^[^@]*@([^:/?]+).*#\1#')"
+                case "$dbhost" in
+                  localhost|127.0.0.1|host.docker.internal) bad DATABASE_URL "points at $dbhost — must be the RDS endpoint (…rds.amazonaws.com)";;
+                  *.rds.amazonaws.com) ok DATABASE_URL "host is an RDS endpoint";;
+                  *) warn DATABASE_URL "host isn't an *.rds.amazonaws.com endpoint — check it's the RDS one";;
+                esac
+                case "$dburl" in *sslmode=require*) ;; *) warn DATABASE_URL "add ?sslmode=require (RDS over TLS)";; esac;;
+              "") ;;
+              *) bad DATABASE_URL "must start with postgresql:// (got another scheme)";;
+            esac
             if grep -Eq '^(DATABASE_URL_NEON|DB_USE_LOCAL)=' /tmp/envcheck; then bad NEON/LOCAL "remove DATABASE_URL_NEON / DB_USE_LOCAL — production uses DATABASE_URL only"; fi
             if grep -Eq '^[A-Z0-9_]+=.*[[:space:]]#' /tmp/envcheck; then bad "inline comments" "a value is followed by '# …' — Docker keeps that as part of the value"; fi
+            q="$(grep -Eo '^[A-Z0-9_]+=["'"'"']' /tmp/envcheck | cut -d= -f1 | tr '\n' ' ')"
+            if [ -n "$q" ]; then bad "quoted values" "remove the quotes from: $q(Docker keeps them as part of the value)"; fi
+            if grep -q $'\r' /tmp/envcheck; then bad "line endings" "ENV_FILE has Windows (CRLF) line endings — re-paste it from a plain-text editor"; fi
+            if grep -Eq '^COOKIE_SECURE=false' /tmp/envcheck; then echo "        (COOKIE_SECURE=false is the development setting — production is HTTPS)"; fi
             rm -f /tmp/envcheck
           fi
 
