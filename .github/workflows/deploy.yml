@@ -252,7 +252,16 @@ jobs:
           ENV_FILE: ${{ secrets.ENV_FILE }}
 
       - name: Deploy (pull, start, health check, rollback on failure)
-        run: ssh app "bash /opt/salesai/remote_deploy.sh '${{ needs.build-push.outputs.image }}'"
+        # The image name is rebuilt here from the same commit instead of being passed as a job
+        # output: GitHub drops job outputs that contain a secret's value (e.g. when the ECR URI
+        # also exists as a secret), which left the image name empty.
+        run: |
+          image="${ECR_REPOSITORY_URI}:${GITHUB_SHA::12}"
+          [ -n "$ECR_REPOSITORY_URI" ] || { echo "ECR_REPOSITORY_URI variable is empty"; exit 1; }
+          echo "Deploying commit ${GITHUB_SHA::12}"
+          ssh app "bash /opt/salesai/remote_deploy.sh '$image'"
+        env:
+          ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
 
       - name: Public health check
         run: |
