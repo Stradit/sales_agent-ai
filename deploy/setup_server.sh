@@ -130,11 +130,8 @@ EOF
   nginx -t && systemctl reload nginx
   certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --email "$EMAIL" --agree-tos --non-interactive
 fi
-# certbot's shared TLS settings (normally written by the nginx plugin)
-[[ -f /etc/letsencrypt/options-ssl-nginx.conf ]] || \
-  curl -fsSL https://raw.githubusercontent.com/certbot/certbot/main/certbot-nginx/src/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf \
-    -o /etc/letsencrypt/options-ssl-nginx.conf
-[[ -f /etc/letsencrypt/ssl-dhparams.pem ]] || openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048 2>/dev/null
+# TLS protocol/cipher settings live in salesai.conf itself; only the DH parameters are generated
+[[ -f /etc/letsencrypt/ssl-dhparams.pem ]] || { echo "   generating DH parameters (about a minute)…"; openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048 2>/dev/null; }
 
 sed -e "s/__DOMAIN__/$DOMAIN/g" -e "s#__CERT__#$CERT#g" -e "s#__KEY__#$KEY#g" \
     "$HERE/nginx/salesai.conf" > "$NGINX_SITE"
