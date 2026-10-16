@@ -61,3 +61,6 @@ scripts/*_pdf.py
 .merge_backup/
 
 .venv/
+
+# Filled-in production settings (real keys) — never committed. Template: deploy/.env.production.example
+deploy/.env.production
