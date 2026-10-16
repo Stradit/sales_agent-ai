@@ -23,7 +23,7 @@ DBNAME="$(printf '%s' "$URL" | sed -E 's#^[a-z]+://[^/]+/([^?]*).*#\1#')"
 ADMIN_URL="$(printf '%s' "$URL" | sed -E 's#^([a-z]+://[^/]+/)[^?]*#\1postgres#')"   # same server, the default db
 [[ -n "$DBNAME" && "$DBNAME" != "$URL" ]] || { echo "DATABASE_URL has no database name (…:5432/<name>)" >&2; exit 1; }
 if docker ps --format '{{.Names}}' | grep -qx salesai-web; then
-  echo "salesai-web is running — stop it first: docker compose -f /opt/salesai/docker-compose.prod.yml down" >&2; exit 1
+  echo "salesai-web is running — stop it first (the next deploy recreates it): sudo docker rm -f salesai-web" >&2; exit 1
 fi
 
 pg() { docker run --rm -i --network host -e DBURL="$URL" -e ADMINURL="$ADMIN_URL" -e DBNAME="$DBNAME" \
