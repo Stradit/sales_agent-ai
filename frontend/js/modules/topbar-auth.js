@@ -30,6 +30,19 @@ document.getElementById('myTasksDrawerClose')?.addEventListener('click', closeMy
 document.getElementById('myTasksDrawerBackdrop')?.addEventListener('click', closeMyTasksDrawer);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMyTasksDrawer(); });
 
+const ROLE_NAMES = { super_admin: 'Super Administrator', sales_manager: 'Sales Manager', user: 'Sales Rep',
+  viewer: 'Viewer (read-only)', partner: 'Partner / Advisor' };
+
+function formatUserRole(role) {
+  if (ROLE_NAMES[role]) return ROLE_NAMES[role];
+  if (!role) return 'Standard User';
+  const r = String(role).toLowerCase().replace(/_/g, ' ');
+  if (r === 'super admin') return 'Super Administrator';
+  if (r === 'ae' || r === 'sales rep') return 'Account Executive';
+  if (r === 'leader' || r === 'sales leader') return 'Sales Leader';
+  return r.charAt(0).toUpperCase() + r.slice(1);
+}
+
 function getUserInitials(user) {
   if (!user) return 'U';
   if (user.full_name) {
@@ -58,7 +71,7 @@ function render() {
   }
 
   const isOnAdminPage = window.location.pathname.startsWith('/admin');
-  const showTasks = currentOptions.showTasks !== false && !isOnAdminPage && (user.role === 'super_admin' || user.has_tasks_access !== false);
+  const showTasks = !isOnAdminPage && (user.role === 'super_admin' || user.has_tasks_access !== false);
   const displayName = user.full_name || (user.email ? user.email.split('@')[0] : 'User');
   const initials = getUserInitials(user);
   const isSuperAdmin = user.role === 'super_admin';
@@ -146,6 +159,8 @@ function render() {
     const tasksBtn = document.getElementById('topbarMyTasksBtn');
     if (tasksBtn) {
       tasksBtn.addEventListener('click', async () => {
+        // Pages without the drawer partial (CRM pages) go to the full task list instead.
+        if (!document.getElementById('myTasksDrawer')) { window.location.href = '/tasks'; return; }
         openMyTasksDrawer();
         const html = await renderMyTasksPanel();
         const body = document.getElementById('myTasksDrawerBody');
@@ -187,8 +202,22 @@ window.addEventListener('pageshow', async (event) => {
 export async function initTopbarAuth(options = {}) {
   currentOptions = options;
   await refreshAccessToken(); // silent — restores a session from the refresh cookie on page load
-  render();
   const user = getCurrentUser();
+  // Partners only ever see the partner portal (the API refuses everything else anyway).
+  if (user && user.role === 'partner' && location.pathname !== '/partner') {
+    document.body.style.display = 'none';
+    location.replace('/partner');
+    return null;
+  }
+  // Viewers: CSS hides edit controls app-wide (shell.css `.role-viewer`), pages can check the class.
+  document.body.classList.toggle('role-viewer', !!(user && user.role === 'viewer'));
+  render();
+  if (user && user.role === 'viewer') {
+    const w = document.getElementById('topbarAuthWidget');
+    if (w && !w.querySelector('.topbar-readonly')) {
+      w.insertAdjacentHTML('afterbegin', '<span class="topbar-readonly" title="Your role can view but not change data"><i class="fa-solid fa-eye"></i> Read-only</span>');
+    }
+  }
   if (user) initSearchPalette();
   return user;
 }

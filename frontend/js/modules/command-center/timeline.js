@@ -2,23 +2,23 @@ import { esc } from './utils.js';
 import { logTouch } from './actions.js';
 import { loadRecentMovements, markMovementActioned } from './exec-movements.js';
 import { renderSkeleton } from '../skeleton.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { openDossier } from './drawer.js';
 import { loadMatrixAccounts } from './real-accounts.js';
 
 const TIMELINE_FILTERS = [
-  { id: 'all', label: 'All movements' },
+  { id: 'all', label: 'All' },
   { id: 'joined', label: 'Joined' },
   { id: 'promoted', label: 'Promoted' },
-  { id: 'aging', label: 'Aging (5d+)' },
+  { id: 'aging', label: 'Aging' },
 ];
 
 function renderTimelineFilters() {
   const wrap = document.getElementById('ccTimelineFilters');
   if (!wrap) return;
   wrap.innerHTML = TIMELINE_FILTERS.map(f => {
-    const active = ccState.timelineFilter === f.id;
-    return `<button type="button" class="cc-chip cc-chip-filter ${active ? 'active' : ''}" data-timeline-filter="${esc(f.id)}">${esc(f.label)}</button>`;
+    const active = (ccState.timelineFilter || 'all') === f.id;
+    return `<button type="button" class="cc-chip cc-chip-xs cc-chip-filter ${active ? 'active' : ''}" data-timeline-filter="${esc(f.id)}">${esc(f.label)}</button>`;
   }).join('');
   wrap.querySelectorAll('[data-timeline-filter]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -30,20 +30,24 @@ function renderTimelineFilters() {
 
 function itemHtml(e) {
   const aging = !e.actioned && (Date.now() - e.date.getTime()) / 86400000 >= 5;
-  const dotCls = e.type === 'joined' ? 'cc-dot-joined' : 'cc-dot-neutral';
+  const dotCls = e.type === 'joined' ? 'cc-dot-joined' : (e.type === 'promoted' ? 'cc-dot-promoted' : 'cc-dot-neutral');
   const dateLabel = e.displayDate || e.date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   return `
-    <li class="cc-timeline-item cc-clickable-row ${aging ? 'cc-timeline-item-aging' : ''}" data-account-id="${esc(e.accountId || '')}" data-company="${esc(e.company || '')}">
+    <li class="cc-timeline-item cc-compact-timeline-item cc-clickable-row ${aging ? 'cc-timeline-item-aging' : ''}" data-account-id="${esc(e.accountId || '')}" data-company="${esc(e.company || '')}">
       <span class="cc-timeline-dot ${dotCls}"></span>
       <div class="cc-timeline-body">
         <div class="cc-timeline-top">
-          <span class="cc-timeline-person">${esc(e.person)}</span>
-          <span class="cc-chip cc-chip-plain">${esc(e.type)}</span>
+          <span class="cc-timeline-person" title="${esc(e.person)}">${esc(e.person)}</span>
+          <span class="cc-chip cc-chip-xs cc-chip-plain">${esc(e.type)}</span>
         </div>
-        <div class="cc-timeline-role">${esc(e.role)} &middot; <strong class="cc-company-name">${esc(e.company)}</strong></div>
-        <div class="cc-timeline-date">${esc(dateLabel)}${aging ? ' &middot; <span class="cc-warning-text">aging, no outreach logged</span>' : ''}</div>
+        <div class="cc-timeline-sub">
+          <span class="cc-timeline-role" title="${esc(e.role)}">${esc(e.role)}</span>
+          <span class="cc-meta-sep">&middot;</span>
+          <strong class="cc-company-name" title="${esc(e.company)}">${esc(e.company)}</strong>
+        </div>
+        <div class="cc-timeline-date">${esc(dateLabel)}${aging ? ' &middot; <span class="cc-warning-text">aging</span>' : ''}</div>
       </div>
-      ${!e.actioned ? `<button type="button" class="cc-btn cc-btn-ghost cc-btn-sm" data-id="${e.id}">Log touch</button>` : ''}
+      ${!e.actioned ? `<button type="button" class="cc-btn cc-btn-ghost cc-btn-xs cc-timeline-touch-btn" data-id="${e.id}" title="Log outreach touch">Log touch</button>` : '<span class="cc-touch-badge" title="Touch logged"><i class="fa-solid fa-check"></i></span>'}
     </li>`;
 }
 
@@ -65,18 +69,9 @@ export async function renderTimeline() {
     return;
   }
 
-  const activeAcctId = ccState.activeAccountId;
-  const activeAcctName = ccState.selectedAccountName;
-  if (activeAcctId || activeAcctName) {
-    movements = movements.filter(m => {
-      if (activeAcctId && String(m.accountId) === String(activeAcctId)) return true;
-      if (activeAcctName && m.company) {
-        const c = m.company.toLowerCase();
-        const a = activeAcctName.toLowerCase();
-        if (c.includes(a) || a.includes(c)) return true;
-      }
-      return false;
-    });
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  if (hasFilter) {
+    movements = movements.filter(m => matchesCurrentAccount(m.accountId, m.company));
   }
 
   const filter = ccState.timelineFilter || 'all';

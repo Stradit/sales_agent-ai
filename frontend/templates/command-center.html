@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sales Command Center | Sales Intelligence</title>
+  <title>Sales Command Center | Doshin</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="css/tokens.css?v=3.0">
@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="css/action-items.css?v=1.0">
   <link rel="stylesheet" href="css/profile-page.css?v=3.1">
   <link rel="stylesheet" href="css/responsive.css?v=3.0">
-  <link rel="stylesheet" href="css/command-center.css?v=1.1">
+  <link rel="stylesheet" href="css/command-center.css?v=3.2">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -43,20 +43,41 @@
           <p class="cc-subtitle" id="ccSubtitle">Loading…</p>
         </div>
         <div class="cc-header-controls">
-          <div class="cc-global-filter-wrap">
-            <label for="ccGlobalAccountSelect" class="cc-filter-label"><i class="fa-solid fa-building"></i> Filter Account:</label>
-            <div class="cc-select-box">
-              <select id="ccGlobalAccountSelect" class="cc-global-account-select" aria-label="Filter by account">
-                <option value="">All Accounts (Global Portfolio)</option>
-              </select>
-              <button type="button" class="cc-btn-clear-filter" id="ccClearGlobalAccountBtn" title="Clear account filter" style="display:none;">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
+          <div class="cc-acct-filter-wrap" id="ccAcctFilterWrap">
+            <button type="button" class="cc-btn cc-btn-primary cc-btn-xs cc-acct-filter-btn" id="ccAcctFilterBtn" title="Filter Monitored Accounts">
+              <i class="fa-solid fa-building"></i>
+              <span id="ccAcctFilterBtnText">All Accounts</span>
+              <i class="fa-solid fa-chevron-down cc-sub-chevron"></i>
+            </button>
+
+            <!-- Dropdown Menu matching Google News Subscribe menu style -->
+            <div class="cc-acct-filter-menu" id="ccAcctFilterMenu" style="display:none;">
+              <div class="cc-acct-filter-menu-header">
+                <span><i class="fa-solid fa-building"></i> Filter Accounts</span>
+              </div>
+              <div class="cc-acct-filter-menu-body">
+                <button type="button" class="cc-acct-filter-option active" data-filter-target="all" id="ccFilterAllBtn">
+                  <div class="cc-acct-filter-opt-info">
+                    <span class="cc-acct-filter-opt-title">All Monitored Accounts</span>
+                    <span class="cc-acct-filter-opt-desc">Global portfolio intelligence across all accounts</span>
+                  </div>
+                </button>
+                <div class="cc-acct-filter-divider"></div>
+                <div class="cc-acct-filter-search-wrap">
+                  <i class="fa-solid fa-magnifying-glass cc-af-search-icon"></i>
+                  <input type="text" class="cc-acct-filter-search" id="ccAcctFilterSearch" placeholder="Search accounts, tickers..." autocomplete="off">
+                </div>
+                <div class="cc-acct-filter-label">Or select specific account:</div>
+                <div class="cc-acct-filter-accounts-list" id="ccAcctFilterList"></div>
+              </div>
             </div>
+
+            <!-- Fallback select for backward compatibility -->
+            <select id="ccGlobalAccountSelect" class="cc-global-account-select" aria-label="Filter by account" style="display:none;">
+              <option value="">All Accounts</option>
+            </select>
           </div>
-          <button type="button" class="cc-btn cc-btn-primary" id="ccGenerateBtn" title="Build the Priority Signal Feed and This Week's Playbook from the latest data">
-            <i class="fa-solid fa-wand-magic-sparkles"></i> Generate
-          </button>
+          <div class="cc-selected-account-tags" id="ccSelectedAccountTags"></div>
           <button type="button" class="cc-btn cc-btn-outline cc-customize-btn" id="ccCustomizeBtn" title="Customize visible dashboard widgets">
             <i class="fa-solid fa-sliders"></i> Customize View
           </button>
@@ -112,13 +133,15 @@
               <h2>Due soon</h2>
             </div>
             <div class="cc-panel-actions">
+              <span class="cc-due-badge-count" id="ccDueSoonCountBadge" style="display:none;"></span>
               <a class="cc-panel-link" href="/tasks">View all <i class="fa-solid fa-arrow-right"></i></a>
               <button type="button" class="cc-help-btn" data-widget-info="due_soon" title="About Due Soon & Tasks" aria-label="About Due Soon & Tasks">
                 <i class="fa-solid fa-circle-question"></i>
               </button>
             </div>
           </div>
-          <ul class="cc-feed-list" id="ccDueSoonList"></ul>
+          <div id="ccDueSoonFilterStripContainer"></div>
+          <ul class="cc-feed-list cc-due-feed-list" id="ccDueSoonList"></ul>
         </div>
 
         <div class="cc-panel cc-timeline-panel" data-widget-id="timeline">
@@ -185,34 +208,61 @@
           <div class="cc-panel-head">
             <div class="cc-panel-head-left">
               <h2>Org coverage gaps</h2>
+              <span class="cc-panel-note" id="ccCoveragePanelNote">Mapped contacts breakdown</span>
             </div>
-            <button type="button" class="cc-help-btn" data-widget-info="coverage" title="About Org Coverage Gaps" aria-label="About Org Coverage Gaps">
-              <i class="fa-solid fa-circle-question"></i>
-            </button>
+            <div class="cc-panel-actions">
+              <div class="cc-filter-pill-group" id="ccCoverageViewToggle" role="group" aria-label="Toggle Chart or Gaps View">
+                <button type="button" class="cc-filter-pill active" data-coverage-view="chart" title="View Contacts Mapped Pie Chart"><i class="fa-solid fa-chart-pie"></i> Chart</button>
+                <button type="button" class="cc-filter-pill" data-coverage-view="list" title="View Coverage Gaps List"><i class="fa-solid fa-list-ul"></i> Gaps</button>
+              </div>
+              <button type="button" class="cc-help-btn" data-widget-info="coverage" title="About Org Coverage Gaps" aria-label="About Org Coverage Gaps">
+                <i class="fa-solid fa-circle-question"></i>
+              </button>
+            </div>
           </div>
-          <ul class="cc-feed-list" id="ccCoverageList"></ul>
+          <div class="cc-coverage-chart-wrap" id="ccCoverageChartWrap">
+            <div class="cc-coverage-chart-stats">
+              <span class="cc-cov-stat-pill"><i class="fa-solid fa-users"></i> <strong id="ccTotalMappedBadge">0</strong> mapped</span>
+              <span class="cc-cov-stat-pill cc-cov-csuite"><i class="fa-solid fa-crown"></i> <strong id="ccTotalCSuiteBadge">0</strong> C-suite</span>
+            </div>
+            <div class="cc-coverage-canvas-container">
+              <canvas id="ccCoveragePieCanvas"></canvas>
+            </div>
+          </div>
+          <ul class="cc-feed-list" id="ccCoverageList" style="display:none;"></ul>
         </div>
 
-        <div class="cc-panel" data-widget-id="pain_points">
-          <div class="cc-panel-head">
-            <h2>Operational pain points</h2>
-            <button type="button" class="cc-help-btn" data-widget-info="pain_points" title="About Operational Pain Points" aria-label="About Operational Pain Points">
-              <i class="bi bi-question-circle"></i>
-            </button>
-          </div>
-          <div id="ccPainPointsBody"></div>
-        </div>
+  </section>
 
-        <div class="cc-panel" data-widget-id="objections">
-          <div class="cc-panel-head">
-            <h2>Common objections</h2>
-            <button type="button" class="cc-help-btn" data-widget-info="objections" title="About Common Objections" aria-label="About Common Objections">
-              <i class="bi bi-question-circle"></i>
-            </button>
-          </div>
-          <div id="ccObjectionsBody"></div>
+  <!-- Parallel Side-by-Side: Operational Pain Points & Common Objections -->
+  <section class="cc-row cc-row-2col">
+    <div class="cc-panel" data-widget-id="pain_points">
+      <div class="cc-panel-head">
+        <div class="cc-panel-head-left">
+          <h2>Operational pain points</h2>
+          <span class="cc-panel-note">Ranked Operational Friction &middot; Multi-Account Intelligence</span>
         </div>
-      </section>
+        <button type="button" class="cc-help-btn" data-widget-info="pain_points" title="About Operational Pain Points" aria-label="About Operational Pain Points">
+          <i class="fa-solid fa-circle-question"></i>
+        </button>
+      </div>
+      <div id="ccPainPointsBody"></div>
+    </div>
+
+    <div class="cc-panel" data-widget-id="objections">
+      <div class="cc-panel-head">
+        <div class="cc-panel-head-left">
+          <h2>Common objections</h2>
+          <span class="cc-panel-note">Field Objections & Stakeholder Resistance &middot; Enterprise Intelligence</span>
+        </div>
+        <button type="button" class="cc-help-btn" data-widget-info="objections" title="About Common Objections" aria-label="About Common Objections">
+          <i class="fa-solid fa-circle-question"></i>
+        </button>
+      </div>
+      <div id="ccObjectionsBody"></div>
+    </div>
+  </section>
+
 
       <section class="cc-row">
         <div class="cc-panel" data-widget-id="strategic_tracks">
@@ -236,11 +286,55 @@
               <h2>Google News</h2>
               <span class="cc-panel-note">Recent coverage captured for your accounts</span>
             </div>
-            <button type="button" class="cc-help-btn" data-widget-info="news" title="About Google News" aria-label="About Google News">
-              <i class="fa-solid fa-circle-question"></i>
-            </button>
+            <div class="cc-panel-actions">
+              <div class="cc-news-subscribe-wrap" id="ccNewsSubscribeWrap">
+                <button type="button" class="cc-btn cc-btn-primary cc-btn-xs cc-news-subscribe-btn" id="ccNewsSubscribeBtn" title="Subscribe to News Alerts">
+                  <i class="fa-regular fa-bell"></i> Subscribe <i class="fa-solid fa-chevron-down cc-sub-chevron"></i>
+                </button>
+                <div class="cc-news-subscribe-menu" id="ccNewsSubscribeMenu" style="display:none;">
+                  <div class="cc-news-sub-menu-header">
+                    <span><i class="fa-regular fa-bell"></i> Google News Alerts</span>
+                  </div>
+                  <div class="cc-news-sub-menu-body">
+                    <button type="button" class="cc-news-sub-option" data-sub-target="all" id="ccSubAllBtn">
+                      <div class="cc-news-sub-opt-info">
+                        <span class="cc-news-sub-opt-title">All Monitored Accounts</span>
+                        <span class="cc-news-sub-opt-desc">Instant alerts for all accounts in portfolio</span>
+                      </div>
+                      <span class="cc-news-sub-check"><i class="fa-solid fa-check"></i></span>
+                    </button>
+                    <div class="cc-news-sub-divider"></div>
+                    <div class="cc-news-sub-label">Or select specific account:</div>
+                    <div class="cc-news-sub-accounts-list" id="ccNewsSubAccountsList"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="cc-news-filter-box">
+                <i class="fa-solid fa-filter cc-news-filter-icon"></i>
+                <select id="ccNewsAccountFilter" class="cc-news-account-select" aria-label="Filter news by account">
+                  <option value="">All Accounts</option>
+                </select>
+              </div>
+              <button type="button" class="cc-btn cc-btn-outline cc-btn-xs" id="ccNewsRefreshBtn" title="Refresh Google News feed">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+              </button>
+              <button type="button" class="cc-help-btn" data-widget-info="news" title="About Google News" aria-label="About Google News">
+                <i class="fa-solid fa-circle-question"></i>
+              </button>
+            </div>
           </div>
-          <ul class="cc-feed-list" id="ccNewsList"></ul>
+          <div class="cc-news-toolbar">
+            <div class="cc-chip-row cc-news-topic-chips" id="ccNewsTopicChips"></div>
+            <div class="cc-news-search-wrap">
+              <i class="fa-solid fa-magnifying-glass cc-news-search-icon"></i>
+              <input type="text" id="ccNewsSearchInput" class="cc-news-search-input" placeholder="Search news headlines, keywords..." aria-label="Search news">
+              <button type="button" class="cc-news-search-clear" id="ccNewsSearchClear" style="display:none;" title="Clear search">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          </div>
+          <div id="ccNewsFilterStripContainer"></div>
+          <ul class="cc-feed-list cc-news-feed-list" id="ccNewsList"></ul>
         </div>
       </section>
     </main>
@@ -254,7 +348,7 @@
     <div class="cc-info-modal-title-wrap">
       <div class="cc-info-modal-icon-box"><i class="fa-solid fa-circle-info" id="ccWidgetInfoIcon"></i></div>
       <div>
-        <span class="cc-info-modal-badge" id="ccWidgetInfoBadge">Sales Intelligence</span>
+        <span class="cc-info-modal-badge" id="ccWidgetInfoBadge">Doshin</span>
         <h3 class="cc-info-modal-title" id="ccWidgetInfoTitle">Widget Guide</h3>
       </div>
     </div>
@@ -311,7 +405,8 @@
 <div class="toast" id="toast"></div>
 
 {% include "partials/drawer.html" %}
+{% include "partials/copilot-dock.html" %}
 
-<script type="module" src="js/modules/command-center/main.js?v=4.7"></script>
+<script type="module" src="js/modules/command-center/main.js?v=7.6"></script>
 </body>
 </html>

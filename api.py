@@ -52,7 +52,7 @@ from collectors.validator import DataQualityValidator
 from serializer import MasterSerializer
 from serializers.account_serializer import slugify
 
-from sqlalchemy import or_, and_, func, text as sql_text
+from sqlalchemy import func as sa_func, or_, and_, func, text as sql_text
 from sqlalchemy.orm import load_only, selectinload
 from db.connection import get_session
 from db.models import (
@@ -117,7 +117,7 @@ try:
         Depends,
         BackgroundTasks,
     )
-    from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
@@ -129,7 +129,7 @@ except ImportError:
 
 if FASTAPI_AVAILABLE:
     app = FastAPI(
-        title="Sales AI Enterprise Intelligence API",
+        title="Doshin API",
         description=(
             "Granular REST API for Frontend UI Tabs: "
             "Account, LOBs, Sub-LOBs, and Personas (Fetch -> Validate -> Dump)"
@@ -156,7 +156,25 @@ if FASTAPI_AVAILABLE:
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():
-        return Response(status_code=204)
+        icon = Path(__file__).resolve().parent / "frontend" / "assets" / "brand" / "favicon-32.png"
+        if not icon.exists():
+            return Response(status_code=204)
+        return FileResponse(icon, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
+
+    @app.get("/api/health", include_in_schema=False)
+    def health():
+        """Liveness + DB check for the container HEALTHCHECK, the deploy script and the load
+        balancer. Public (no auth) and reveals nothing beyond up/down."""
+        session = get_session()
+        try:
+            session.execute(sql_text("SELECT 1"))
+            db_ok = True
+        except Exception:
+            db_ok = False
+        finally:
+            session.close()
+        return JSONResponse({"status": "ok" if db_ok else "degraded", "db": "ok" if db_ok else "down"},
+                            status_code=200 if db_ok else 503, headers={"Cache-Control": "no-store"})
 
     @app.on_event("startup")
     def on_startup():
@@ -245,9 +263,20 @@ if FASTAPI_AVAILABLE:
                 "refresh_token", refresh_token, httponly=True, secure=_COOKIE_SECURE, samesite="lax",
                 max_age=auth.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600, path="/api/auth",
             )
+            _set_session_hint(response)
             return {"access_token": access_token, "token_type": "bearer", "user": _user_public(user)}
         finally:
             session.close()
+
+    # "/" serves the public landing page to signed-out visitors and the dashboard to
+    # signed-in users. The refresh cookie is scoped to /api/auth, so page requests can't
+    # see it; this companion cookie is only a hint for which page to render — it holds
+    # no secret and grants nothing (every API call still needs the access token).
+    SESSION_HINT_COOKIE = "si_signed_in"
+
+    def _set_session_hint(response: Response) -> None:
+        response.set_cookie(SESSION_HINT_COOKIE, "1", httponly=True, secure=_COOKIE_SECURE, samesite="lax",
+                            max_age=auth.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600, path="/")
 
     @app.post("/api/auth/refresh", tags=["0. Authentication"])
     def refresh_access_token(request: Request, response: Response):
@@ -262,6 +291,7 @@ if FASTAPI_AVAILABLE:
                 "refresh_token", new_raw, httponly=True, secure=_COOKIE_SECURE, samesite="lax",
                 max_age=auth.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600, path="/api/auth",
             )
+            _set_session_hint(response)
             return {"access_token": access_token, "token_type": "bearer", "user": _user_public(user)}
         finally:
             session.close()
@@ -282,6 +312,7 @@ if FASTAPI_AVAILABLE:
             samesite="lax",
             secure=_COOKIE_SECURE,
         )
+        response.delete_cookie(SESSION_HINT_COOKIE, path="/", httponly=True, samesite="lax", secure=_COOKIE_SECURE)
         return {"ok": True}
 
     @app.get("/api/auth/me", tags=["0. Authentication"])
@@ -304,7 +335,7 @@ if FASTAPI_AVAILABLE:
                 # must never be what the caller's HTTP request is waiting on.
                 background_tasks.add_task(
                     email_sender.send_email,
-                    user.email, "Reset your Sales Intelligence password",
+                    user.email, "Reset your Doshin password",
                     f"Hi {user.full_name or user.email},\n\n"
                     "A password reset was requested for your account. If this wasn't you, "
                     "you can safely ignore this email.\n\n"
@@ -369,8 +400,8 @@ if FASTAPI_AVAILABLE:
         background_tasks: BackgroundTasks,
         current: User = Depends(auth.require_role("super_admin")),
     ):
-        if body.role not in ("super_admin", "user"):
-            raise HTTPException(status_code=400, detail="role must be 'super_admin' or 'user'")
+        if body.role not in auth.ROLES:
+            raise HTTPException(status_code=400, detail="role must be one of " + ", ".join(auth.ROLES))
         session = get_session()
         try:
             email = body.email.strip().lower()
@@ -404,10 +435,10 @@ if FASTAPI_AVAILABLE:
             background_tasks.add_task(
                 email_sender.send_email,
                 new_user.email,
-                "Welcome to Sales Intelligence",
+                "Welcome to Doshin",
                 (
                     f"Hi {new_user.full_name or new_user.email},\n\n"
-                    f"An account has been created for you on Sales Intelligence by "
+                    f"An account has been created for you on Doshin by "
                     f"{current.full_name or current.email}.\n\n"
                     f"Email: {new_user.email}\nRole: {new_user.role}\n\n"
                     f"Access: {access_note}\n\n"
@@ -415,7 +446,7 @@ if FASTAPI_AVAILABLE:
                     "You'll receive a separate email shortly to set your own password.\n"
                 ),
                 html_body=email_sender.render_html(
-                    "Welcome to Sales Intelligence",
+                    "Welcome to Doshin",
                     [f"Hi {new_user.full_name or new_user.email},",
                      f"An account has been created for you by {current.full_name or current.email}.",
                      f"Email: {new_user.email}  •  Role: {new_user.role}",
@@ -433,7 +464,7 @@ if FASTAPI_AVAILABLE:
             reset_link = f"{base_url}/reset-password?token={reset_token}"
             background_tasks.add_task(
                 email_sender.send_email,
-                new_user.email, "Set your Sales Intelligence password",
+                new_user.email, "Set your Doshin password",
                 f"Hi {new_user.full_name or new_user.email},\n\n"
                 "Set your password to finish setting up your account "
                 f"(expires in {auth.RESET_TOKEN_EXPIRE_MINUTES} minutes):\n{reset_link}\n",
@@ -480,12 +511,14 @@ if FASTAPI_AVAILABLE:
                     target.email = new_email
 
             if body.role is not None and body.role != target.role:
-                if body.role not in ("super_admin", "user"):
-                    raise HTTPException(status_code=400, detail="role must be 'super_admin' or 'user'")
+                if body.role not in auth.ROLES:
+                    raise HTTPException(status_code=400, detail="role must be one of " + ", ".join(auth.ROLES))
                 if target.id == current.id and body.role != "super_admin":
                     raise HTTPException(status_code=400, detail="You cannot demote your own account from super_admin")
                 details["role"] = {"old": target.role, "new": body.role}
                 target.role = body.role
+                from apps.sales_crm.permissions import forget_role
+                forget_role(target.id)
 
             if body.is_active is not None and body.is_active != target.is_active:
                 details["is_active"] = {"old": target.is_active, "new": body.is_active}
@@ -552,7 +585,7 @@ if FASTAPI_AVAILABLE:
             target = session.query(User).filter_by(id=user_id).first()
             if not target:
                 raise HTTPException(status_code=404, detail="User not found")
-            granted_ids = set(auth.get_accessible_account_ids(session, user_id))
+            granted_ids = set(auth.get_granted_account_ids(session, user_id))
             accounts = session.query(Account).order_by(Account.display_name).all()
             is_sa = target.role == "super_admin"
             return {
@@ -913,6 +946,7 @@ if FASTAPI_AVAILABLE:
         status: Optional[str] = "open"  # open | in_progress
         due_date: Optional[str] = None  # ISO 8601
         assigned_to_id: Optional[int] = None
+        source: str = "manual"  # manual | playbook | signal_feed
 
     class ActionItemDirectCreateRequest(BaseModel):
         account_id: int
@@ -939,7 +973,7 @@ if FASTAPI_AVAILABLE:
     # ══════════════════════════════════════════════════════
     account_router = APIRouter(prefix="/api/account", tags=["1. Account Level"])
 
-    @account_router.post("/create")
+    @account_router.post("/create", dependencies=[Depends(auth.require_role("super_admin"))])
     def create_account_stub(req: AccountCreateRequest):
         """[Tab 1 - Add Account Modal]: Creates or fetches an Account row in PostgreSQL with an official ID."""
         session = get_session()
@@ -1033,7 +1067,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @account_router.post("/fetch")
+    @account_router.post("/fetch", dependencies=[Depends(auth.require_role("super_admin"))])
     def fetch_account_data(req: AccountFetchRequest):
         """[Tab 1 - Fetch Button]: Enterprise 11-source account intelligence collection.
         Uses AccountService.collect() with: SEC EDGAR, GLEIF, OpenCorporates, FMP, CourtListener,
@@ -1176,7 +1210,7 @@ if FASTAPI_AVAILABLE:
             )
             raise HTTPException(status_code=500, detail=f"Account fetch failed: {str(e)}")
 
-    @account_router.post("/fetch-background")
+    @account_router.post("/fetch-background", dependencies=[Depends(auth.require_role("super_admin"))])
     def fetch_account_background(req: AccountFetchRequest):
         """
         [Background Mode — Tab 1 Fetch]:
@@ -1324,7 +1358,7 @@ if FASTAPI_AVAILABLE:
             "message":  f"Account enrichment started for '{req.company_name}'. Thread runs independently of this connection.",
         }
 
-    @account_router.post("/validate")
+    @account_router.post("/validate", dependencies=[Depends(auth.require_role("super_admin"))])
     def validate_account_data(account_data: Dict[str, Any] = Body(...)):
         """[Tab 1 - Validate Button]: Validates staged account data."""
         t0 = datetime.now(timezone.utc)
@@ -1374,7 +1408,7 @@ if FASTAPI_AVAILABLE:
             )
             raise HTTPException(status_code=500, detail=f"Account validation failed: {str(e)}")
 
-    @account_router.post("/dump-db")
+    @account_router.post("/dump-db", dependencies=[Depends(auth.require_role("super_admin"))])
     def dump_account_to_db(req: AccountDumpRequest):
         """[Tab 1 - Dump DB Button]: Commits validated account data into PostgreSQL `accounts` table."""
         t0 = datetime.now(timezone.utc)
@@ -2160,8 +2194,8 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @account_router.patch("/{account_id}")
-    @app.patch("/api/accounts/{account_id}", tags=["1. Account Level"])
+    @account_router.patch("/{account_id}", dependencies=[Depends(auth.require_role("super_admin"))])
+    @app.patch("/api/accounts/{account_id}", tags=["1. Account Level"], dependencies=[Depends(auth.require_account_access), Depends(auth.require_editor)])
     def update_account(account_id: int, payload: Dict[str, Any] = Body(...)):
         """
         [Universal & Inline Edit]: Updates account fields directly in PostgreSQL.
@@ -2233,7 +2267,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"10-K Chunking failed: {str(e)}")
 
-    @account_router.post("/patents")
+    @account_router.post("/patents", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_full_patents(req: PatentsRequest):
         """
         [Full Patent Text Extractor]:
@@ -2244,7 +2278,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Patent extraction failed: {str(e)}")
 
-    @account_router.post("/sec-exhibit-21")
+    @account_router.post("/sec-exhibit-21", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_sec_exhibit_21_subsidiaries(req: Sec10kRequest):
         """
         [SEC EDGAR Exhibit 21 (Subsidiaries of Registrant) Extractor]:
@@ -2256,7 +2290,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Exhibit 21 extraction failed: {str(e)}")
 
-    @account_router.post("/gleif")
+    @account_router.post("/gleif", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_gleif_ownership_tree(req: PatentsRequest):
         """
         [GLEIF Corporate Ownership Graph Resolver]:
@@ -2268,7 +2302,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"GLEIF extraction failed: {str(e)}")
 
-    @account_router.post("/wikipedia")
+    @account_router.post("/wikipedia", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_wikipedia_intel(req: PatentsRequest):
         """
         [Wikipedia & DBpedia Open Knowledge Graph Extractor]:
@@ -2279,7 +2313,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Wikipedia extraction failed: {str(e)}")
 
-    @account_router.post("/fec")
+    @account_router.post("/fec", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_fec_political_intel(req: PatentsRequest):
         """
         [FEC Federal Election Commission Political Giving API]:
@@ -2290,7 +2324,7 @@ if FASTAPI_AVAILABLE:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"FEC extraction failed: {str(e)}")
 
-    @account_router.post("/diffbot")
+    @account_router.post("/diffbot", dependencies=[Depends(auth.require_role("super_admin"))])   # external data fetch: admin only
     def get_diffbot_intel(req: AccountFetchRequest):
         """
         [Diffbot Knowledge Graph (DKG) Enhancer]:
@@ -3023,7 +3057,7 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @lobs_router.patch("/{lob_id}")
-    @app.patch("/api/lob/{lob_id}", tags=["2. LOB & Sub-LOB Level"])
+    @app.patch("/api/lob/{lob_id}", tags=["2. LOB & Sub-LOB Level"], dependencies=[Depends(auth.require_lob_account_access), Depends(auth.require_editor)])
     def update_lob(lob_id: int, payload: Dict[str, Any] = Body(...)):
         """
         [Universal & Inline Edit]: Updates LOB fields directly in PostgreSQL.
@@ -3083,7 +3117,7 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @lobs_router.get("/sub/{sub_lob_id}")
-    @app.get("/api/sub-lobs/{sub_lob_id}", tags=["2. LOB & Sub-LOB Level"])
+    @app.get("/api/sub-lobs/{sub_lob_id}", tags=["2. LOB & Sub-LOB Level"], dependencies=[Depends(auth.require_sub_lob_account_access)])
     def get_sub_lob_record(sub_lob_id: int):
         """Retrieves a single Sub-LOB by ID with all 19 enterprise columns."""
         session = get_session()
@@ -3096,7 +3130,7 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @lobs_router.patch("/sub/{sub_lob_id}")
-    @app.patch("/api/sub-lobs/{sub_lob_id}", tags=["2. LOB & Sub-LOB Level"])
+    @app.patch("/api/sub-lobs/{sub_lob_id}", tags=["2. LOB & Sub-LOB Level"], dependencies=[Depends(auth.require_sub_lob_account_access), Depends(auth.require_editor)])
     def update_sub_lob(sub_lob_id: int, payload: Dict[str, Any] = Body(...)):
         """
         [Sub-LOB Universal & Inline Edit]: Updates Sub-LOB fields directly in PostgreSQL.
@@ -3903,8 +3937,8 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @personas_router.patch("/{persona_id}")
-    @app.patch("/api/persona/{persona_id}", tags=["3. Personas Level"])
-    @app.patch("/api/personas/{persona_id}", tags=["3. Personas Level"])
+    @app.patch("/api/persona/{persona_id}", tags=["3. Personas Level"], dependencies=[Depends(auth.require_persona_account_access), Depends(auth.require_editor)])
+    @app.patch("/api/personas/{persona_id}", tags=["3. Personas Level"], dependencies=[Depends(auth.require_persona_account_access), Depends(auth.require_editor)])
     def update_persona(persona_id: int, payload: Dict[str, Any] = Body(...)):
         """
         [Universal & Inline Edit]: Updates persona fields directly in PostgreSQL.
@@ -3962,7 +3996,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.post("/api/verify/{entity_type}/{entity_id}", tags=["0. Verification Engine"])
+    @app.post("/api/verify/{entity_type}/{entity_id}", tags=["0. Verification Engine"], dependencies=[Depends(auth.require_entity_account_access), Depends(auth.require_editor)])
     def toggle_manual_verification(entity_type: str, entity_id: int, payload: Optional[Dict[str, Any]] = Body(default=None)):
         """
         [Manual Verification Toggle]: Sets or toggles is_manually_verified flag on Account, LOB, or Persona in PostgreSQL.
@@ -4345,10 +4379,15 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     # Include all sub-routers
-    app.include_router(pipeline_router)
-    app.include_router(account_router)
-    app.include_router(lobs_router)
-    app.include_router(personas_router)
+    # Access (apps/sales_crm/README.md §5.2, M5 hardening): the pipeline / bulk LOB / bulk persona
+    # routers run paid enrichment and database dumps -> super admin only. The account router's
+    # enrichment helpers are used by reps on account pages -> any signed-in editor; its bulk
+    # create / fetch / validate / dump / patch routes are super admin only (per-route below).
+    _admin_only = [Depends(auth.require_role("super_admin"))]
+    app.include_router(pipeline_router, dependencies=_admin_only)
+    app.include_router(account_router, dependencies=[Depends(auth.require_editor)])
+    app.include_router(lobs_router, dependencies=_admin_only)
+    app.include_router(personas_router, dependencies=_admin_only)
 
     # Sales Copilot (RAG chat) — own module, own tables; see apps/sales_copilot/README.md
     from apps.sales_copilot.api import install as install_copilot
@@ -4357,6 +4396,9 @@ if FASTAPI_AVAILABLE:
     # Deals pipeline (Intro → Discovery → Proposal → Pilot → Contract) — apps/sales_copilot/README.md §21
     from apps.sales_deals.api import install as install_deals
     install_deals(app)
+    # CRM core (apps/sales_crm/README.md): roles guard, business lines, team
+    from apps.sales_crm.api import install as install_crm
+    install_crm(app)
 
     # Global search palette (Ctrl+K / Ctrl+F): lexical suggestions + semantic related content
     from apps.sales_search.api import install as install_search
@@ -4382,7 +4424,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.get("/api/lobs/{lob_id}", tags=["2. Lines of Business"])
+    @app.get("/api/lobs/{lob_id}", tags=["2. Lines of Business"], dependencies=[Depends(auth.require_lob_account_access)])
     def get_single_line_of_business(lob_id: int):
         """Retrieve details for a single Line of Business by its ID."""
         session = get_session()
@@ -4394,7 +4436,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.delete("/api/lobs/{lob_id}", tags=["2. Lines of Business"])
+    @app.delete("/api/lobs/{lob_id}", tags=["2. Lines of Business"], dependencies=[Depends(auth.require_role("super_admin"))])
     def delete_single_lob(lob_id: int):
         """Delete a single Line of Business (and its sub-LOBs) by ID."""
         session = get_session()
@@ -4427,6 +4469,7 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @app.get("/api/objections", tags=["3. Personas & Buying Committee"])
+    @app.get("/api/command-center/objections", tags=["9. Command Center"])
     def get_common_objections_and_pain_points(
         response: Response,
         user: User = Depends(auth.get_current_user),
@@ -4520,7 +4563,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.delete("/api/personas/{persona_id}", tags=["3. Personas & Buying Committee"])
+    @app.delete("/api/personas/{persona_id}", tags=["3. Personas & Buying Committee"], dependencies=[Depends(auth.require_role("super_admin"))])
     def delete_single_persona(persona_id: int):
         """Delete a single Persona record by ID."""
         session = get_session()
@@ -4549,7 +4592,7 @@ if FASTAPI_AVAILABLE:
     # ── Enterprise Record Updating & Verification Endpoints ────────────────────
 
 
-    @app.patch("/api/accounts/{account_id}", tags=["1. Accounts"])
+    @app.patch("/api/accounts/{account_id}", tags=["1. Accounts"], dependencies=[Depends(auth.require_account_access), Depends(auth.require_editor)])
     def update_account_record(account_id: int, updates: Dict[str, Any]):
         """Directly updates Account fields in PostgreSQL, sets is_manually_verified=True, and logs audit run."""
         session = get_session()
@@ -4600,7 +4643,7 @@ if FASTAPI_AVAILABLE:
 
     # ── Enterprise Data Management & Granular Purge Endpoints ─────────────────
 
-    @app.get("/api/accounts/{account_id}/data-summary", tags=["1. Accounts"])
+    @app.get("/api/accounts/{account_id}/data-summary", tags=["1. Accounts"], dependencies=[Depends(auth.require_account_access)])
     def get_account_data_summary(account_id: int):
         """Returns live counts of all child entities and persona seniority tiers for granular data management."""
         session = get_session()
@@ -4690,7 +4733,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.post("/api/accounts/{account_id}/purge", tags=["1. Accounts"])
+    @app.post("/api/accounts/{account_id}/purge", tags=["1. Accounts"], dependencies=[Depends(auth.require_role("super_admin"))])
     def purge_account_data(account_id: int, req: AccountPurgeRequest):
         """Atomically purges selected or all components of an account with enterprise safeguards."""
         session = get_session()
@@ -4902,19 +4945,19 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.delete("/api/accounts/{account_id}", tags=["1. Accounts"])
+    @app.delete("/api/accounts/{account_id}", tags=["1. Accounts"], dependencies=[Depends(auth.require_role("super_admin"))])
     def delete_account_direct(account_id: int, confirmation: Optional[str] = Query(None)):
         """REST shortcut to purge an entire account."""
         req = AccountPurgeRequest(delete_account_record=True, confirmation_text=confirmation)
         return purge_account_data(account_id, req)
 
-    @app.get("/api/accounts/{account_id}/credit-breakdown", tags=["1. Accounts"])
+    @app.get("/api/accounts/{account_id}/credit-breakdown", tags=["1. Accounts"], dependencies=[Depends(auth.require_account_access)])
     def get_account_credit_breakdown(account_id: int):
         """Returns enterprise run telemetry & credit usage breakdown for an account."""
         from services.telemetry_service import TelemetryService
         return TelemetryService.get_run_credit_breakdown(account_id=account_id)
 
-    @app.get("/api/system/health", tags=["0. System Telemetry"])
+    @app.get("/api/system/health", tags=["0. System Telemetry"], dependencies=[Depends(auth.require_role("super_admin"))])
     def get_system_health():
         """Returns live system telemetry, credit usage stats, database status, and API connectors health."""
         from db.models import PipelineRun, Account, Lob, Persona
@@ -4951,6 +4994,27 @@ if FASTAPI_AVAILABLE:
                 "serper": {"name": "Serper Google OSINT", "status": "active" if bool(SERPER_API_KEY) else "unconfigured", "type": "Search Engine"},
             }
 
+            # Real normalized units across all enterprise accounts (30s in-memory cache)
+            import time
+            from services.telemetry_service import TelemetryService
+            global _HEALTH_TELEMETRY_CACHE
+            if "_HEALTH_TELEMETRY_CACHE" not in globals():
+                _HEALTH_TELEMETRY_CACHE = {"ts": 0.0, "units": 2751, "cost": 13.76}
+
+            now = time.time()
+            if now - _HEALTH_TELEMETRY_CACHE.get("ts", 0) > 30:
+                accounts = session.query(Account).all()
+                t_units = 0
+                for a in accounts:
+                    bd = TelemetryService.get_run_credit_breakdown(account_id=a.id)
+                    t_units += bd.get("kpis", {}).get("total_credits", 0)
+                _HEALTH_TELEMETRY_CACHE["ts"] = now
+                _HEALTH_TELEMETRY_CACHE["units"] = t_units
+                _HEALTH_TELEMETRY_CACHE["cost"] = round(t_units * 0.005, 2)
+
+            real_account_units = _HEALTH_TELEMETRY_CACHE.get("units", 2751)
+            estimated_cost_usd = _HEALTH_TELEMETRY_CACHE.get("cost", 13.76)
+
             return {
                 "status": "healthy",
                 "database": {
@@ -4963,7 +5027,11 @@ if FASTAPI_AVAILABLE:
                     "total_lobs": total_lobs,
                     "total_personas": total_personas,
                     "total_pipeline_runs": total_runs,
-                    "total_credits_consumed": total_credits,
+                    "total_credits_consumed": real_account_units,
+                    "total_units": real_account_units,
+                    "estimated_cost_usd": estimated_cost_usd,
+                    "billing_tier": "Free Tier Evaluation",
+                    "disclaimer": "Free Tier Active • Trial quota units",
                     "last_sync_timestamp": last_run,
                 },
                 "connectors": connectors,
@@ -4977,13 +5045,13 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.get("/api/pipeline/runs/{run_id}/credit-breakdown", tags=["4. Pipeline Orchestration"])
+    @app.get("/api/pipeline/runs/{run_id}/credit-breakdown", tags=["4. Pipeline Orchestration"], dependencies=[Depends(auth.require_role("super_admin"))])
     def get_run_credit_breakdown_by_id(run_id: str):
         """Returns enterprise run telemetry & credit usage breakdown for a specific run ID."""
         from services.telemetry_service import TelemetryService
         return TelemetryService.get_run_credit_breakdown(run_id=run_id)
 
-    @app.patch("/api/lobs/{lob_id}", tags=["2. Lines of Business"])
+    @app.patch("/api/lobs/{lob_id}", tags=["2. Lines of Business"], dependencies=[Depends(auth.require_lob_account_access), Depends(auth.require_editor)])
     def update_lob_record(lob_id: int, updates: Dict[str, Any]):
         """Directly updates LOB fields in PostgreSQL, sets is_manually_verified=True, and logs audit run."""
         session = get_session()
@@ -5047,7 +5115,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.patch("/api/personas/{persona_id}", tags=["3. Personas & Buying Committee"])
+    @app.patch("/api/personas/{persona_id}", tags=["3. Personas & Buying Committee"], dependencies=[Depends(auth.require_persona_account_access), Depends(auth.require_editor)])
     def update_persona_record(persona_id: int, updates: Dict[str, Any]):
         """Directly updates Persona fields in PostgreSQL, sets is_manually_verified=True, and logs audit run."""
         session = get_session()
@@ -5100,7 +5168,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.post("/api/verify/{entity_type}/{entity_id}", tags=["0. Verification"])
+    @app.post("/api/verify/{entity_type}/{entity_id}", tags=["0. Verification"], dependencies=[Depends(auth.require_entity_account_access), Depends(auth.require_editor)])
     def toggle_entity_verification(entity_type: str, entity_id: int):
         """Toggles manual verification flag directly in DB and appends audit trail."""
         session = get_session()
@@ -5282,7 +5350,7 @@ if FASTAPI_AVAILABLE:
                 return row
         return None
 
-    @app.get("/api/explorer/personas/{persona_id}/download-pdf", tags=["3. Personas & Buying Committee"])
+    @app.get("/api/explorer/personas/{persona_id}/download-pdf", tags=["3. Personas & Buying Committee"], dependencies=[Depends(auth.require_persona_account_access)])
     def download_explorer_persona_dossier_pdf(persona_id: int):
         """Dedicated Account Explorer executive dossier PDF download.
         Renders full database intelligence, AI sales playbook, KPIs, objections,
@@ -6058,6 +6126,8 @@ if FASTAPI_AVAILABLE:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
                 if assignee.role in ("super_admin", "admin"):
                     raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in auth.READ_ONLY_ROLES:
+                    raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
             item = ActionItem(
                 account_id=account_id, persona_id=body.persona_id, title=body.title,
                 description=body.description, priority=body.priority,
@@ -6109,6 +6179,8 @@ if FASTAPI_AVAILABLE:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
                 if assignee.role in ("super_admin", "admin"):
                     raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in auth.READ_ONLY_ROLES:
+                    raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
             elif user.role == "user":
                 assigned_id = user.id
 
@@ -6169,7 +6241,8 @@ if FASTAPI_AVAILABLE:
                 item.title = body.title
             if body.description is not None:
                 item.description = body.description
-            if body.due_date is not None:
+            # Sent explicitly as null/"" clears the date; left out keeps it.
+            if "due_date" in body.model_fields_set:
                 item.due_date = _parse_due_date(body.due_date)
             if body.persona_id is not None:
                 persona = (
@@ -6187,6 +6260,8 @@ if FASTAPI_AVAILABLE:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
                 if assignee.role in ("super_admin", "admin"):
                     raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in auth.READ_ONLY_ROLES:
+                    raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
 
             reassigned = body.assigned_to_id is not None and body.assigned_to_id != item.assigned_to_id
             if body.assigned_to_id is not None:
@@ -6509,6 +6584,17 @@ if FASTAPI_AVAILABLE:
                     .filter_by(user_id=user.id)
                     .order_by(CommandCenterSnapshot.generated_at.desc())
                     .first())
+            if not snap or not snap.signals:
+                # Auto-generate snapshot on-demand if user has no snapshot yet
+                result = command_center_service.generate(session, _command_center_scope(session, user))
+                snap = CommandCenterSnapshot(
+                    user_id=user.id, generated_at=datetime.now(timezone.utc),
+                    signals=result["signals"], playbook=result["playbook"],
+                    velocity=result["velocity"], source_counts=result["source_counts"],
+                )
+                session.add(snap)
+                session.commit()
+                session.refresh(snap)
             return _command_center_payload(session, user, snap)
         finally:
             session.close()
@@ -6600,14 +6686,32 @@ if FASTAPI_AVAILABLE:
                                            ["Exported at", exports._now()], ["Contacts", len(data)]])
         return _xlsx_response(content, exports.safe_filename(f"{name}-contacts", "xlsx"))
 
+    def _allowed_target_keys(session, user) -> Optional[set]:
+        """Content target keys this user may see (None = everything). An account's keys follow
+        _build_target_key_to_account_map; a person's follow the frontend's resolvePersonaTargetKey
+        (persona key, slug of the name, slug without middle initials). apps/sales_crm README §5, M5."""
+        if not auth.AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
+            return None
+        ids = set(auth.get_accessible_account_ids(session, user.id))
+        keys = {k for k, a in _build_target_key_to_account_map(session).items() if a.id in ids}
+        if ids:
+            for pkey, full, disp in session.query(Persona.key, Persona.full_name, Persona.display_name).filter(Persona.account_id.in_(ids)):
+                name = full or disp or ""
+                no_initials = " ".join(w for w in name.split() if len(re.sub(r"[^a-zA-Z0-9]", "", w)) > 1)
+                keys.update(k for k in (pkey, slugify(name) if name else None, slugify(no_initials) if no_initials else None) if k)
+        return keys
+
     @app.get("/api/content", tags=["4. Content Intelligence"])
-    def get_content_intelligence():
-        """Retrieve aggregated social listening posts and LLM channel digests."""
+    def get_content_intelligence(user: User = Depends(auth.get_current_user)):
+        """Retrieve aggregated social listening posts and LLM channel digests (scoped to the user's accounts)."""
         session = get_session()
         try:
+            allowed = _allowed_target_keys(session, user)
             digests_by_key = {}
             try:
                 for d in session.query(Digest).all():
+                    if allowed is not None and d.target_key not in allowed:
+                        continue
                     digests_by_key[d.target_key] = {
                         "target_key": d.target_key,
                         "kind": d.kind,
@@ -6622,7 +6726,10 @@ if FASTAPI_AVAILABLE:
 
             posts_by_key = {}
             try:
-                for p in session.query(Post).order_by(Post.target_key, Post.channel, Post.rank).all():
+                post_q = session.query(Post).order_by(Post.target_key, Post.channel, Post.rank)
+                if allowed is not None:
+                    post_q = post_q.filter(Post.target_key.in_(list(allowed) or [""]))
+                for p in post_q.all():
                     posts_by_key.setdefault(p.target_key, []).append(
                         {
                             "id": p.id,
@@ -6648,6 +6755,8 @@ if FASTAPI_AVAILABLE:
                 jobs_query = session.query(LinkedInJob).order_by(
                     LinkedInJob.target_key, LinkedInJob.first_seen.desc().nullslast()
                 )
+                if allowed is not None:
+                    jobs_query = jobs_query.filter(LinkedInJob.target_key.in_(list(allowed) or [""]))
                 for j in jobs_query.all():
                     jobs_by_key.setdefault(j.target_key, []).append(
                         {
@@ -6768,6 +6877,7 @@ if FASTAPI_AVAILABLE:
         sort: str = "newest",
         page: int = 1,
         page_size: int = 24,
+        user: User = Depends(auth.get_current_user),
     ):
         """Retrieve scraped LinkedIn job postings across all accounts, each resolved to its
         owning account and tagged with a heuristic job category. Supports free-text search,
@@ -6783,6 +6893,10 @@ if FASTAPI_AVAILABLE:
 
             key_to_account = _build_target_key_to_account_map(session)
             jobs_query = session.query(LinkedInJob).order_by(LinkedInJob.first_seen.desc().nullslast())
+            if auth.AUTH_ENFORCED and user.role != "super_admin":
+                allowed_ids = set(auth.get_accessible_account_ids(session, user.id))
+                allowed_keys = [k for k, a in key_to_account.items() if a.id in allowed_ids]
+                jobs_query = jobs_query.filter(LinkedInJob.target_key.in_(allowed_keys or [""]))
 
             employment_types_set, workplace_types_set = set(), set()
             # Matches every account/search/employment/workplace filter but NOT category,
@@ -6846,7 +6960,7 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @app.get("/api/linkedin-jobs/{job_id}", tags=["5. LinkedIn Jobs"])
-    def get_linkedin_job_detail(job_id: int):
+    def get_linkedin_job_detail(job_id: int, user: User = Depends(auth.get_current_user)):
         """Retrieve the full detail (including description) for a single LinkedIn job posting."""
         session = get_session()
         try:
@@ -6854,6 +6968,9 @@ if FASTAPI_AVAILABLE:
             if not j:
                 raise HTTPException(status_code=404, detail="Job posting not found")
             acct = _build_target_key_to_account_map(session).get(j.target_key)
+            if auth.AUTH_ENFORCED and user.role != "super_admin" and (
+                    not acct or acct.id not in auth.get_accessible_account_ids(session, user.id)):
+                raise HTTPException(status_code=404, detail="Job posting not found")
             job_category = categorize_job_title(j.title)
             detail = _job_summary_dict(j, acct, job_category)
             detail["description"] = j.description
@@ -6861,7 +6978,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.get("/api/accounts/{account_id}/hiring-summary", tags=["5. LinkedIn Jobs"])
+    @app.get("/api/accounts/{account_id}/hiring-summary", tags=["5. LinkedIn Jobs"], dependencies=[Depends(auth.require_account_access)])
     def get_account_hiring_summary(
         account_id: int,
         days: Optional[int] = Query(None, description="Filter jobs posted within the last N days (e.g. 15, 30)")
@@ -6987,7 +7104,7 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.get("/api/accounts/{account_id}/jobs", tags=["5. LinkedIn Jobs"])
+    @app.get("/api/accounts/{account_id}/jobs", tags=["5. LinkedIn Jobs"], dependencies=[Depends(auth.require_account_access)])
     def get_account_jobs(
         account_id: int,
         sort: str = "newest",
@@ -7101,6 +7218,7 @@ if FASTAPI_AVAILABLE:
         event_type: Optional[str] = None,
         q: Optional[str] = None,
         limit: int = 100,
+        user: User = Depends(auth.get_current_user),
     ):
         """Retrieve executive transitions (joined, resigned, retired, promoted) across accounts."""
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
@@ -7109,6 +7227,16 @@ if FASTAPI_AVAILABLE:
         session = get_session()
         try:
             query = session.query(CxoMovement)
+            if auth.AUTH_ENFORCED and user.role != "super_admin":
+                # Scope to the user's accounts: by target key, or by company name / alias
+                # (movement target keys don't always equal accounts.key, e.g. blackrock_inc).
+                ids = set(auth.get_accessible_account_ids(session, user.id))
+                keys = [k for k, a in _build_target_key_to_account_map(session).items() if a.id in ids]
+                names = set()
+                for a in session.query(Account).filter(Account.id.in_(ids or [-1])):
+                    names.update(n.lower() for n in [a.display_name, a.legal_name, *(a.aliases or [])] if n)
+                query = query.filter(CxoMovement.target_key.in_(keys or [""])
+                                     | sa_func.lower(CxoMovement.company_name).in_(list(names) or [""]))
             if target_key:
                 query = query.filter(CxoMovement.target_key == target_key)
             if event_type and event_type.lower() != "all":
@@ -7379,8 +7507,8 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
-    @app.get("/api/database/download", tags=["7. Database Operations"])
-    @app.get("/api/database/download/sql", tags=["7. Database Operations"])
+    @app.get("/api/database/download", tags=["7. Database Operations"], dependencies=[Depends(auth.require_role("super_admin"))])
+    @app.get("/api/database/download/sql", tags=["7. Database Operations"], dependencies=[Depends(auth.require_role("super_admin"))])
     def download_database_sql():
         """Download the complete PostgreSQL SQL database dump file."""
         sql_path = PIPELINE_ROOT / "sales_ai_database_export.sql"
@@ -7396,7 +7524,7 @@ if FASTAPI_AVAILABLE:
             path=str(sql_path), filename="sales_ai_database_export.sql", media_type="application/sql"
         )
 
-    @app.get("/api/database/download/json", tags=["7. Database Operations"])
+    @app.get("/api/database/download/json", tags=["7. Database Operations"], dependencies=[Depends(auth.require_role("super_admin"))])
     def download_database_json():
         """Download the complete database in JSON format."""
         json_path = PIPELINE_ROOT / "sales_ai_database_export.json"
@@ -7420,6 +7548,10 @@ if FASTAPI_AVAILABLE:
     frontend_dir = Path(__file__).resolve().parent / "frontend"
     if frontend_dir.exists():
         templates = Jinja2Templates(directory=str(frontend_dir / "templates"))
+        # Temporarily hidden pages. FORECAST_ENABLED=1 in .env brings the Forecast page and
+        # its nav entry back; its API (/api/crm/forecast*) and data are untouched either way.
+        FORECAST_ENABLED = os.getenv("FORECAST_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+        templates.env.globals["forecast_enabled"] = FORECAST_ENABLED
 
         _NO_CACHE_HEADERS = {
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -7427,13 +7559,63 @@ if FASTAPI_AVAILABLE:
             "Expires": "0",
         }
 
+        # ── SEO: public URL, robots.txt, sitemap.xml (favicon: top of the file) ──────────────
+        # Only the landing page is public; everything else sits behind sign-in, so crawlers
+        # are pointed at "/" and kept out of the app. SITE_URL (else APP_BASE_URL) is the
+        # public origin used for canonical / Open Graph links; set it in production.
+        def _site_url(request: Request) -> str:
+            base = (os.getenv("SITE_URL") or os.getenv("APP_BASE_URL") or "").strip()
+            return (base or str(request.base_url)).rstrip("/")
+
+        templates.env.globals["site_url"] = _site_url
+
+        @app.get("/robots.txt", include_in_schema=False)
+        async def robots_txt(request: Request):
+            base = _site_url(request)
+            body = ("User-agent: *\n"
+                    "Allow: /$\n"             # the landing page only (not /?account= deep links)
+                    "Allow: /assets/\nAllow: /css/\nAllow: /js/\n"   # so crawlers can render it
+                    "Disallow: /\n\n"
+                    f"Sitemap: {base}/sitemap.xml\n")
+            return Response(body, media_type="text/plain", headers={"Cache-Control": "public, max-age=3600"})
+
+        @app.get("/sitemap.xml", include_in_schema=False)
+        async def sitemap_xml(request: Request):
+            base = _site_url(request)
+            landing = frontend_dir / "templates" / "landing.html"
+            lastmod = datetime.fromtimestamp(landing.stat().st_mtime, tz=timezone.utc).date().isoformat()
+            body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+                    f"  <url><loc>{base}/</loc><lastmod>{lastmod}</lastmod>"
+                    "<changefreq>monthly</changefreq><priority>1.0</priority></url>\n"
+                    "</urlset>\n")
+            return Response(body, media_type="application/xml", headers={"Cache-Control": "public, max-age=3600"})
+
         @app.get("/", response_class=HTMLResponse, include_in_schema=False)
         async def dashboard_home(request: Request):
+            """Bare /: signed-out visitors get the landing page, signed-in users (session hint
+            cookie) go to the Command Center. With a query string (/?account=…, deep links
+            that predate /accounts) it is the accounts dashboard, which handles login itself."""
+            if not request.query_params:
+                if request.cookies.get(SESSION_HINT_COOKIE):
+                    return RedirectResponse(url="/command-center", status_code=302)
+                return templates.TemplateResponse(request, "landing.html", headers=_NO_CACHE_HEADERS)
+            return templates.TemplateResponse(request, "index.html", headers=_NO_CACHE_HEADERS)
+
+        @app.get("/accounts", response_class=HTMLResponse, include_in_schema=False)
+        async def accounts_dashboard(request: Request):
+            """The accounts dashboard (account tree, dossiers, buying committee)."""
             return templates.TemplateResponse(request, "index.html", headers=_NO_CACHE_HEADERS)
 
         @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
         async def login_page(request: Request):
             return templates.TemplateResponse(request, "login.html", headers=_NO_CACHE_HEADERS)
+
+        @app.get("/welcome", response_class=HTMLResponse, include_in_schema=False)
+        async def landing_page(request: Request):
+            """The public landing page at a fixed URL (it is also what / shows signed-out
+            visitors), e.g. for a signed-in user who wants to see it."""
+            return templates.TemplateResponse(request, "landing.html", headers=_NO_CACHE_HEADERS)
 
         @app.get("/reset-password", response_class=HTMLResponse, include_in_schema=False)
         async def reset_password_page(request: Request):
@@ -7469,6 +7651,31 @@ if FASTAPI_AVAILABLE:
             """Deals pipeline board + deal room (apps/sales_copilot/README.md §21).
             ?deal=ID opens a deal; ?account_id= filters the board."""
             return templates.TemplateResponse(request, "deals.html", headers=_NO_CACHE_HEADERS)
+
+        @app.get("/partner", response_class=HTMLResponse, include_in_schema=False)
+        async def partner_page(request: Request):
+            """Partner / advisor portal: their own introductions only (apps/sales_crm/README.md §5.3).
+            Admins can preview a connector's view with ?connector_id=."""
+            return templates.TemplateResponse(request, "partner.html", headers=_NO_CACHE_HEADERS)
+
+        @app.get("/email-sync", response_class=HTMLResponse, include_in_schema=False)
+        async def capture_settings_page(request: Request):
+            """Connect Microsoft 365 email + calendar for automatic activity capture (apps/sales_crm/README.md §4)."""
+            return templates.TemplateResponse(request, "capture.html", headers=_NO_CACHE_HEADERS)
+
+        @app.get("/forecast", response_class=HTMLResponse, include_in_schema=False)
+        async def forecast_page(request: Request):
+            """Quarterly forecast roll-up, targets and week-over-week changes (apps/sales_crm/README.md §3).
+            Hidden for now unless FORECAST_ENABLED is set: old links land on Deals instead."""
+            if not FORECAST_ENABLED:
+                return RedirectResponse(url="/deals", status_code=302)
+            return templates.TemplateResponse(request, "forecast.html", headers=_NO_CACHE_HEADERS)
+
+        @app.get("/introductions", response_class=HTMLResponse, include_in_schema=False)
+        async def introductions_page(request: Request):
+            """Warm introductions board, connectors and attribution (apps/sales_crm/README.md §2.2).
+            ?intro=ID opens one introduction."""
+            return templates.TemplateResponse(request, "introductions.html", headers=_NO_CACHE_HEADERS)
 
         @app.get("/copilot", response_class=HTMLResponse, include_in_schema=False)
         async def copilot_page(request: Request):
@@ -7528,6 +7735,10 @@ if FASTAPI_AVAILABLE:
             app.mount("/css", NoCacheStaticFiles(directory=str(css_dir)), name="frontend-css")
         if js_dir.exists():
             app.mount("/js", NoCacheStaticFiles(directory=str(js_dir)), name="frontend-js")
+        assets_dir = frontend_dir / "assets"
+        if assets_dir.exists():
+            # Images (EliteHost theme illustrations etc.) — cacheable, they never change in place.
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend-assets")
         if pipline_dir.exists():
             app.mount("/pipeline", NoCacheStaticFiles(directory=str(pipline_dir), html=True), name="frontend-pipeline")
             app.mount("/pipline", NoCacheStaticFiles(directory=str(pipline_dir), html=True), name="frontend-pipline")

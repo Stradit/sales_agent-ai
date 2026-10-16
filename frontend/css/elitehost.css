@@ -1,0 +1,175 @@
+/* ── EliteHost component layer ───────────────────────────────────────────
+   Loaded LAST on every app page. tokens.css already carries the EliteHost
+   palette, radii and shadows into every component; this file only adds the
+   template's signature details that tokens can't express:
+     • orange accent line under the navy topbar (the template's orange top strip)
+     • white cards with a neutral border that darkens on hover
+     • navy, bold headings
+   Keep it small: page-specific look belongs in each page's own CSS. */
+
+/* Topbar: navy bar + orange accent line */
+.dash-topbar,
+.cc-topbar,
+.tp-topbar {
+  border-bottom: 2px solid var(--topbar-accent) !important;
+  box-shadow: 0 2px 12px rgba(0, 18, 51, .18);
+}
+.topbar-icon { box-shadow: 0 2px 8px rgba(228, 101, 33, .45); }
+
+/* Cards & panels: EliteHost card hover */
+.cc-panel,
+.cc-kpi-card,
+.tp-kpi-card,
+.contact-card,
+.api-config-card,
+.radar-kpi-card,
+.radar-job-card,
+.lp-card {
+  transition: border-color .25s ease, box-shadow .25s ease;
+}
+.cc-panel:hover,
+.cc-kpi-card:hover,
+.tp-kpi-card:hover,
+.api-config-card:hover,
+.radar-kpi-card:hover,
+.radar-job-card:hover {
+  border-color: var(--border-dark);
+  box-shadow: var(--shadow-hover);
+}
+
+/* Headings in navy, like the template */
+.dash-main h1, .dash-main h2, .dash-main h3,
+.cc-panel h2, .cc-panel h3 {
+  color: var(--text-primary);
+}
+
+/* Primary buttons that use the brand colour get the template's hover */
+.cc-btn-primary:hover,
+.tp-btn-primary:hover,
+.cc-view-btn-primary:hover {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+}
+
+/* ── Calm accents: orange for primary actions and the active state only ──
+   Everything below tones down places where orange filled large areas or
+   repeated on every row, which made long sessions tiring. */
+
+/* Command Center: no rainbow top borders on panels and KPI cards */
+.cc-panel,
+.cc-panel[data-widget-id],
+.cc-kpi-card,
+.cc-kpi-card:nth-child(n) {
+  border-top: 1px solid var(--cc-border-defined, var(--border-color)) !important;
+}
+
+/* Signal feed: "new" rows get a thin soft edge (the NEW badge already says it), no tint */
+.cc-feed-row.is-new,
+#ccFeedList .cc-feed-row.is-new {
+  background: transparent !important;
+  border-left: 2px solid rgba(228, 101, 33, .45) !important;
+}
+.cc-feed-row:hover,
+.cc-feed-row.is-new:hover,
+#ccFeedList .cc-feed-row:hover {
+  background: var(--hover-bg) !important;
+}
+
+/* A primary button repeated on every row competes with itself: outline until hovered */
+.cc-feed-task-btn.cc-btn-primary,
+#ccFeedList .cc-feed-task-btn {
+  background: transparent !important;
+  color: var(--brand) !important;
+  border: 1px solid rgba(228, 101, 33, .4) !important;
+  box-shadow: none !important;
+}
+.cc-feed-task-btn.cc-btn-primary:hover,
+#ccFeedList .cc-feed-task-btn:hover {
+  background: var(--brand) !important;
+  color: #fff !important;
+  border-color: var(--brand) !important;
+}
+
+/* Left nav cards: tinted icons; only the active page gets solid orange */
+.nav-digest-icon { background: var(--brand-muted); color: var(--brand); }
+.nav-digest-btn:hover { border-color: var(--border-mid); background: var(--hover-bg); }
+.nav-digest-btn.active {
+  border-color: var(--border-mid);
+  background: var(--brand-soft);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.nav-digest-btn.active .nav-digest-title { color: var(--text-primary); }
+.nav-digest-btn.active .nav-digest-icon { background: var(--brand); color: #fff; }
+
+/* Account avatars: soft navy instead of orange blocks */
+.nav-account-avatar {
+  background: var(--avatar-bg) !important;
+  color: var(--avatar-fg) !important;
+}
+
+/* ── Account Detail View: Calm, eye-friendly branding (maintains original #E46521 shade) ── */
+.acct-avatar-lg {
+  border-radius: 10px !important;
+  background: linear-gradient(135deg, #F0894F, #E46521) !important;
+  box-shadow: 0 4px 14px rgba(228, 101, 33, 0.20) !important;
+  color: #FFFFFF !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+}
+
+/* Account Navigation Tabs: Clean, professional active state without blinding solid brick */
+.tab-btn {
+  border-radius: 6px !important;
+  transition: all 0.2s ease !important;
+}
+.tab-btn.active {
+  background: var(--brand-soft) !important;
+  color: var(--brand) !important;
+  border-color: rgba(228, 101, 33, 0.35) !important;
+  box-shadow: 0 1px 4px rgba(228, 101, 33, 0.08) !important;
+}
+.tab-btn.active i {
+  color: var(--brand) !important;
+}
+.tab-btn.active .tab-badge {
+  background: var(--brand) !important;
+  color: #FFFFFF !important;
+}
+
+/* Committee Stakeholder Avatars: Calm contrast instead of solid neon blocks */
+.persona-committee-avatar {
+  background: var(--avatar-bg) !important;
+  color: var(--avatar-fg) !important;
+  border: 1.5px solid var(--border-color) !important;
+  border-radius: 8px !important;
+}
+
+/* Quick Arsenal: Calm intelligence bar */
+.quick-arsenal {
+  background: var(--hover-bg) !important;
+  border: 1px solid var(--border-color) !important;
+  border-left: 3px solid var(--brand) !important;
+  border-radius: 6px !important;
+}
+.arsenal-btn {
+  border-radius: 5px !important;
+}
+
+/* Strategic Triggers & Talk Tracks: Refined accent line */
+.talk-track-box {
+  background: var(--input-bg) !important;
+  border-left: 3px solid var(--brand) !important;
+  border-radius: 0 6px 6px 0 !important;
+}
+
+[data-theme="dark"] .acct-avatar-lg {
+  background: linear-gradient(135deg, #F0894F, #C9541A) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45) !important;
+}
+[data-theme="dark"] .tab-btn.active {
+  background: rgba(228, 101, 33, 0.16) !important;
+  color: #F4A170 !important;
+  border-color: rgba(228, 101, 33, 0.45) !important;
+}
+[data-theme="dark"] .tab-btn.active i {
+  color: #F4A170 !important;
+}

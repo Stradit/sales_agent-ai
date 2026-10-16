@@ -1,27 +1,33 @@
 .git
+.github
 .gitignore
 .idea
 .vscode
 .env
+.env.*
+!.env.example
 *.env.local
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
 
 # Local dev venv sitting at the repo root (pyvenv.cfg, Lib/, Scripts/) —
 # not source, and would otherwise bloat the image with Windows binaries.
 sales_agent-ai/
 
-# Runtime data
+# Runtime data (mounted from the host in production: /opt/salesai/data/output)
 output/
 
-# apps/content_pipeline is a separate app with its own Dockerfile/image —
-# this build only needs this app's own code.
-apps/
+# apps/content_pipeline is a separate app with its own Dockerfile/image.
+# Everything else under apps/ (sales_copilot, sales_crm, sales_deals,
+# sales_search) IS this app and must stay in the image.
+apps/content_pipeline/
 
 # Deferred, not implemented yet (see .gitignore) — nothing to copy.
 celery_app.py
 tasks/
 
-MERGE_PLAN.md
-README.md
+# Deployment tooling and docs aren't needed inside the image
+deploy/
+*.md

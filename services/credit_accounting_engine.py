@@ -19,7 +19,7 @@ class CreditAccountingEngine:
         "diffbot": {
             "tier": "account",
             "name": "Entity Enrichment Engine (Diffbot Knowledge Graph)",
-            "credits_per_unit": 25,
+            "credits_per_unit": 1,
             "unit_name": "lookups",
             "is_billable": True,
             "key_prefix": "diff",
@@ -37,7 +37,7 @@ class CreditAccountingEngine:
         "finnhub": {
             "tier": "account",
             "name": "Watchlist & Market Intelligence (Finnhub & FMP)",
-            "credits_per_unit": 5,
+            "credits_per_unit": 1,
             "unit_name": "screens",
             "is_billable": True,
             "key_prefix": "finnhub",
@@ -46,7 +46,7 @@ class CreditAccountingEngine:
         "fmp": {
             "tier": "account",
             "name": "Financial Statements & SEC Filings (FMP)",
-            "credits_per_unit": 2,
+            "credits_per_unit": 1,
             "unit_name": "queries",
             "is_billable": True,
             "key_prefix": "fmp",
@@ -64,7 +64,7 @@ class CreditAccountingEngine:
         "apify_crunchbase": {
             "tier": "account",
             "name": "Funding & Venture Rounds (Apify Crunchbase Scraper)",
-            "credits_per_unit": 10,
+            "credits_per_unit": 1,
             "unit_name": "crawls",
             "is_billable": True,
             "key_prefix": "apify",
@@ -73,7 +73,7 @@ class CreditAccountingEngine:
         "apify_glassdoor": {
             "tier": "account",
             "name": "Employee Sentiment & Culture (Apify Glassdoor Scraper)",
-            "credits_per_unit": 10,
+            "credits_per_unit": 1,
             "unit_name": "crawls",
             "is_billable": True,
             "key_prefix": "apify",
@@ -138,7 +138,7 @@ class CreditAccountingEngine:
         "apify_linkedin_company": {
             "tier": "lob",
             "name": "Operating Segments & Subsidiaries (Apify LinkedIn Company)",
-            "credits_per_unit": 15,
+            "credits_per_unit": 1,
             "unit_name": "ops",
             "is_billable": True,
             "key_prefix": "apify",
@@ -147,7 +147,7 @@ class CreditAccountingEngine:
         "tavily": {
             "tier": "lob",
             "name": "Competitor & Market Landscape (Tavily AI Search)",
-            "credits_per_unit": 5,
+            "credits_per_unit": 1,
             "unit_name": "ops",
             "is_billable": True,
             "key_prefix": "tvly",
@@ -156,9 +156,9 @@ class CreditAccountingEngine:
         "patents": {
             "tier": "lob",
             "name": "Intellectual Property & Patents (Google Patents Indexer)",
-            "credits_per_unit": 2,
+            "credits_per_unit": 0,
             "unit_name": "ops",
-            "is_billable": True,
+            "is_billable": False,
             "key_prefix": "uspto",
             "public_label": "USPTO / Google Patents Public Indexer",
         },
@@ -185,7 +185,7 @@ class CreditAccountingEngine:
         "monid_apollo": {
             "tier": "persona",
             "name": "Organizational Hierarchy Engine (Apollo via Monid.ai)",
-            "credits_per_unit": 25,
+            "credits_per_unit": 1,
             "unit_name": "passes",
             "is_billable": True,
             "key_prefix": "moni",
@@ -194,7 +194,7 @@ class CreditAccountingEngine:
         "fullenrich": {
             "tier": "persona",
             "name": "Contact Waterfall & Career History (FullEnrich v2)",
-            "credits_per_unit": 10,
+            "credits_per_unit": 1,
             "unit_name": "lookups",
             "is_billable": True,
             "key_prefix": "fe",
@@ -203,7 +203,7 @@ class CreditAccountingEngine:
         "apify_linkedin_profile": {
             "tier": "persona",
             "name": "Executive Leadership Discovery (Apify LinkedIn Profiles)",
-            "credits_per_unit": 10,
+            "credits_per_unit": 1,
             "unit_name": "interactions",
             "is_billable": True,
             "key_prefix": "apify",
@@ -212,7 +212,7 @@ class CreditAccountingEngine:
         "exa": {
             "tier": "persona",
             "name": "Executive Semantic Research (Exa AI Search)",
-            "credits_per_unit": 5,
+            "credits_per_unit": 1,
             "unit_name": "queries",
             "is_billable": True,
             "key_prefix": "exa",
@@ -230,7 +230,7 @@ class CreditAccountingEngine:
         "gemini_llm": {
             "tier": "persona",
             "name": "Neural Biography & Psychological Synthesis (Gemini LLM)",
-            "credits_per_unit": 5,
+            "credits_per_unit": 1,
             "unit_name": "prompts",
             "is_billable": True,
             "key_prefix": "gemini",
@@ -238,7 +238,7 @@ class CreditAccountingEngine:
         },
     }
 
-    COST_PER_CREDIT = 0.0021  # $0.0021 USD per enterprise credit
+    COST_PER_CREDIT = 0.005  # ~$0.005 USD per real API invocation
 
     @classmethod
     def get_masked_key(cls, vendor_key: str) -> str:

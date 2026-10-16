@@ -3,7 +3,7 @@ import { esc } from './utils.js';
 import { loadMatrixAccounts } from './real-accounts.js';
 import { loadRecentMovements } from './exec-movements.js';
 import { openDossier } from './drawer.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { renderTimeline } from './timeline.js';
 
 function sparklinePath(values, w, h) {
@@ -27,22 +27,17 @@ export function highlightAndScrollTo(selector) {
   if (!el) return;
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.remove('cc-panel-highlight');
-  // force reflow to restart animation if clicked repeatedly
   void el.offsetWidth;
   el.classList.add('cc-panel-highlight');
   setTimeout(() => el.classList.remove('cc-panel-highlight'), 2200);
 }
 
-// Account-level data (composite score, deal potential) and exec-change data
-// are both real (see real-accounts.js / exec-movements.js). Signal velocity
-// and "plays in motion" come from the generated snapshot (generator.js):
-// velocity = signals detected this week vs. last, plays = open tasks that
-// were started from the playbook.
 async function computeKpi() {
-  const [accounts, execChangesAll] = await Promise.all([
+  const [accounts, execChangesAll, _, dueSoonItems] = await Promise.all([
     loadMatrixAccounts(),
     loadRecentMovements().catch(() => []),
     loadCommandCenter(),
+    fetch('/api/me/action-items').then(r => r.ok ? r.json() : { action_items: [] }).then(d => d.action_items || []).catch(() => []),
   ]);
   const cc = getCommandCenter();
   const velocity = cc.velocity || { this_week: 0, delta_pct: 0, trend: [] };
@@ -56,6 +51,44 @@ async function computeKpi() {
   const promoted = execChangesAll.filter(e => e.type === 'promoted').length;
   const other = execChangesAll.length - joined - promoted;
 
+  const playbookList = cc.playbook || [];
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  const matchingPlays = hasFilter
+    ? playbookList.filter(p => matchesCurrentAccount(p.account_id, p.account_name))
+    : playbookList;
+
+  const inMotionCount = matchingPlays.filter(p => p.tasked).length || (cc.plays && cc.plays.in_motion) || 0;
+  const stalledCount = (cc.plays && cc.plays.stalled) || 0;
+
+  // Filter tasks for active account(s) if selected
+  let relevantTasks = dueSoonItems.filter(i => i.status === 'open' || i.status === 'in_progress');
+  if (hasFilter) {
+    relevantTasks = relevantTasks.filter(i => matchesCurrentAccount(i.account_id, i.account_name));
+  }
+
+  const now = Date.now();
+  let overdueCount = 0;
+  let dueTodayCount = 0;
+  let dueThisWeekCount = 0;
+  let totalDueSoon = 0;
+
+  relevantTasks.forEach(t => {
+    if (!t.due_date) return;
+    const dueTime = new Date(t.due_date).getTime();
+    if (isNaN(dueTime)) return;
+    const diffDays = Math.round((dueTime - now) / 86400000);
+    if (diffDays < 0) {
+      overdueCount++;
+      totalDueSoon++;
+    } else if (diffDays === 0) {
+      dueTodayCount++;
+      totalDueSoon++;
+    } else if (diffDays <= 7) {
+      dueThisWeekCount++;
+      totalDueSoon++;
+    }
+  });
+
   return {
     accounts,
     topAccount,
@@ -68,8 +101,14 @@ async function computeKpi() {
     execJoined: joined,
     execPromoted: promoted,
     execOther: other,
-    playsInMotion: cc.plays.in_motion,
-    playsStalled: cc.plays.stalled,
+    playbookTotal: matchingPlays.length,
+    playsInMotion: inMotionCount,
+    playsStalled: stalledCount,
+    totalDueSoon,
+    overdueCount,
+    dueTodayCount,
+    dueThisWeekCount,
+    openTasksCount: relevantTasks.length,
   };
 }
 
@@ -110,16 +149,38 @@ export async function renderKpiStrip() {
   const card4 = `
     <div class="cc-kpi-card cc-kpi-clickable" data-kpi-action="jump-playbook" title="Click to view This Week's Playbook" tabindex="0" role="button">
       <div class="cc-kpi-label-row">
-        <span class="cc-kpi-label">Open plays in motion</span>
+        <span class="cc-kpi-label">This week's playbook</span>
         <i class="fa-solid fa-arrow-up-right-from-square cc-kpi-icon"></i>
       </div>
-      <div class="cc-kpi-value">${k.playsInMotion}</div>
+      <div class="cc-kpi-value">${k.generated ? k.playbookTotal : (k.playbookTotal || 0)} <span class="cc-kpi-unit" style="font-size:0.85rem; font-weight:500; color:var(--text-secondary);">plays</span></div>
       <div class="cc-kpi-foot ${k.playsStalled > 0 ? 'cc-warning-text' : ''}">
-        ${k.playsStalled > 0 ? `${k.playsStalled} stalled 14d` : (k.playsInMotion ? 'no stalled plays' : 'start a play from the playbook')} &middot; <span class="cc-kpi-action-text">View Playbook &rarr;</span>
+        ${k.playsInMotion > 0 ? `<strong>${k.playsInMotion}</strong> in motion` : 'Ready to start'} &middot; <span class="cc-kpi-action-text">View Playbook &rarr;</span>
+      </div>
+      <div class="cc-chip-row">
+        <span class="cc-chip cc-chip-plain">${k.playbookTotal} available</span>
+        ${k.playsInMotion > 0 ? `<span class="cc-chip cc-chip-brand">${k.playsInMotion} in motion</span>` : ''}
       </div>
     </div>`;
 
-  return { html: card1 + card3 + card4, data: k };
+  const cardDueSoon = `
+    <div class="cc-kpi-card cc-kpi-clickable" data-kpi-action="jump-due-soon" title="Click to view Due Soon tasks" tabindex="0" role="button">
+      <div class="cc-kpi-label-row">
+        <span class="cc-kpi-label">Tasks due soon</span>
+        <i class="fa-solid fa-arrow-up-right-from-square cc-kpi-icon"></i>
+      </div>
+      <div class="cc-kpi-value">${k.totalDueSoon} <span class="cc-kpi-unit" style="font-size:0.85rem; font-weight:500; color:var(--text-secondary);">due</span></div>
+      <div class="cc-kpi-foot ${k.overdueCount > 0 ? 'cc-warning-text' : ''}">
+        ${k.overdueCount > 0 ? `<strong style="color:var(--danger);">${k.overdueCount} overdue</strong>` : (k.dueTodayCount > 0 ? `${k.dueTodayCount} due today` : (k.totalDueSoon > 0 ? `${k.totalDueSoon} next 7 days` : 'all clear this week'))} &middot; <span class="cc-kpi-action-text">View Due Soon &rarr;</span>
+      </div>
+      <div class="cc-chip-row">
+        ${k.overdueCount > 0 ? `<span class="cc-chip cc-chip-danger">${k.overdueCount} overdue</span>` : ''}
+        ${k.dueTodayCount > 0 ? `<span class="cc-chip cc-chip-warning">${k.dueTodayCount} today</span>` : ''}
+        ${k.dueThisWeekCount > 0 ? `<span class="cc-chip cc-chip-plain">${k.dueThisWeekCount} next 7d</span>` : ''}
+        ${k.totalDueSoon === 0 ? `<span class="cc-chip cc-chip-brand">all caught up</span>` : ''}
+      </div>
+    </div>`;
+
+  return { html: card1 + cardDueSoon + card3 + card4, data: k };
 }
 
 export function bindKpiListeners(container, kpiData) {
@@ -129,7 +190,6 @@ export function bindKpiListeners(container, kpiData) {
     const action = card.dataset.kpiAction;
 
     const executeAction = (e) => {
-      // Don't trigger card action if a chip inside the card was clicked
       if (e.target.closest('[data-timeline-filter]')) return;
 
       if (action === 'jump-feed') {
@@ -138,6 +198,8 @@ export function bindKpiListeners(container, kpiData) {
         highlightAndScrollTo('.cc-timeline-panel');
       } else if (action === 'jump-playbook') {
         highlightAndScrollTo('.cc-playbook-panel');
+      } else if (action === 'jump-due-soon') {
+        highlightAndScrollTo('[data-widget-id="due_soon"]');
       }
     };
 

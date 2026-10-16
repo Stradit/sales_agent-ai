@@ -124,7 +124,7 @@ function updateDashboardLinkAccess() {
     return;
   }
 
-  dashBtn.addEventListener('click', () => { window.location.href = '/'; });
+  dashBtn.addEventListener('click', () => { window.location.href = '/accounts'; });
 }
 
 // Sales Command Center is open by default, but a super_admin can revoke it per user

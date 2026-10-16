@@ -64,11 +64,11 @@ function vecStrip(values) {
   const max = Math.max(...values.map(Math.abs)) || 1;
   const cells = values.slice(0, 48).map((v) => {
     const a = Math.min(1, Math.abs(v) / max).toFixed(2);
-    const color = v >= 0 ? `rgba(111,106,248,${a})` : `rgba(245,50,92,${a})`;
+    const color = v >= 0 ? `rgba(228, 101, 33,${a})` : `rgba(245,50,92,${a})`;
     return `<span style="background:${color}" title="${v}"></span>`;
   }).join('');
   return `<div class="pl-vec" aria-label="First ${Math.min(48, values.length)} vector dimensions">${cells}</div>
-    <div class="pl-vec-legend"><span><i style="background:rgba(111,106,248,1)"></i>positive</span><span><i style="background:rgba(245,50,92,1)"></i>negative</span><span>first ${Math.min(48, values.length)} dims</span></div>`;
+    <div class="pl-vec-legend"><span><i style="background:rgba(228, 101, 33,1)"></i>positive</span><span><i style="background:rgba(245,50,92,1)"></i>negative</span><span>first ${Math.min(48, values.length)} dims</span></div>`;
 }
 function simBar(s) {
   const w = Math.max(0, Math.min(1, s || 0)) * 100;

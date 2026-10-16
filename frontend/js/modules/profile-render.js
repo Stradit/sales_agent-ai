@@ -379,14 +379,14 @@ export function renderFullPsychologicalProfile(digestEntry, persona, psychData) 
 
         <div class="playbook-dos-donts-grid">
           ${(playbook.dos || []).length ? `
-            <div style="background:rgba(0,186,136,0.05); border:1px solid rgba(0,186,136,0.2); border-radius:var(--radius-sm); padding:12px 14px;">
+            <div style="background:rgba(0,186,136,0.05); border:1px solid rgba(0,186,136,0.2); border-radius:0; padding:12px 14px;">
               <div style="font-weight:700; font-size:.82rem; color:var(--success); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.04em;"><i class="fa-solid fa-circle-check"></i> Recommended (Do This)</div>
               <ul style="padding-left:18px; margin:0; font-size:.82rem; color:var(--text-primary); line-height:1.55;">
                 ${playbook.dos.map(d => `<li>${esc(d)}</li>`).join('')}
               </ul>
             </div>` : ''}
           ${(playbook.donts || []).length ? `
-            <div style="background:rgba(255,77,79,0.05); border:1px solid rgba(255,77,79,0.2); border-radius:var(--radius-sm); padding:12px 14px;">
+            <div style="background:rgba(255,77,79,0.05); border:1px solid rgba(255,77,79,0.2); border-radius:0; padding:12px 14px;">
               <div style="font-weight:700; font-size:.82rem; color:var(--danger); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.04em;"><i class="fa-solid fa-circle-xmark"></i> Avoid (Don't Do This)</div>
               <ul style="padding-left:18px; margin:0; font-size:.82rem; color:var(--text-primary); line-height:1.55;">
                 ${playbook.donts.map(d => `<li>${esc(d)}</li>`).join('')}

@@ -22,11 +22,11 @@ body.auth-page-body {
   align-items: center;
   padding: 72px 88px;
   color: #fff;
-  background-color: #221E3D;
+  /* EliteHost hero: navy starfield (same image as the /welcome landing hero) */
+  background-color: var(--navy);
   background:
-    radial-gradient(circle at 12% 15%, rgba(255,255,255,.08) 0%, transparent 38%),
-    radial-gradient(circle at 88% 85%, rgba(255,255,255,.05) 0%, transparent 42%),
-    linear-gradient(135deg, #1A1640 0%, #221E3D 55%, #3F3690 100%);
+    radial-gradient(circle at 88% 85%, rgba(228, 101, 33, .18) 0%, transparent 42%),
+    var(--navy) url(/assets/elitehost/banner-bg-2.webp) center bottom / cover no-repeat;
 }
 
 /* Faint dot-grid texture so the panel doesn't read as a flat gradient. */
@@ -48,10 +48,10 @@ body.auth-page-body {
   padding: 8px 16px 8px 10px;
   background: rgba(255,255,255,.10);
   border: 1px solid rgba(255,255,255,.16);
-  border-radius: 999px;
+  border-radius: 0;
 }
 .auth-brand i { font-size: 1.05rem; }
-.auth-brand-mobile { display: none; margin-bottom: 28px; color: var(--brand); background: var(--brand-muted); border: 1px solid rgba(111,106,248,.15); }
+.auth-brand-mobile { display: none; margin-bottom: 28px; color: var(--brand); background: var(--brand-muted); border: 1px solid rgba(228, 101, 33,.15); }
 
 .auth-left-title {
   font-size: 2.6rem; font-weight: 800; line-height: 1.18;
@@ -72,7 +72,7 @@ body.auth-page-body {
   display: grid; place-items: center;
   background: rgba(255,255,255,.10);
   border: 1px solid rgba(255,255,255,.14);
-  border-radius: var(--radius-md);
+  border-radius: 0;
 }
 
 .auth-stats-row {
@@ -107,7 +107,7 @@ body.auth-page-body {
   width: 100%; box-sizing: border-box;
   padding: 12px 14px; font-size: .9rem; font-family: inherit;
   background: var(--input-bg); border: 1.5px solid var(--border-color);
-  border-radius: var(--radius-sm); color: var(--text-primary);
+  border-radius: 0; color: var(--text-primary);
   transition: var(--transition);
 }
 .auth-input:focus {
@@ -120,11 +120,11 @@ body.auth-page-body {
   width: 100%; margin-top: 26px; padding: 13px;
   font-size: .9rem; font-weight: 700; font-family: inherit;
   color: #fff; background: var(--brand); border: none;
-  border-radius: var(--radius-sm); cursor: pointer;
-  box-shadow: 0 2px 8px rgba(111, 106, 248, 0.28);
+  border-radius: 0; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(228, 101, 33, 0.28);
   transition: var(--transition);
 }
-.auth-submit:hover { background: var(--brand-hover); box-shadow: 0 4px 14px rgba(111, 106, 248, 0.38); transform: translateY(-1px); }
+.auth-submit:hover { background: var(--brand-hover); box-shadow: 0 4px 14px rgba(228, 101, 33, 0.38); transform: translateY(-1px); }
 .auth-submit:active { transform: translateY(0); }
 .auth-submit:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; transform: none; }
 
@@ -143,7 +143,7 @@ body.auth-page-body {
 .auth-error:not([hidden]), .auth-success:not([hidden]) {
   display: flex; align-items: flex-start; gap: 8px;
   padding: 11px 13px; margin-bottom: 16px;
-  border-radius: var(--radius-sm); font-size: .8rem; line-height: 1.45;
+  border-radius: 0; font-size: .8rem; line-height: 1.45;
 }
 .auth-error { background: rgba(255,77,79,.08); color: var(--danger); border: 1px solid rgba(255,77,79,.2); }
 .auth-success { background: rgba(0,186,136,.08); color: var(--success); border: 1px solid rgba(0,186,136,.2); }

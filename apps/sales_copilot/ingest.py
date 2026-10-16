@@ -506,11 +506,59 @@ def simhash64(text_: str) -> int:
     return v - (1 << 64) if v >= (1 << 63) else v
 
 
+ACTIVITY_LABEL = {"email": "Email", "meeting": "Meeting", "call": "Call", "note": "Note", "transcript": "Meeting transcript",
+                  "linkedin": "LinkedIn message", "task_done": "Completed task"}
+
+
+def render_activities(conn, ref: Ref) -> Iterable[RenderedDoc]:
+    """CRM activities (apps/sales_crm/activities.py). Private ones are never indexed."""
+    cur = conn.cursor()
+    cur.execute("SELECT to_regclass('activities') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return
+    cur.execute("""SELECT a.id, a.type, a.direction, a.subject, a.summary, a.body, a.occurred_at, a.metadata,
+                          coalesce(u.full_name, u.email),
+                          coalesce(array_agg(l.object_type || ':' || l.object_id) FILTER (WHERE l.object_id IS NOT NULL), '{}')
+                   FROM activities a LEFT JOIN users u ON u.id = a.owner_user_id
+                   LEFT JOIN activity_links l ON l.activity_id = a.id
+                   WHERE a.visibility = 'team' GROUP BY a.id, u.id""")
+    for aid, typ, direction, subject, summary, body, when, meta, owner, links in cur.fetchall():
+        entities: Set[Entity] = set()
+        names = []
+        for link in links:
+            otype, oid = link.split(":", 1)
+            oid = int(oid)
+            if otype == "account" and oid in ref.accounts:
+                entities.add((oid, None, None, "about", 1.0))
+            elif otype == "persona" and oid in ref.personas:
+                p = ref.personas[oid]
+                entities.add((p["account_id"], oid, p.get("lob_id"), "about", 1.0))
+                names.append(person_name(p))
+        if not entities:
+            continue
+        acct = ", ".join(sorted({ref.account_name(e[0]) for e in entities}))
+        label = ACTIVITY_LABEL.get(typ, typ)
+        with_whom = f" with {', '.join(names)}" if names else ""
+        parts = [f"{label}{with_whom} at {acct} on {when:%Y-%m-%d}, logged by {owner or 'a colleague'}."]
+        if subject:
+            parts.append(f"Subject: {subject}.")
+        if summary:
+            parts.append(("Key points: " if typ == "transcript" else "Notes: ") + summary.replace("\n", " "))
+        actions = (meta or {}).get("action_items") or []
+        if actions:
+            parts.append("Action items: " + "; ".join(f"{a.get('speaker')}: {a.get('text')}" for a in actions[:8]))
+        if typ == "transcript" and body:
+            parts.append("Transcript: " + " ".join(body.split()[:1500]))
+        yield RenderedDoc(f"activity:{aid}", "activity", subject or f"{label}{with_whom}", "\n".join(parts),
+                          published_at=when, entities=entities, sources={("activities", str(aid))})
+
+
 def render_all(conn) -> Tuple[Dict[str, RenderedDoc], Ref]:
     ref = Ref(conn)
     docs: Dict[str, RenderedDoc] = {}
     gens = [render_personas(ref), render_accounts(ref), render_lobs(conn, ref), render_signals(conn, ref),
-            render_digests(conn, ref), render_cxo(conn, ref), render_posts(conn, ref), render_jobs(conn, ref)]
+            render_digests(conn, ref), render_cxo(conn, ref), render_posts(conn, ref), render_jobs(conn, ref),
+            render_activities(conn, ref)]
     for gen in gens:
         for d in gen:
             if not d.text.strip():

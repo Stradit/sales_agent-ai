@@ -13,6 +13,9 @@
 {"id": "news-bny", "q": "What's new at BNY?", "intent": "account_brief"}
 {"id": "acl-northern-trust", "q": "Northern Trust Project Acacia digital assets", "acl": [11, 14, 27], "expect_no_accounts": [23, 24]}
 {"id": "acl-vanguard", "q": "Vanguard news and hiring", "acl": [11, 14, 27], "expect_no_accounts": [23, 24]}
+{"id": "deals-stuck", "q": "Which deals are stuck?", "intent": "deals"}
+{"id": "deals-mine-bny", "q": "Show my pipeline at BNY", "intent": "deals"}
+{"id": "opps-not-deals", "q": "What opportunities does BNY have for AI?", "intent": "open_question"}
 {"id": "greeting", "q": "Hi", "intent": "smalltalk", "no_llm": true}
 {"id": "greeting-typo", "q": "Good mornming", "intent": "smalltalk", "no_llm": true}
 {"id": "thanks", "q": "thanks, that helps!", "intent": "smalltalk", "no_llm": true}

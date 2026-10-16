@@ -25,7 +25,7 @@ export const WIDGET_GUIDES = {
     icon: 'fa-solid fa-bookmark',
     badge: 'Weekly Action Plan',
     summary: 'The top 5 plays for this week, one per account and signal type, built from the highest-scoring signals in the Priority Signal Feed.',
-    actionTip: 'Click "Start play" to create a task for it — open plays count toward "Open plays in motion". Press Generate again each week (or after new data lands).',
+    actionTip: 'Click "Create task" to create a task for it — open plays count toward "Open plays in motion". Press Generate again each week (or after new data lands).',
     signals: 'Priority Signal Feed (generated)',
   },
   timeline: {
@@ -130,7 +130,7 @@ export function initWidgetGuides() {
 
     if (titleEl) titleEl.textContent = guide.title;
     if (iconEl) iconEl.className = `${guide.icon || 'fa-solid fa-circle-info'}`;
-    if (badgeEl) badgeEl.textContent = guide.badge || 'Sales Intelligence';
+    if (badgeEl) badgeEl.textContent = guide.badge || 'Doshin';
     if (summaryEl) summaryEl.textContent = guide.summary;
     if (actionEl) actionEl.textContent = guide.actionTip;
     if (signalsEl) signalsEl.textContent = guide.signals || 'Real-time telemetry';

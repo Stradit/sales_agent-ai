@@ -41,6 +41,9 @@ function renderQuota(q) {
 }
 
 async function pageContext() {
+  // Any page can publish what's open right now (e.g. the Introductions drawer).
+  const published = window.doshinPageContext;
+  if (published && (published.persona || published.account_id)) return published;
   // Profile page: /profile?account=&persona_id=
   const params = new URLSearchParams(location.search);
   const pid = parseInt(params.get('persona_id'), 10);

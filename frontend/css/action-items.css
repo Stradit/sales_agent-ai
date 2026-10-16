@@ -11,10 +11,10 @@
   padding: 12px 14px;
   background: var(--panel-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
 }
 .action-item-card.action-item-overdue { border-color: rgba(255,77,79,.35); background: rgba(255,77,79,.04); }
-.action-item-card.action-item-suggestion { border-style: dashed; border-color: rgba(0,97,255,.35); background: var(--brand-soft); }
+.action-item-card.action-item-suggestion { border-style: dashed; border-color: rgba(228, 101, 33,.35); background: var(--brand-soft); }
 
 .action-item-rationale {
   display: flex; align-items: flex-start; gap: 5px;
@@ -35,31 +35,31 @@
 
 .aitem-select {
   font-size: .74rem; font-family: inherit; padding: 5px 8px;
-  border: 1px solid var(--border-color); border-radius: var(--radius-xs);
+  border: 1px solid var(--border-color); border-radius: 0;
   background: var(--input-bg); color: var(--text-primary);
 }
 
 .aitem-btn {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: .72rem; font-weight: 600; padding: 5px 10px;
-  border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color); border-radius: 0;
   background: var(--panel-bg); color: var(--text-secondary); cursor: pointer;
   font-family: inherit; transition: var(--transition); white-space: nowrap;
 }
-.aitem-btn:hover { background: var(--brand-soft); color: var(--brand); border-color: rgba(0,97,255,.25); }
+.aitem-btn:hover { background: var(--brand-soft); color: var(--brand); border-color: rgba(228, 101, 33,.25); }
 .aitem-btn.danger:hover { background: rgba(255,77,79,.08); color: var(--danger); border-color: rgba(255,77,79,.2); }
 
 .aitem-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; }
 .aitem-form label { display: block; font-size: .68rem; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; }
 .aitem-form input, .aitem-form select {
   width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: .82rem; font-family: inherit;
-  background: var(--input-bg); border: 1.5px solid var(--border-color); border-radius: var(--radius-sm);
+  background: var(--input-bg); border: 1.5px solid var(--border-color); border-radius: 0;
   color: var(--text-primary);
 }
 .aitem-form input:focus, .aitem-form select:focus { outline: none; border-color: var(--brand); background: var(--panel-bg); }
 .aitem-submit {
   padding: 9px 16px; font-size: .82rem; font-weight: 700; font-family: inherit;
-  color: #fff; background: var(--brand); border: none; border-radius: var(--radius-sm); cursor: pointer;
+  color: #fff; background: var(--brand); border: none; border-radius: 0; cursor: pointer;
 }
 .aitem-submit:hover { background: var(--brand-hover); }
 .aitem-submit:disabled { opacity: .6; cursor: not-allowed; }
@@ -69,10 +69,10 @@
 .aitem-filter-pill {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: .76rem; font-weight: 600; padding: 6px 12px;
-  border: 1px solid var(--border-color); border-radius: 999px;
+  border: 1px solid var(--border-color); border-radius: 0;
   background: var(--panel-bg); color: var(--text-secondary); cursor: pointer;
   font-family: inherit; transition: var(--transition);
 }
-.aitem-filter-pill:hover { border-color: rgba(0,97,255,.3); }
+.aitem-filter-pill:hover { border-color: rgba(228, 101, 33,.3); }
 .aitem-filter-pill.active { background: var(--brand); color: #fff; border-color: var(--brand); }
 .aitem-filter-pill.active .tab-badge { background: rgba(255,255,255,.25); color: #fff; border-color: transparent; }

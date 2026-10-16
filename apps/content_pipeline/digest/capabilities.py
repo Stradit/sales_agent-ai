@@ -16,6 +16,8 @@ quote them back nearly verbatim in a sales pitch.
 """
 from typing import Any, Dict, List
 
+
+
 OFFERINGS: List[Dict[str, Any]] = [
     {
         "name": "KYRO",

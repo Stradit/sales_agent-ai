@@ -1,6 +1,7 @@
 // Sales Copilot workspace page (/copilot). See apps/sales_copilot/README.md §19.
 // URL params: ?persona_id= / ?account_id= open a chat scoped to that contact or
-// account; ?session= reopens a saved chat. The chat surface itself lives in
+// account; ?deal_id= adds the deal (stage, committee, MEDDICC) to every answer;
+// ?q= prefills the composer without sending; ?session= reopens a saved chat. The chat surface itself lives in
 // chat-view.js (shared with the dock on other pages).
 import '../fetch-instrumentation.js'; // must load first — attaches the bearer token to fetch()
 import { initThemeToggle } from '../theme.js';
@@ -20,6 +21,8 @@ let sessionsCache = [];
 function suggestions(v) {
   const p = v.scopeNames.persona;
   const a = v.scopeNames.account;
+  if (v.scopeNames.deal) return [`What should my next step be on this deal?`, `Who else should be on the buying committee?`,
+    `Draft a follow-up email to the champion`, `What risks do you see in this deal?`];
   if (p) return [`Prep me for a call with ${p}`, `What objections will ${p} raise?`,
     `What has ${p} been talking about recently?`, `What changed for ${p} in the last 30 days?`];
   if (a) return [`What's new at ${a}?`, `Who are the decision-makers at ${a}?`,
@@ -30,6 +33,7 @@ function suggestions(v) {
 
 function renderScope(v) {
   const chips = [];
+  if (v.scopeNames.deal) chips.push(['deal', `<i class="fa-solid fa-diagram-next"></i> ${esc(v.scopeNames.deal)}`]);
   if (v.scopeNames.persona) chips.push(['persona', `<i class="fa-solid fa-user"></i> ${esc(v.scopeNames.persona)}`]);
   if (v.scopeNames.account) chips.push(['account', `<i class="fa-solid fa-building"></i> ${esc(v.scopeNames.account)}`]);
   $('cpScope').innerHTML = chips.length
@@ -48,6 +52,17 @@ async function loadScopeFromUrl() {
         const p = await res.json();
         view.setScope('persona', pid, p.name);
         if (p.account_id) view.context.account_id = p.account_id;
+      }
+    } catch { /* scope label is cosmetic */ }
+  }
+  const did = parseInt(params.get('deal_id'), 10);
+  if (did) {
+    try {
+      const res = await fetch(`/api/deals/${did}`);
+      if (res.ok) {
+        const d = await res.json();
+        view.setScope('deal', did, d.name);
+        if (!view.context.account_id) view.context.account_id = d.account_id;
       }
     } catch { /* scope label is cosmetic */ }
   }
@@ -297,6 +312,7 @@ function wire() {
     view.clearScope(kind);
     const url = new URL(location.href);
     if (kind === 'persona') url.searchParams.delete('persona_id');
+    else if (kind === 'deal') url.searchParams.delete('deal_id');
     else { url.searchParams.delete('account_id'); url.searchParams.delete('account'); }
     history.replaceState(null, '', url);
   });
@@ -350,12 +366,10 @@ async function init() {
   if (sessionParam) {
     try { await view.openSession(sessionParam); } catch (err) { showToast(err.message); }
   }
-  // ?q= (from the search palette's "Ask Copilot"): prefill only — sending stays the
-  // user's choice, since every answer spends the shared LLM quota.
-  const q = new URLSearchParams(location.search).get('q');
-  if (q) {
-    $('cpInput').value = q;
-    $('cpInput').dispatchEvent(new Event('input', { bubbles: true }));   // lets the textarea auto-grow
+  const prefill = new URLSearchParams(location.search).get('q');
+  if (prefill && !$('cpInput').value) {
+    $('cpInput').value = prefill.slice(0, 2000);
+    $('cpInput').dispatchEvent(new Event('input', { bubbles: true }));
     const url = new URL(location.href); url.searchParams.delete('q'); history.replaceState(null, '', url);
   }
   $('cpInput').focus();

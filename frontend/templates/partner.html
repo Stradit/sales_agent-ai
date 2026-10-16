@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Partner Portal | StradIT</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/tokens.css?v=3.0">
+  <link rel="stylesheet" href="css/base.css?v=3.0">
+  <link rel="stylesheet" href="css/partner.css?v=1.2">
+</head>
+<body class="pt-body">
+<div class="global-loading-bar" id="globalLoadingBar"></div>
+
+<header class="pt-top">
+  <div class="pt-brand"><span class="pt-logo"><i class="fa-solid fa-handshake"></i></span>
+    <div><strong>StradIT Partner Portal</strong><small id="ptOrg">&nbsp;</small></div></div>
+  <div class="pt-user"><span id="ptUser"></span>
+    <button type="button" class="pt-btn pt-ghost" id="ptLogout"><i class="fa-solid fa-right-from-bracket"></i> Sign out</button></div>
+</header>
+
+<main class="pt-main" aria-label="Your introductions">
+  <div class="pt-preview" id="ptPreview" hidden></div>
+  <section class="pt-hero">
+    <div><h1>Your introductions</h1>
+      <p>Track every introduction you've made to StradIT, see where it stands, and send a new one.</p></div>
+    <div class="pt-hero-actions">
+      <label class="pt-mail" id="ptMailWrap" hidden><input type="checkbox" id="ptMail"> Email me when an introduction changes</label>
+      <button type="button" class="pt-btn pt-primary" id="ptNewBtn"><i class="fa-solid fa-plus"></i> Submit an introduction</button>
+    </div>
+  </section>
+
+  <section class="pt-kpis" id="ptKpis" aria-label="Summary"></section>
+
+  <form class="pt-card pt-form" id="ptForm" hidden autocomplete="off">
+    <h2>Submit an introduction</h2>
+    <div class="pt-grid">
+      <label><span>Company<span class="in-req" aria-hidden="true">*</span></span><input id="ptCompany" required minlength="2" maxlength="200" placeholder="e.g. BNY"></label>
+      <label><span>Contact name<span class="in-req" aria-hidden="true">*</span></span><input id="ptContact" required minlength="2" maxlength="200" placeholder="Full name"></label>
+      <label><span>Their title <span>(optional)</span></span><input id="ptTitle" maxlength="200" placeholder="e.g. Chief Data Officer"></label>
+      <label><span>Their work email <span>(optional)</span></span><input id="ptEmail" type="email" maxlength="255" placeholder="name@company.com"></label>
+    </div>
+    <label><span>Why this introduction?<span class="in-req" aria-hidden="true">*</span> <span>(how you know them, what they need)</span></span>
+      <textarea id="ptContext" required minlength="10" maxlength="4000" rows="4"></textarea></label>
+    <div class="pt-form-foot"><span class="pt-muted">Only you and the StradIT team can see what you submit.</span>
+      <button type="button" class="pt-btn pt-ghost" id="ptCancel">Cancel</button>
+      <button type="submit" class="pt-btn pt-primary">Submit</button></div>
+  </form>
+
+  <section class="pt-list" id="ptList" aria-label="Introductions"><p class="pt-muted">Loading…</p></section>
+</main>
+
+<div class="toast" id="toast"></div>
+<script type="module" src="js/modules/partner/main.js?v=1.2"></script>
+</body>
+</html>

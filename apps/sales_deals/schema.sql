@@ -66,3 +66,6 @@ CREATE INDEX IF NOT EXISTS deal_activity_deal ON deal_activity (deal_id, created
 
 ALTER TABLE action_items ADD COLUMN IF NOT EXISTS deal_id bigint REFERENCES deals(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS action_items_deal ON action_items (deal_id) WHERE deal_id IS NOT NULL;
+
+-- D3: MEDDICC qualification notes (free text per key)
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS qualification jsonb NOT NULL DEFAULT '{}';

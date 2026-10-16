@@ -1,0 +1,27 @@
+# Production stack on the EC2 host: ONE container. Background work (Copilot sync, stale
+# introductions, forecast snapshots, notifications, M365 capture, research jobs) runs as
+# threads inside it, guarded by Postgres advisory locks — there is no Celery worker and no
+# Redis (DEPLOYMENT_REVIEW.md B2/B3). nginx on the host terminates TLS and proxies to
+# 127.0.0.1:8000.
+#
+#   APP_IMAGE=<account>.dkr.ecr.us-east-1.amazonaws.com/sales-ai:<sha> \
+#     docker compose -f /opt/salesai/docker-compose.prod.yml up -d
+services:
+  web:
+    image: ${APP_IMAGE:?set APP_IMAGE to the ECR image to run}
+    container_name: salesai-web
+    restart: unless-stopped
+    env_file:
+      - /opt/salesai/.env
+    ports:
+      - "127.0.0.1:8000:8000"          # host loopback only; nginx is the public entry point
+    volumes:
+      - /opt/salesai/data/output:/app/output   # Chroma vectors (output/chroma) + pipeline output
+    stop_grace_period: 60s             # let in-flight requests and research threads wind down
+    mem_limit: 3g                      # t3.medium has 4 GB; leave room for nginx + the OS
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    # Health check comes from the image (GET /api/health, which also checks the database).

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Email &amp; Calendar Sync | Doshin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/tokens.css?v=3.0">
+  <link rel="stylesheet" href="css/base.css?v=3.0">
+  <link rel="stylesheet" href="css/shell.css?v=3.0">
+  <link rel="stylesheet" href="css/deals.css?v=1.3">
+  <link rel="stylesheet" href="css/capture.css?v=1.0">
+</head>
+<body>
+
+<div class="dash-shell">
+
+{% include "partials/topbar.html" %}
+
+  <div class="dash-body dl-body">
+    <main class="dl-main cap-main" aria-label="Email and calendar sync">
+      <header class="dl-header">
+        <div>
+          <a href="/deals" class="dl-back"><i class="fa-solid fa-arrow-left"></i> Deals pipeline</a>
+          <h1 class="dl-title"><i class="fa-solid fa-envelope-circle-check"></i> Email &amp; Calendar Sync</h1>
+          <p class="dl-sub">Meetings and emails with your contacts are logged to the right account, contact, deal and introduction automatically.</p>
+        </div>
+      </header>
+      <div class="cap-banner" id="capBanner" hidden></div>
+      <div id="capMain"><p class="cap-muted">Loading…</p></div>
+      <section id="capNotify"></section>
+      <section id="capAdmin" hidden></section>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+{% include "partials/copilot-dock.html" %}
+<script type="module" src="js/modules/capture/main.js?v=1.1"></script>
+</body>
+</html>

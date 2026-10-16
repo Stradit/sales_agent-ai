@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Introductions | Doshin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/tokens.css?v=3.0">
+  <link rel="stylesheet" href="css/base.css?v=3.0">
+  <link rel="stylesheet" href="css/shell.css?v=3.0">
+  <link rel="stylesheet" href="css/deals.css?v=1.3">
+  <link rel="stylesheet" href="css/introductions.css?v=1.1">
+  <link rel="stylesheet" href="css/activity-timeline.css?v=1.0">
+</head>
+<body>
+
+<div class="dash-shell">
+
+{% include "partials/topbar.html" %}
+
+  <div class="dash-body dl-body">
+    <main class="dl-main" aria-label="Introductions">
+      <header class="dl-header">
+        <div>
+          <a href="/deals" class="dl-back" id="inBack"><i class="fa-solid fa-arrow-left"></i> Back</a>
+          <h1 class="dl-title"><i class="fa-solid fa-handshake"></i> Introductions</h1>
+          <p class="dl-sub" id="inSummary">Loading…</p>
+        </div>
+        <div class="dl-tools">
+          <div class="dl-search"><i class="fa-solid fa-magnifying-glass"></i><input id="inSearch" type="search" placeholder="Search connector, account or contact" aria-label="Search introductions"></div>
+          <select id="inConnector" class="dl-select" aria-label="Filter by connector"><option value="">All connectors</option></select>
+          <select id="inBusinessLine" class="dl-select" aria-label="Filter by business line"><option value="">All business lines</option></select>
+          <label class="dl-toggle"><input type="checkbox" id="inMine"> Mine</label>
+          <button type="button" class="dl-btn" id="inExport"><i class="fa-regular fa-file-excel"></i> Export</button>
+          <button type="button" class="dl-btn dl-btn-primary" id="inNew"><i class="fa-solid fa-plus"></i> New introduction</button>
+        </div>
+      </header>
+
+      <nav class="in-tabs" role="tablist" aria-label="Views">
+        <button type="button" class="in-tab active" role="tab" aria-selected="true" data-view="board"><i class="fa-solid fa-table-columns"></i> Board</button>
+        <button type="button" class="in-tab" role="tab" aria-selected="false" data-view="attribution"><i class="fa-solid fa-chart-column"></i> Attribution</button>
+        <button type="button" class="in-tab" role="tab" aria-selected="false" data-view="connectors"><i class="fa-solid fa-address-book"></i> Connectors</button>
+      </nav>
+
+      <section id="inViewBoard" class="in-view active">
+        <div class="in-triage" id="inTriage" hidden></div>
+        <div class="dl-board in-board" id="inBoard" aria-label="Introductions by status"></div>
+        <section class="dl-closed" id="inClosed" aria-label="Declined and stale introductions"></section>
+      </section>
+      <section id="inViewAttribution" class="in-view" hidden></section>
+      <section id="inViewConnectors" class="in-view" hidden></section>
+    </main>
+  </div>
+</div>
+
+<!-- Introduction drawer -->
+<div class="dl-overlay" id="inOverlay" hidden></div>
+<aside class="dl-room" id="inRoom" role="dialog" aria-modal="true" aria-labelledby="inRoomTitle" hidden></aside>
+
+<!-- New introduction -->
+<div class="dl-modal-wrap" id="inModal" hidden>
+  <form class="dl-modal" id="inNewForm" role="dialog" aria-modal="true" aria-labelledby="inNewTitle" autocomplete="off" novalidate>
+    <header><h2 id="inNewTitle">New introduction</h2><button type="button" class="dl-icon" data-close-modal aria-label="Close"><i class="fa-solid fa-xmark"></i></button></header>
+    <label><span>Introduced by (connector)<span class="in-req" aria-hidden="true">*</span></span><select id="inNewConnector" required aria-required="true" aria-describedby="inNewConnectorErr"></select>
+      <span class="in-err" id="inNewConnectorErr" hidden></span></label>
+    <button type="button" class="in-link" id="inNewConnectorToggle"><i class="fa-solid fa-plus"></i> Add a new connector</button>
+    <div class="dl-row in-newconn" id="inNewConnectorBox" hidden>
+      <label class="dl-grow"><span>Name<span class="in-req" aria-hidden="true">*</span></span><input id="inNcName" maxlength="200" placeholder="Person or firm" aria-required="true" aria-describedby="inNcNameErr">
+        <span class="in-err" id="inNcNameErr" hidden></span></label>
+      <label>Kind<select id="inNcKind"><option value="partner">Partner</option><option value="advisor">Advisor</option><option value="employee">Employee</option><option value="customer">Customer</option><option value="other">Other</option></select></label>
+      <label class="dl-grow">Organisation<input id="inNcOrg" maxlength="200"></label>
+    </div>
+    <label><span>Account<span class="in-req" aria-hidden="true">*</span></span><select id="inNewAccount" required aria-required="true" aria-describedby="inNewAccountErr"></select>
+      <span class="in-err" id="inNewAccountErr" hidden></span></label>
+    <label><span>Contact being introduced<span class="in-req" id="inNewContactReq" aria-hidden="true" hidden>*</span></span>
+      <span class="in-suggest-wrap">
+        <input id="inNewContactSearch" placeholder="Type to search people at this account…" role="combobox" aria-autocomplete="list"
+               aria-expanded="false" aria-controls="inNewContactList" aria-describedby="inNewContactErr">
+        <ul class="in-suggest" id="inNewContactList" role="listbox" aria-label="Matching contacts" hidden></ul>
+      </span>
+      <input type="hidden" id="inNewContact">
+      <span class="in-err" id="inNewContactErr" hidden></span>
+    </label>
+    <div class="dl-row">
+      <label>Business line<select id="inNewBusinessLine"></select></label>
+      <label>Status<select id="inNewStatus"></select></label>
+    </div>
+    <label>Context<textarea id="inNewContext" maxlength="4000" rows="3" placeholder="How does the connector know them? What did they say?"></textarea></label>
+    <footer><button type="button" class="dl-btn" data-close-modal>Cancel</button><button type="submit" class="dl-btn dl-btn-primary">Create</button></footer>
+  </form>
+</div>
+
+<div class="toast" id="toast"></div>
+
+{% include "partials/copilot-dock.html" %}
+<script type="module" src="js/modules/introductions/main.js?v=1.3"></script>
+</body>
+</html>

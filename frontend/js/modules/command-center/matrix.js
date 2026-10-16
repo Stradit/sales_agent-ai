@@ -1,5 +1,5 @@
 import { formatMoney } from './utils.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 import { openDossier } from './drawer.js';
 import { loadMatrixAccounts } from './real-accounts.js';
 import { renderSkeleton } from '../skeleton.js';
@@ -60,7 +60,7 @@ const quadrantPlugin = {
     ctx.fillRect(chartArea.left, chartArea.top, xMid - chartArea.left, yMid - chartArea.top);
 
     // Bottom-Right: Re-engage (Indigo / Violet)
-    ctx.fillStyle = 'rgba(99, 102, 241, 0.04)';
+    ctx.fillStyle = 'rgba(228, 101, 33, 0.04)';
     ctx.fillRect(xMid, yMid, chartArea.right - xMid, chartArea.bottom - yMid);
 
     // Bottom-Left: Watch (Slate)
@@ -96,7 +96,7 @@ const quadrantPlugin = {
 
     drawBadge('🔥 ACT NOW (HIGH HEAT)', xMid + 10, chartArea.top + 18, '#dc2626', 'rgba(239, 68, 68, 0.14)');
     drawBadge('🌱 NURTURE', chartArea.left + 10, chartArea.top + 18, '#059669', 'rgba(16, 185, 129, 0.12)');
-    drawBadge('⚡ RE-ENGAGE', xMid + 10, chartArea.bottom - 10, '#4f46e5', 'rgba(99, 102, 241, 0.12)');
+    drawBadge('⚡ RE-ENGAGE', xMid + 10, chartArea.bottom - 10, '#C9541A', 'rgba(228, 101, 33, 0.12)');
     drawBadge('👁️ WATCH', chartArea.left + 10, chartArea.bottom - 10, '#64748b', 'rgba(148, 163, 184, 0.12)');
 
     ctx.restore();
@@ -168,14 +168,25 @@ export async function renderMatrix() {
     ccState.matrixChart.destroy();
   }
 
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+
   ccState.matrixChart = new Chart(liveCanvas.getContext('2d'), {
     type: 'bubble',
     data: {
       datasets: [{
         data,
-        backgroundColor: data.map(d => colorFor(d.account.compositeScore)),
-        borderColor: data.map(d => borderFor(d.account.compositeScore)),
-        borderWidth: 2,
+        backgroundColor: data.map(d => {
+          const isMatch = !hasFilter || matchesCurrentAccount(d.account.id, d.account.name);
+          return isMatch ? colorFor(d.account.compositeScore) : 'rgba(148, 163, 184, 0.14)';
+        }),
+        borderColor: data.map(d => {
+          const isMatch = !hasFilter || matchesCurrentAccount(d.account.id, d.account.name);
+          return isMatch ? borderFor(d.account.compositeScore) : 'rgba(148, 163, 184, 0.2)';
+        }),
+        borderWidth: data.map(d => {
+          const isMatch = !hasFilter || matchesCurrentAccount(d.account.id, d.account.name);
+          return isMatch ? (hasFilter ? 3 : 2) : 1;
+        }),
         hoverBorderColor: '#0f172a',
         hoverBorderWidth: 2.5,
       }],

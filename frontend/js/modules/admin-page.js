@@ -4,8 +4,10 @@ import { getCurrentUser, logout, refreshAccessToken } from './auth-client.js';
 import { initTopbarAuth } from './topbar-auth.js';
 import { initThemeToggle } from './theme.js';
 import { showToast } from './toast.js';
+import { mountCrmSettings } from './admin-crm-settings.js';
 
 initThemeToggle();
+initTopbarAuth();
 
 const esc = (s) => {
   const d = document.createElement('div');
@@ -20,7 +22,17 @@ let currentFilter = 'all';
 let searchQuery = '';
 let activeAdminTab = 'users';
 let apiConfigsCache = [];
+let rolesGuideCache = null;   // GET /api/crm/roles (apps/sales_crm/role_guide.py)
 let dirtyConfigs = {};
+
+// CRM roles + team (apps/sales_crm/README.md §5). 'user' is the Sales Rep role.
+const ROLE_OPTIONS = [['user', 'Sales Rep'], ['sales_manager', 'Sales Manager'], ['viewer', 'Viewer (read-only)'],
+  ['partner', 'Partner / Advisor'], ['super_admin', 'Super Admin']];
+const ROLE_LABEL = Object.fromEntries(ROLE_OPTIONS.map(([k, l]) => [k, l.replace(' (read-only)', '')]));
+let crmTeam = {};            // user id -> {manager_id, manager_name, business_line_ids}
+let crmBusinessLines = [];
+let authEnforced = true;
+const roleOptions = (selected) => ROLE_OPTIONS.map(([k, l]) => `<option value="${k}" ${k === selected ? 'selected' : ''}>${l}</option>`).join('');
 
 let auditLogs = [];
 let auditOffset = 0;
@@ -121,10 +133,7 @@ function renderCreateForm() {
           </div>
           <div class="admin-form-group">
             <label>Assigned Role</label>
-            <select name="role">
-              <option value="user" selected>Standard User</option>
-              <option value="super_admin">Super Admin</option>
-            </select>
+            <select name="role">${roleOptions('user')}</select>
           </div>
           <div class="admin-form-group btn-group">
             <button type="submit" class="admin-submit-btn" id="createUserSubmit">
@@ -142,15 +151,14 @@ function getFilteredUsers() {
   let list = usersCache;
   if (currentFilter === 'active') list = list.filter(u => u.is_active);
   else if (currentFilter === 'inactive') list = list.filter(u => !u.is_active);
-  else if (currentFilter === 'super_admin') list = list.filter(u => u.role === 'super_admin');
-  else if (currentFilter === 'user') list = list.filter(u => u.role === 'user');
+  else if (ROLE_LABEL[currentFilter]) list = list.filter(u => u.role === currentFilter);
 
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
     list = list.filter(u =>
       (u.full_name && u.full_name.toLowerCase().includes(q)) ||
       (u.email && u.email.toLowerCase().includes(q)) ||
-      (u.role && u.role.toLowerCase().includes(q))
+      (u.role && (u.role.toLowerCase().includes(q) || (ROLE_LABEL[u.role] || '').toLowerCase().includes(q)))
     );
   }
   return list;
@@ -175,10 +183,8 @@ function renderUsersTable(currentUserId) {
           </div>
         </td>
         <td>
-          <select class="admin-role-select" data-action="role" ${isSelf ? 'disabled title="You cannot change your own role"' : ''}>
-            <option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option>
-            <option value="super_admin" ${u.role === 'super_admin' ? 'selected' : ''}>Super Admin</option>
-          </select>
+          <select class="admin-role-select" data-action="role" ${isSelf ? 'disabled title="You cannot change your own role"' : ''}>${roleOptions(u.role)}</select>
+          ${teamLine(u.id)}
         </td>
         <td>
           <span class="admin-status-pill ${u.is_active ? 'active' : 'inactive'}">
@@ -237,8 +243,8 @@ function renderUsersTable(currentUserId) {
           <button type="button" class="admin-filter-chip ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">All</button>
           <button type="button" class="admin-filter-chip ${currentFilter === 'active' ? 'active' : ''}" data-filter="active">Active</button>
           <button type="button" class="admin-filter-chip ${currentFilter === 'inactive' ? 'active' : ''}" data-filter="inactive">Inactive</button>
-          <button type="button" class="admin-filter-chip ${currentFilter === 'super_admin' ? 'active' : ''}" data-filter="super_admin">Super Admins</button>
-          <button type="button" class="admin-filter-chip ${currentFilter === 'user' ? 'active' : ''}" data-filter="user">Users</button>
+          ${[['super_admin', 'Super Admins'], ['sales_manager', 'Managers'], ['user', 'Sales Reps'], ['viewer', 'Viewers'], ['partner', 'Partners']]
+            .map(([k, l]) => `<button type="button" class="admin-filter-chip ${currentFilter === k ? 'active' : ''}" data-filter="${k}">${l}</button>`).join('')}
         </div>
       </div>
 
@@ -407,10 +413,7 @@ function renderModalShell() {
             <div class="admin-form-row" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
               <div class="admin-form-group">
                 <label class="admin-form-label" for="editUserRole"><i class="fa-solid fa-shield-halved"></i> System Role</label>
-                <select class="admin-form-select" id="editUserRole" name="role">
-                  <option value="user">User</option>
-                  <option value="super_admin">Super Admin</option>
-                </select>
+                <select class="admin-form-select" id="editUserRole" name="role">${roleOptions('user')}</select>
               </div>
               <div class="admin-form-group">
                 <label class="admin-form-label" for="editUserStatus"><i class="fa-solid fa-heart-pulse"></i> Account Status</label>
@@ -419,6 +422,14 @@ function renderModalShell() {
                   <option value="false">Inactive</option>
                 </select>
               </div>
+            </div>
+            <div class="admin-form-group">
+              <label class="admin-form-label" for="editUserManager"><i class="fa-solid fa-sitemap"></i> Reports to <span style="font-weight:400; font-size:0.7rem; color:var(--text-muted);">(managers see their team's accounts)</span></label>
+              <select class="admin-form-select" id="editUserManager" name="manager_id"></select>
+            </div>
+            <div class="admin-form-group">
+              <span class="admin-form-label"><i class="fa-solid fa-layer-group"></i> Business lines</span>
+              <div id="editUserBusinessLines" style="display:flex; flex-wrap:wrap; gap:6px 14px; font-size:0.8rem;"></div>
             </div>
             <div class="admin-form-group">
               <label class="admin-form-label" for="editUserPassword">
@@ -440,12 +451,35 @@ function renderModalShell() {
   `;
 }
 
+async function loadCrmTeam() {
+  try {
+    const [teamRes, metaRes] = await Promise.all([fetch('/api/crm/team'), fetch('/api/crm/meta')]);
+    if (teamRes.ok) crmTeam = Object.fromEntries((await teamRes.json()).map(r => [r.id, r]));
+    if (metaRes.ok) {
+      const meta = await metaRes.json();
+      crmBusinessLines = meta.business_lines || [];
+      authEnforced = meta.auth_enforced !== false;
+    }
+  } catch { /* team info is optional on this page */ }
+}
+
+function teamLine(userId) {
+  const t = crmTeam[userId];
+  if (!t) return '';
+  const bls = (t.business_line_ids || []).map(id => (crmBusinessLines.find(b => b.id === id) || {}).name).filter(Boolean);
+  const bits = [t.manager_name ? `Reports to ${esc(t.manager_name)}` : '', bls.length ? esc(bls.join(', ')) : ''].filter(Boolean);
+  return bits.length ? `<div style="font-size:0.68rem; color:var(--text-muted); margin-top:3px;">${bits.join(' · ')}</div>` : '';
+}
+
 function renderAdminTabsNav() {
   return `
     <div class="admin-tabs-nav">
       <button type="button" class="admin-tab-btn ${activeAdminTab === 'users' ? 'active' : ''}" data-admin-tab="users">
         <i class="bi bi-people-fill"></i> User Directory & Access Control
         <span class="admin-tab-badge">${usersCache.length}</span>
+      </button>
+      <button type="button" class="admin-tab-btn ${activeAdminTab === 'roles' ? 'active' : ''}" data-admin-tab="roles">
+        <i class="fa-solid fa-user-shield"></i> Roles & Permissions
       </button>
       <button type="button" class="admin-tab-btn ${activeAdminTab === 'api-config' ? 'active' : ''}" data-admin-tab="api-config">
         <i class="bi bi-sliders"></i> API & Model Configuration
@@ -457,6 +491,63 @@ function renderAdminTabsNav() {
   `;
 }
 
+// ── Roles & permissions guide ───────────────────────────────────────────────
+const ACCESS_ICON = { yes: 'fa-circle-check', no: 'fa-circle-minus', scoped: 'fa-building', team: 'fa-people-group',
+  own: 'fa-user', read: 'fa-eye' };
+
+async function loadRolesGuide() {
+  if (rolesGuideCache) return;
+  const res = await fetch('/api/crm/roles');
+  if (!res.ok) throw new Error(`Couldn't load the roles guide (${res.status})`);
+  rolesGuideCache = await res.json();
+}
+
+function renderRolesPanel() {
+  const g = rolesGuideCache;
+  if (!g) return '<div class="admin-panel"><div class="admin-panel-body">Couldn’t load the roles guide.</div></div>';
+  const count = (key) => usersCache.filter(u => u.role === key && u.is_active !== false).length;
+  const label = Object.fromEntries(g.roles.map(r => [r.key, r.label]));
+  const cards = g.roles.map(r => `
+    <article class="role-card" aria-labelledby="role-${r.key}">
+      <header class="role-card-head">
+        <span class="role-card-icon"><i class="fa-solid ${esc(r.icon)}"></i></span>
+        <div><h3 id="role-${r.key}">${esc(r.label)}</h3>
+          <button type="button" class="role-count" data-role-users="${r.key}" title="Show these users">${count(r.key)} active user${count(r.key) === 1 ? '' : 's'} <i class="fa-solid fa-arrow-right"></i></button></div>
+      </header>
+      <p class="role-summary">${esc(r.summary)}</p>
+      <div class="role-block"><h4><i class="fa-solid fa-database"></i> Data access</h4><p>${esc(r.data_scope)}</p></div>
+      <div class="role-block"><h4><i class="fa-solid fa-list-check"></i> Responsibilities</h4>
+        <ul>${r.responsibilities.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
+      ${r.limits.length ? `<div class="role-block role-limits"><h4><i class="fa-solid fa-ban"></i> Can't</h4>
+        <ul>${r.limits.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+    </article>`).join('');
+  const cell = (row, role) => {
+    const v = row.access[role];
+    const note = (row.notes || {})[role];
+    const text = note || g.access_labels[v] || v;
+    return `<td class="role-cell ${esc(v)}"><span title="${esc(text)}"><i class="fa-solid ${ACCESS_ICON[v] || 'fa-circle'}" aria-hidden="true"></i>
+      <span>${esc(text)}</span></span></td>`;
+  };
+  const matrix = `<div class="admin-table-wrap role-matrix-wrap"><table class="admin-table role-matrix">
+    <caption class="sr-only">What each role can do</caption>
+    <thead><tr><th scope="col">Capability</th>${g.order.map(k => `<th scope="col">${esc(label[k] || k)}</th>`).join('')}</tr></thead>
+    <tbody>${g.capabilities.map(grp => `<tr class="role-group"><th colspan="${g.order.length + 1}" scope="colgroup">${esc(grp.group)}</th></tr>
+      ${grp.items.map(row => `<tr><th scope="row">${esc(row.label)}</th>${g.order.map(k => cell(row, k)).join('')}</tr>`).join('')}`).join('')}
+    </tbody></table></div>`;
+  const legend = Object.entries(g.access_labels).map(([k, l]) => `<span class="role-cell ${esc(k)}"><span><i class="fa-solid ${ACCESS_ICON[k]}" aria-hidden="true"></i> ${esc(l)}</span></span>`).join('');
+  return `
+    <div class="admin-panel">
+      <div class="admin-panel-header"><div class="admin-panel-title"><i class="fa-solid fa-user-shield"></i> Roles & responsibilities</div>
+        <span class="role-note">Change someone's role in User Directory. The app enforces these rules; this page describes them.</span></div>
+      <div class="admin-panel-body"><div class="role-cards">${cards}</div></div>
+    </div>
+    <div class="admin-panel" style="margin-top:16px;">
+      <div class="admin-panel-header"><div class="admin-panel-title"><i class="fa-solid fa-table-cells"></i> Access by role</div>
+        <div class="role-legend">${legend}</div></div>
+      <div class="admin-panel-body" style="padding:0;">${matrix}</div>
+    </div>`;
+}
+
 function findConfig(key) {
   return apiConfigsCache.find(c => c.config_key === key) || { config_key: key, value: '', is_configured: false, is_secret: false };
 }
@@ -464,7 +555,7 @@ function findConfig(key) {
 function renderFieldInput(c) {
   const meta = c.extra_metadata || {};
   const currentVal = dirtyConfigs[c.config_key] !== undefined ? dirtyConfigs[c.config_key] : (c.is_secret ? '' : (c.value || ''));
-  
+
   if (meta.options && Array.isArray(meta.options)) {
     return `
       <select class="api-input" data-config-key="${c.config_key}">
@@ -472,7 +563,7 @@ function renderFieldInput(c) {
       </select>
     `;
   }
-  
+
   if (c.is_secret) {
     let cleanPlaceholder = meta.placeholder || (c.is_configured ? 'Key configured — paste new key to replace...' : 'Enter API key...');
     cleanPlaceholder = cleanPlaceholder.replace(/[•*]+/g, '').trim() || 'Enter API key...';
@@ -506,7 +597,7 @@ function renderFieldInput(c) {
       </div>
     `;
   }
-  
+
   return `
     <input type="${meta.type === 'number' ? 'number' : 'text'}" class="api-input" data-config-key="${c.config_key}" value="${esc(currentVal)}" placeholder="${esc(meta.placeholder || '')}">
   `;
@@ -1024,8 +1115,9 @@ async function loadAndRender() {
   statsCache = await statsRes.json();
   const usersData = await usersRes.json();
   usersCache = usersData.users || [];
+  await loadCrmTeam();
 
-  const me = getCurrentUser();
+  const me = getCurrentUser();   // the topbar user menu is drawn by initTopbarAuth()
 
   let tabContentHtml = '';
   if (activeAdminTab === 'users') {
@@ -1040,6 +1132,9 @@ async function loadAndRender() {
         </div>
       </div>
     `;
+  } else if (activeAdminTab === 'roles') {
+    try { await loadRolesGuide(); } catch (err) { console.error(err); }
+    tabContentHtml = renderRolesPanel();
   } else if (activeAdminTab === 'api-config') {
     tabContentHtml = renderApiConfigPanel();
   } else if (activeAdminTab === 'audit') {
@@ -1053,15 +1148,20 @@ async function loadAndRender() {
   }
 
   main.innerHTML = `
+    ${authEnforced ? '' : `<div class="admin-form-error" style="display:flex; margin-bottom:14px;">
+      <i class="fa-solid fa-triangle-exclamation"></i>&nbsp; AUTH_ENFORCED is off — every request runs as a super admin, so roles
+      (manager scope, viewer read-only, partner isolation) are not applied. Set AUTH_ENFORCED=true in production.</div>`}
     ${renderHero()}
     ${renderKPIBanner(statsCache)}
     ${renderAdminTabsNav()}
     <div id="adminTabContent">
       ${tabContentHtml}
     </div>
+    <div id="crmSettingsMount" style="margin-top:16px;"></div>
     ${renderModalShell()}
   `;
   wireEvents();
+  mountCrmSettings(document.getElementById('crmSettingsMount'));
   if (activeAdminTab === 'users' || activeAdminTab === 'audit') {
     loadAuditLogs(true);
   }
@@ -1085,6 +1185,16 @@ function wireEvents() {
       }
 
       activeAdminTab = targetTab;
+      await loadAndRender();
+    });
+  });
+
+  // Roles guide: "N active users" jumps to the User Directory filtered by that role
+  main.querySelectorAll('[data-role-users]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      activeAdminTab = 'users';
+      currentFilter = btn.dataset.roleUsers;
+      searchQuery = '';
       await loadAndRender();
     });
   });
@@ -1406,6 +1516,16 @@ function wireEvents() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed to update user profile');
+        const mgrVal = document.getElementById('editUserManager').value;
+        const crmBody = {
+          business_line_ids: [...document.querySelectorAll('#editUserBusinessLines input:checked')].map(i => Number(i.value)),
+          ...(mgrVal ? { manager_id: Number(mgrVal) } : { clear_manager: true }),
+        };
+        const crmRes = await fetch(`/api/crm/users/${userId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(crmBody),
+        });
+        const crmData = await crmRes.json().catch(() => ({}));
+        if (!crmRes.ok) throw new Error(crmData.detail || 'Saved profile, but could not update manager / business lines');
 
         closeEditUserModal();
         showToast(`User ${data.email} updated successfully`);
@@ -1474,6 +1594,19 @@ function openEditUserModal(user, isSelf) {
     statusSelect.title = isSelf ? 'You cannot deactivate your own account' : '';
   }
   if (passInput) passInput.value = '';
+  const team = crmTeam[user.id] || {};
+  const mgr = document.getElementById('editUserManager');
+  if (mgr) {
+    const candidates = usersCache.filter(x => x.id !== user.id && ['sales_manager', 'super_admin'].includes(x.role));
+    mgr.innerHTML = '<option value="">— No manager —</option>' + candidates.map(x =>
+      `<option value="${x.id}" ${x.id === team.manager_id ? 'selected' : ''}>${esc(x.full_name || x.email)} · ${esc(ROLE_LABEL[x.role] || x.role)}</option>`).join('');
+  }
+  const bls = document.getElementById('editUserBusinessLines');
+  if (bls) {
+    bls.innerHTML = crmBusinessLines.filter(b => b.active).map(b => `<label style="display:inline-flex; gap:5px; align-items:center;">
+      <input type="checkbox" value="${b.id}" ${(team.business_line_ids || []).includes(b.id) ? 'checked' : ''}> ${esc(b.name)}</label>`).join('')
+      || '<span style="color:var(--text-muted)">No business lines configured</span>';
+  }
   if (errorEl) {
     errorEl.textContent = '';
     errorEl.style.display = 'none';
@@ -1507,10 +1640,8 @@ function updateTableOnly(currentUserId) {
           </div>
         </td>
         <td>
-          <select class="admin-role-select" data-action="role" ${isSelf ? 'disabled title="You cannot change your own role"' : ''}>
-            <option value="user" ${u.role === 'user' ? 'selected' : ''}>User</option>
-            <option value="super_admin" ${u.role === 'super_admin' ? 'selected' : ''}>Super Admin</option>
-          </select>
+          <select class="admin-role-select" data-action="role" ${isSelf ? 'disabled title="You cannot change your own role"' : ''}>${roleOptions(u.role)}</select>
+          ${teamLine(u.id)}
         </td>
         <td>
           <span class="admin-status-pill ${u.is_active ? 'active' : 'inactive'}">
@@ -1598,8 +1729,8 @@ function renderDashboardAccessToggles(userId, permissions, disabled) {
     </div>
     <div class="admin-access-dashboards-grid">
       ${dashboards.map(d => {
-        const hasAccess = !!permissions[d.key];
-        return `
+    const hasAccess = !!permissions[d.key];
+    return `
           <div class="admin-access-row">
             <label class="admin-access-toggle">
               <input type="checkbox" data-perm-key="${d.key}" ${hasAccess ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
@@ -1613,7 +1744,7 @@ function renderDashboardAccessToggles(userId, permissions, disabled) {
             </span>
           </div>
         `;
-      }).join('')}
+  }).join('')}
     </div>
   `;
 
@@ -1813,7 +1944,7 @@ function initTopbarAccountsDropdown() {
     if (isOpening) {
       container.classList.add('active');
       menu.classList.remove('d-none');
-      
+
       const accounts = await loadTopbarAccounts();
       renderTopbarAccountsList(accounts);
     } else {

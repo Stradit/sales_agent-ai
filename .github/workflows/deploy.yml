@@ -1,0 +1,131 @@
+name: Deploy to production
+
+# tests → build image → push to ECR (tag = commit SHA) → SSH to EC2 → remote_deploy.sh
+# (pull, start, health check, automatic rollback) → public health check.
+#
+# Runs from "Actions → Deploy to production → Run workflow" (pick the branch). Every run
+# waits for a reviewer if the "production" environment has required reviewers.
+#
+# GitHub → Settings → Environments → production:
+#   Variables: AWS_DEPLOY_ROLE_ARN, ECR_REPOSITORY_URI, EC2_HOST, SITE_URL
+#   Secrets:   DEPLOY_SSH_KEY (private key, deploy user), EC2_KNOWN_HOSTS (ssh-keyscan output),
+#              ENV_FILE (the whole production .env — see deploy/.env.production.example)
+# See deploy/AWS_SETUP.md and DEPLOYMENT_REVIEW.md Phase 4.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false      # never kill a deploy half-way
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      - name: Unit tests (no database, no secrets)
+        run: python -m pytest tests/ -q
+
+  build-push:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write            # GitHub OIDC → AWS role, no stored AWS keys
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check configuration
+        run: |
+          missing=""
+          for v in AWS_DEPLOY_ROLE_ARN ECR_REPOSITORY_URI EC2_HOST SITE_URL; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          [ -z "$missing" ] || { echo "Missing environment variables:$missing"; exit 1; }
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
+          EC2_HOST: ${{ vars.EC2_HOST }}
+          SITE_URL: ${{ vars.SITE_URL }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - id: meta
+        run: echo "image=${{ vars.ECR_REPOSITORY_URI }}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        run: |
+          if aws ecr describe-images --region "$AWS_REGION" --repository-name "${ECR_REPO##*/}" \
+               --image-ids imageTag="${GITHUB_SHA::12}" >/dev/null 2>&1; then
+            echo "Image ${{ steps.meta.outputs.image }} already in ECR — reusing it."
+          else
+            docker build -t "${{ steps.meta.outputs.image }}" .
+            docker push "${{ steps.meta.outputs.image }}"
+          fi
+        env:
+          ECR_REPO: ${{ vars.ECR_REPOSITORY_URI }}
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: ${{ vars.SITE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH setup
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+          printf 'Host app\n  HostName %s\n  User deploy\n  IdentityFile ~/.ssh/deploy\n  StrictHostKeyChecking yes\n  ConnectTimeout 20\n' \
+            "${{ vars.EC2_HOST }}" > ~/.ssh/config
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+
+      - name: Upload compose file, deploy script and .env
+        run: |
+          scp -q deploy/docker-compose.prod.yml deploy/remote_deploy.sh app:/opt/salesai/
+          printf '%s\n' "$ENV_FILE" | ssh app 'umask 077 && cat > /opt/salesai/.env.new && mv /opt/salesai/.env.new /opt/salesai/.env'
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+
+      - name: Deploy (pull, start, health check, rollback on failure)
+        run: ssh app "bash /opt/salesai/remote_deploy.sh '${{ needs.build-push.outputs.image }}'"
+
+      - name: Public health check
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS --max-time 10 "${{ vars.SITE_URL }}/api/health"; then echo; exit 0; fi
+            sleep 5
+          done
+          echo "Public health check failed"; exit 1
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/deploy

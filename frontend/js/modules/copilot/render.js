@@ -16,14 +16,14 @@ const TYPE_LABEL = {
   persona_card: 'Profile', callprep: 'Call-prep', personality_profile: 'Personality', digest_channel: 'Digest',
   account_card: 'Account', lob_card: 'Line of business', signal: 'Signal', news: 'News', blog: 'Blog',
   linkedin_post: 'LinkedIn', reddit: 'Reddit', social: 'X / Twitter', filing: 'SEC filing', cxo_move: 'Leadership move',
-  patent: 'Patent', job: 'Job posting', job_theme: 'Hiring summary',
+  patent: 'Patent', job: 'Job posting', job_theme: 'Hiring summary', activity: 'Logged activity',
 };
 
 const TYPE_ICON = {
   persona_card: 'fa-user', callprep: 'fa-comment-dots', personality_profile: 'fa-brain', digest_channel: 'fa-newspaper',
   account_card: 'fa-building', lob_card: 'fa-sitemap', signal: 'fa-bolt', news: 'fa-newspaper', blog: 'fa-pen-nib',
   linkedin_post: 'fa-linkedin', reddit: 'fa-reddit', social: 'fa-x-twitter', filing: 'fa-file-contract',
-  cxo_move: 'fa-user-tie', patent: 'fa-lightbulb', job: 'fa-briefcase', job_theme: 'fa-chart-column',
+  cxo_move: 'fa-user-tie', patent: 'fa-lightbulb', job: 'fa-briefcase', job_theme: 'fa-chart-column', activity: 'fa-clock-rotate-left',
 };
 
 // Scraped text is sometimes double-encoded (UTF-8 read as Windows-1252): "Wealthâ€™s".
@@ -114,6 +114,7 @@ function renderTable(table) {
       const href = profileLink(row);
       return href ? `<a href="${href}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v);
     }
+    if (c === 'deal' && table.kind === 'deals' && row.deal_id) return `<a href="/deals?deal=${encodeURIComponent(row.deal_id)}">${esc(v)}</a>`;
     if (c === 'email' && v) return `<a href="mailto:${esc(v)}">${esc(v)}</a>`;
     if (c === 'phone' && v) return `<a href="tel:${esc(v)}">${esc(v)}</a>`;
     if (c === 'changed_at' && v) return esc(new Date(v).toLocaleDateString());
@@ -220,7 +221,7 @@ export function renderMessage(msg, opts = {}) {
   const fb = msg.feedback;
   const hasTable = !!(extras.table && extras.table.rows && extras.table.rows.length);
   const streaming = !!msg.streaming;
-  return `<div class="cp-msg cp-msg-bot${streaming ? ' is-streaming' : ''}" data-message-id="${msg.id || ''}">
+  return `<div class="cp-msg cp-msg-bot${streaming ? ' is-streaming' : ''}${opts.isLast ? ' is-last' : ''}" data-message-id="${msg.id || ''}">
     <div class="cp-avatar" aria-hidden="true"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
     <div class="cp-bubble">
       <div class="cp-msg-head">
@@ -229,6 +230,7 @@ export function renderMessage(msg, opts = {}) {
         <span class="cp-time">${esc(timeLabel(msg.created_at))}</span>
       </div>
       ${msg.status && streaming ? `<div class="cp-status"><span class="cp-dot"></span><span class="cp-dot"></span><span class="cp-dot"></span> ${esc(msg.status)}</div>` : ''}
+      ${streaming && !msg.content ? '<div class="cp-skel" aria-hidden="true"><span></span><span></span><span></span></div>' : ''}
       ${(!streaming && extras.draft && renderDraft(msg, cites.length)) || `<div class="cp-md">${renderMarkdown(msg.content, cites.length)}${streaming && msg.content ? '<span class="cp-caret" aria-hidden="true"></span>' : ''}</div>`}
       ${!streaming && !extras.draft ? renderGuardrails(extras.guardrails, true) : ''}
       ${renderTable(extras.table)}
@@ -272,10 +274,10 @@ export function renderSources(citations) {
 
 export function renderEmpty(scopeName, suggestions, recent = []) {
   return `<div class="cp-empty">
-    <div class="cp-empty-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+    <div class="cp-empty-icon" aria-hidden="true"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
     <h2>${scopeName ? `Ask about ${esc(scopeName)}` : 'What are you working on?'}</h2>
     <div class="cp-muted">Answers come from your accounts' data — people, call-prep, news, signals, hiring and digests — with sources you can check.</div>
-    <div class="cp-suggestions">${suggestions.map(s => `<button type="button" class="cp-suggestion">${esc(s)}</button>`).join('')}</div>
+    <div class="cp-suggestions">${suggestions.map(s => `<button type="button" class="cp-suggestion"><span>${esc(s)}</span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>`).join('')}</div>
     <div class="cp-tips">
       <span><kbd>@</kbd> mention a person or account</span>
       <span><kbd>/</kbd> commands: /prep, /remember, /changes</span>

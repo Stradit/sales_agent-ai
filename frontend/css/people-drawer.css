@@ -19,7 +19,7 @@
 .contact-search input {
   width: 100%; padding: 8px 10px 8px 32px;
   border: 1.5px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--input-bg); color: var(--text-primary);
   font-family: inherit; font-size: .8rem;
   outline: none; transition: var(--transition);
@@ -31,12 +31,12 @@
 }
 
 .contact-card {
-  padding: 11px; border-radius: var(--radius-md);
+  padding: 11px; border-radius: 0;
   border: 1.5px solid var(--border-color);
   margin-bottom: 8px;
   transition: var(--transition);
 }
-.contact-card:hover { border-color: rgba(0,97,255,.25); box-shadow: var(--shadow); }
+.contact-card:hover { border-color: rgba(228, 101, 33,.25); box-shadow: var(--shadow); }
 
 .contact-main {
   display: flex; gap: 10px; width: 100%; align-items: flex-start;
@@ -53,13 +53,12 @@
 }
 .contact-body { flex: 1; min-width: 0; }
 .contact-name { font-size: .84rem; font-weight: 700; }
-.dossier-badge { font-size: .7rem; color: var(--brand); }
 .contact-title { font-size: .72rem; color: var(--text-secondary); }
 .contact-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .tag {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: .62rem; font-weight: 700; padding: 2px 7px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   background: var(--brand-soft); color: var(--brand);
 }
 .contact-chevron {
@@ -84,7 +83,7 @@
 .profile-basis-list li a:hover { text-decoration: underline; }
 
 .icon-btn {
-  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  width: 28px; height: 28px; border-radius: 0;
   display: grid; place-items: center;
   border: 1.5px solid var(--border-color);
   background: var(--panel-bg);
@@ -95,7 +94,7 @@
 .icon-btn:hover {
   background: var(--brand-soft);
   color: var(--brand);
-  border-color: rgba(0,97,255,.25);
+  border-color: rgba(228, 101, 33,.25);
 }
 .icon-btn.disabled { opacity: .35; pointer-events: none; }
 
@@ -105,17 +104,17 @@
   font-size: .74rem; font-weight: 600; color: var(--brand);
   text-decoration: none;
   background: var(--brand-soft); padding: 6px 11px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(0,97,255,.14);
+  border-radius: 0;
+  border: 1px solid rgba(228, 101, 33,.14);
   transition: var(--transition);
 }
-.social-link:hover { background: rgba(0,97,255,.15); }
+.social-link:hover { background: rgba(228, 101, 33,.15); }
 
 .action-btn {
   width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;
   font-size: .82rem; font-weight: 600; font-family: inherit; color: #fff;
   background: var(--brand);
-  border: none; border-radius: var(--radius-sm); padding: 10px;
+  border: none; border-radius: 0; padding: 10px;
   cursor: pointer; margin-bottom: 8px; transition: var(--transition);
   letter-spacing: .01em;
 }
@@ -134,7 +133,7 @@
   transform: translateX(-50%) translateY(20px);
   background: #1A1D23; color: #fff;
   font-size: .82rem; padding: 10px 18px;
-  border-radius: var(--radius-md);
+  border-radius: 0;
   box-shadow: var(--shadow-modal);
   opacity: 0; pointer-events: none;
   transition: all .25s ease; z-index: 2000;
@@ -170,7 +169,7 @@
 .drawer-title { font-size: 1.05rem; font-weight: 700; letter-spacing: -.01em; }
 
 .drawer-close {
-  width: 30px; height: 30px; border-radius: var(--radius-sm); flex-shrink: 0;
+  width: 30px; height: 30px; border-radius: 0; flex-shrink: 0;
   border: 1.5px solid var(--border-color); background: var(--panel-bg);
   color: var(--text-secondary); cursor: pointer; font-size: .8rem;
   display: grid; place-items: center;
@@ -211,7 +210,7 @@
 .drawer-action {
   flex: 1 1 auto; min-width: 96px; display: flex; align-items: center; justify-content: center; gap: 6px;
   font-size: .78rem; font-weight: 600; font-family: inherit; text-decoration: none;
-  padding: 9px; border-radius: var(--radius-sm);
+  padding: 9px; border-radius: 0;
   border: 1.5px solid var(--border-color);
   background: var(--panel-bg); color: var(--text-primary);
   transition: var(--transition);
@@ -219,7 +218,7 @@
 .drawer-action:hover {
   background: var(--brand-soft);
   color: var(--brand);
-  border-color: rgba(0,97,255,.25);
+  border-color: rgba(228, 101, 33,.25);
 }
 .drawer-action.disabled { opacity: .4; pointer-events: none; }
 
@@ -228,7 +227,7 @@
 .drawer-jumpnav::-webkit-scrollbar { display: none; }
 .drawer-jump-btn {
   flex-shrink: 0; font-size: .7rem; font-weight: 600; font-family: inherit;
-  padding: 6px 12px; border-radius: var(--radius-sm);
+  padding: 6px 12px; border-radius: 0;
   border: 1.5px solid var(--border-color);
   background: var(--panel-bg); color: var(--text-secondary);
   cursor: pointer; transition: var(--transition); white-space: nowrap;
@@ -236,14 +235,14 @@
 .drawer-jump-btn:hover { color: var(--text-primary); border-color: var(--border-mid); }
 .drawer-jump-btn.active {
   background: var(--brand-soft); color: var(--brand);
-  border-color: rgba(0,97,255,.25);
+  border-color: rgba(228, 101, 33,.25);
 }
 
 /* Drawer sections */
 .drawer-section {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-md);
+  border-radius: 0;
   padding: 14px 16px; margin-bottom: 10px;
   scroll-margin-top: 10px;
 }

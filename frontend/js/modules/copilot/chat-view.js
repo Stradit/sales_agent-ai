@@ -17,8 +17,8 @@ export class ChatView {
     this.opts = opts;          // {compact, getSuggestions, getRecent, onSession, onMessages, onQuota, onNoteSaved, onScope}
     this.sessionId = null;
     this.messages = [];
-    this.context = {};         // {persona_id, account_id}
-    this.scopeNames = {};      // {persona, account}
+    this.context = {};         // {persona_id, account_id, deal_id}
+    this.scopeNames = {};      // {persona, account, deal}
     this.controller = null;
     this.mention = { items: [], index: 0, open: false, timer: null };
     this._raf = null;
@@ -31,6 +31,7 @@ export class ChatView {
   setScope(kind, id, name) {
     if (kind === 'persona') { this.context.persona_id = id; this.scopeNames.persona = name; }
     if (kind === 'account') { this.context.account_id = id; this.scopeNames.account = name; }
+    if (kind === 'deal') { this.context.deal_id = id; this.scopeNames.deal = name; }
     this.opts.onScope && this.opts.onScope(this);
     if (!this.messages.length) this.render();
   }
@@ -38,6 +39,7 @@ export class ChatView {
   clearScope(kind) {
     if (kind === 'persona') { delete this.context.persona_id; delete this.scopeNames.persona; }
     if (kind === 'account') { delete this.context.account_id; delete this.scopeNames.account; }
+    if (kind === 'deal') { delete this.context.deal_id; delete this.scopeNames.deal; }
     this.opts.onScope && this.opts.onScope(this);
     if (!this.messages.length) this.render();
   }

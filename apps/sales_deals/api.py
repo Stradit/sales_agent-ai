@@ -15,6 +15,8 @@ from sqlalchemy import text
 
 import auth
 from apps.sales_copilot import privacy
+from apps.sales_crm import permissions
+from apps.sales_crm.forecast import stage_probability
 from db.connection import engine, get_session
 from db.models.user import User
 
@@ -22,6 +24,8 @@ router = APIRouter(prefix="/api/deals", tags=["Deals pipeline"])
 
 STAGES = ["intro", "discovery", "proposal", "pilot", "contract"]
 CLOSED = ["won", "lost"]
+# A deal can only be marked won once there is a proposal on the table.
+WON_FROM = ["proposal", "pilot", "contract"]
 STAGE_LABEL = {"intro": "Intro", "discovery": "Discovery", "proposal": "Proposal", "pilot": "Pilot",
                "contract": "Contract", "won": "Won", "lost": "Lost"}
 ROLES = ["champion", "economic_buyer", "technical_evaluator", "influencer", "blocker", "user"]
@@ -89,20 +93,25 @@ def _session():
 
 
 def _acl(s, user) -> List[int]:
-    if not auth.AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
-        return [r[0] for r in s.execute(text("SELECT id FROM accounts")).fetchall()]
-    return list(auth.get_accessible_account_ids(s, user.id))
+    return auth.account_scope(s, user)
 
 
 def _get_deal_row(s, deal_id: int, user) -> Dict[str, Any]:
     row = s.execute(text("""
-        SELECT d.*, a.display_name AS account_name, l.lob_name, u.full_name AS owner_name, u.email AS owner_email
+        SELECT d.*, a.display_name AS account_name, l.lob_name, u.full_name AS owner_name, u.email AS owner_email,
+               bl.name AS business_line_name
         FROM deals d JOIN accounts a ON a.id = d.account_id
         LEFT JOIN lobs l ON l.id = d.lob_id LEFT JOIN users u ON u.id = d.owner_user_id
+        LEFT JOIN business_lines bl ON bl.id = d.business_line_id
         WHERE d.id = :id"""), {"id": deal_id}).mappings().fetchone()
     if not row or row["account_id"] not in _acl(s, user):
         raise HTTPException(404, "Deal not found.")
     return dict(row)
+
+
+def _check_business_line(s, bl_id: Optional[int]) -> None:
+    if bl_id is not None and not s.execute(text("SELECT 1 FROM business_lines WHERE id = :b AND active"), {"b": bl_id}).scalar():
+        raise HTTPException(400, "Unknown or inactive business line.")
 
 
 def _log(s, deal_id: int, user_id: Optional[int], kind: str, txt: str) -> None:
@@ -198,29 +207,50 @@ def _deal_payload(s, deal: Dict[str, Any], full: bool = False) -> Dict[str, Any]
         SELECT stage, item_key, label, ordinal, done, note, done_at FROM deal_checklist WHERE deal_id = :d
         ORDER BY array_position(ARRAY['intro','discovery','proposal','pilot','contract'], stage), ordinal"""),
         {"d": did}).mappings()]
-    last_activity = s.execute(text("SELECT max(created_at) FROM deal_activity WHERE deal_id = :d"), {"d": did}).scalar()
+    internal_last = s.execute(text("SELECT max(created_at) FROM deal_activity WHERE deal_id = :d"), {"d": did}).scalar()
+    customer_touch = deal.get("last_activity_at")          # latest logged/captured customer interaction (CRM activities)
+    last_activity = max([x for x in (internal_last, customer_touch) if x is not None], default=None)
     open_tasks = s.execute(text("SELECT count(*) FROM action_items WHERE deal_id = :d AND status IN ('open','in_progress')"),
                            {"d": did}).scalar()
     h = health(deal, stakeholders, checklist, last_activity, open_tasks)
+    if deal["stage"] in STAGES:
+        now = datetime.now(timezone.utc)
+        if customer_touch is None and (now - deal["created_at"]).days >= 7:
+            h["gaps"].append("No customer interaction logged yet")
+        elif customer_touch is not None and (now - customer_touch).days > 21:
+            h["gaps"].append(f"No customer contact for {(now - customer_touch).days} days")
     for x in stakeholders:
         if x["recent_move"]:
             h["gaps"].append(f"{x['name']} ({x['role'].replace('_', ' ')}) had a recent leadership change")
     out = {
         "id": did, "name": deal["name"], "account_id": deal["account_id"], "account_name": deal["account_name"],
         "lob_id": deal["lob_id"], "lob_name": deal.get("lob_name"), "stage": deal["stage"],
+        "business_line_id": deal.get("business_line_id"), "business_line_name": deal.get("business_line_name"),
+        "forecast_category": deal.get("forecast_category") or "pipeline", "probability": deal.get("probability"),
+        "stage_probability": stage_probability(s).get(deal["stage"]),
+        "amount_usd": float(deal["amount_usd"]) if deal.get("amount_usd") is not None else None,
         "stage_label": STAGE_LABEL[deal["stage"]], "offerings": deal["offerings"] or [],
         "value_amount": float(deal["value_amount"]) if deal["value_amount"] is not None else None,
         "currency": deal["currency"], "expected_close": deal["expected_close"], "next_step": deal["next_step"],
         "next_step_due": deal["next_step_due"], "lost_reason": deal["lost_reason"],
         "owner": {"id": deal["owner_user_id"], "name": deal.get("owner_name") or deal.get("owner_email")},
         "stage_changed_at": deal["stage_changed_at"], "created_at": deal["created_at"], "updated_at": deal["updated_at"],
-        "health": h, "open_tasks": open_tasks, "last_activity": last_activity,
+        "health": h, "open_tasks": open_tasks, "last_activity": last_activity, "last_customer_touch": customer_touch,
         "stakeholder_count": len(stakeholders),
         "committee_gaps": [r for r in ("champion", "economic_buyer") if r not in {x["role"] for x in stakeholders}],
     }
     stage_items = [c for c in checklist if c["stage"] == deal["stage"]]
     out["stage_progress"] = {"done": sum(1 for c in stage_items if c["done"]), "total": len(stage_items)}
+    if deal.get("introduction_id"):
+        intro = s.execute(text("""SELECT i.id, i.status, i.attribution_pct, c.name AS connector_name, c.kind AS connector_kind
+                                    FROM introductions i JOIN connectors c ON c.id = i.connector_id WHERE i.id = :i"""),
+                          {"i": deal["introduction_id"]}).mappings().fetchone()
+        out["introduction"] = dict(intro) if intro else None
+        if intro and intro["attribution_pct"] is not None:
+            out["introduction"]["attribution_pct"] = float(intro["attribution_pct"])
+    out["source"] = deal.get("source")
     if full:
+        out["qualification"] = deal.get("qualification") or {}
         out["stakeholders"] = stakeholders
         out["checklist"] = checklist
         out["history"] = [dict(r) for r in s.execute(text("""
@@ -230,8 +260,10 @@ def _deal_payload(s, deal: Dict[str, Any], full: bool = False) -> Dict[str, Any]
             SELECT a.id, a.kind, a.text, a.created_at, coalesce(u.full_name, u.email) AS by FROM deal_activity a
             LEFT JOIN users u ON u.id = a.user_id WHERE a.deal_id = :d ORDER BY a.created_at DESC LIMIT 100"""), {"d": did}).mappings()]
         out["tasks"] = [dict(r) for r in s.execute(text("""
-            SELECT id, title, status, priority, due_date FROM action_items WHERE deal_id = :d
-            ORDER BY (status IN ('done','cancelled')), due_date NULLS LAST"""), {"d": did}).mappings()]
+            SELECT t.id, t.title, t.status, t.priority, t.due_date, t.assigned_to_id,
+                   coalesce(u.full_name, u.email) AS assignee
+            FROM action_items t LEFT JOIN users u ON u.id = t.assigned_to_id WHERE t.deal_id = :d
+            ORDER BY (t.status IN ('done','cancelled')), t.due_date NULLS LAST, t.id"""), {"d": did}).mappings()]
     return out
 
 
@@ -242,6 +274,7 @@ class DealIn(BaseModel):
     account_id: int
     name: str = Field(..., min_length=1, max_length=200)
     lob_id: Optional[int] = None
+    business_line_id: Optional[int] = None
     value_amount: Optional[float] = Field(None, ge=0)
     currency: str = Field("USD", max_length=3)
     expected_close: Optional[date] = None
@@ -254,6 +287,10 @@ class DealIn(BaseModel):
 class DealPatch(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     lob_id: Optional[int] = None
+    business_line_id: Optional[int] = None
+    forecast_category: Optional[str] = None
+    probability: Optional[int] = Field(None, ge=0, le=100)
+    clear_probability: bool = False
     value_amount: Optional[float] = Field(None, ge=0)
     currency: Optional[str] = Field(None, max_length=3)
     expected_close: Optional[date] = None
@@ -262,6 +299,7 @@ class DealPatch(BaseModel):
     next_step_due: Optional[date] = None
     stage: Optional[str] = None
     lost_reason: Optional[str] = Field(None, max_length=500)
+    reason: Optional[str] = Field(None, max_length=500)
 
 
 class StakeholderIn(BaseModel):
@@ -290,22 +328,28 @@ class TaskIn(BaseModel):
 
 
 @router.get("/meta")
-def meta():
+def meta(s=Depends(_session)):
+    bls = [dict(r) for r in s.execute(text("SELECT id, key, name FROM business_lines WHERE active ORDER BY sort, name")).mappings()]
     return {"stages": [{"key": k, "label": STAGE_LABEL[k]} for k in STAGES + CLOSED], "roles": ROLES,
+            "won_from": WON_FROM, "business_lines": bls,
             "offerings": [{"key": k, "label": v} for k, v in OFFERINGS.items()],
             "checklist": {k: [{"key": a, "label": b} for a, b in v] for k, v in CHECKLIST.items()}}
 
 
 @router.get("")
-def list_deals(account_id: Optional[int] = None, mine: bool = False, q: Optional[str] = None,
+def list_deals(account_id: Optional[int] = None, business_line_id: Optional[int] = None, mine: bool = False, q: Optional[str] = None,
                include_closed: bool = True, user: User = Depends(auth.get_current_user), s=Depends(_session)):
     acl = _acl(s, user)
-    sql = """SELECT d.*, a.display_name AS account_name, l.lob_name, u.full_name AS owner_name, u.email AS owner_email
+    sql = """SELECT d.*, a.display_name AS account_name, l.lob_name, u.full_name AS owner_name, u.email AS owner_email,
+                    bl.name AS business_line_name
              FROM deals d JOIN accounts a ON a.id = d.account_id LEFT JOIN lobs l ON l.id = d.lob_id
-             LEFT JOIN users u ON u.id = d.owner_user_id WHERE d.account_id = ANY(:acl)"""
+             LEFT JOIN users u ON u.id = d.owner_user_id LEFT JOIN business_lines bl ON bl.id = d.business_line_id
+             WHERE d.account_id = ANY(:acl)"""
     params: Dict[str, Any] = {"acl": acl}
     if account_id:
         sql += " AND d.account_id = :a"; params["a"] = account_id
+    if business_line_id:
+        sql += " AND d.business_line_id = :bl"; params["bl"] = business_line_id
     if mine:
         sql += " AND d.owner_user_id = :u"; params["u"] = user.id
     if q:
@@ -328,11 +372,12 @@ def create_deal(body: DealIn, user: User = Depends(auth.get_current_user), s=Dep
     if body.stage not in STAGES:
         raise HTTPException(400, "stage must be one of " + ", ".join(STAGES))
     offerings = [o for o in body.offerings if o in OFFERINGS]
+    _check_business_line(s, body.business_line_id)
     did = s.execute(text("""
-        INSERT INTO deals (account_id, lob_id, name, owner_user_id, stage, offerings, value_amount, currency,
+        INSERT INTO deals (account_id, lob_id, business_line_id, name, owner_user_id, stage, offerings, value_amount, currency,
                            expected_close, next_step, next_step_due)
-        VALUES (:a, :l, :n, :u, :st, :o, :v, :c, :ec, :ns, :nd) RETURNING id"""),
-        {"a": body.account_id, "l": body.lob_id, "n": body.name.strip(), "u": user.id, "st": body.stage,
+        VALUES (:a, :l, :bl, :n, :u, :st, :o, :v, :c, :ec, :ns, :nd) RETURNING id"""),
+        {"a": body.account_id, "l": body.lob_id, "bl": body.business_line_id, "n": body.name.strip(), "u": user.id, "st": body.stage,
          "o": offerings, "v": body.value_amount, "c": body.currency.upper(), "ec": body.expected_close,
          "ns": body.next_step, "nd": body.next_step_due}).scalar()
     _seed_checklist(s, did)
@@ -342,6 +387,94 @@ def create_deal(body: DealIn, user: User = Depends(auth.get_current_user), s=Dep
     _sync_auto_checks(s, did, user.id)
     s.commit()
     return _deal_payload(s, _get_deal_row(s, did, user), full=True)
+
+
+
+
+def digest_data(s, acl: List[int], owner_id: Optional[int] = None, days: int = 7) -> Dict[str, Any]:
+    """Weekly pipeline digest (README §21.5, phase D4) — pure SQL + health(), no LLM."""
+    sql = """SELECT d.*, a.display_name AS account_name, l.lob_name, u.full_name AS owner_name, u.email AS owner_email,
+                    bl.name AS business_line_name
+             FROM deals d JOIN accounts a ON a.id = d.account_id LEFT JOIN lobs l ON l.id = d.lob_id
+             LEFT JOIN users u ON u.id = d.owner_user_id LEFT JOIN business_lines bl ON bl.id = d.business_line_id
+             WHERE d.account_id = ANY(:acl)"""
+    params: Dict[str, Any] = {"acl": acl}
+    if owner_id:
+        sql += " AND d.owner_user_id = :u"; params["u"] = owner_id
+    deals = [_deal_payload(s, dict(r)) for r in s.execute(text(sql), params).mappings()]
+    open_ = [d for d in deals if d["stage"] in STAGES]
+    since = datetime.now(timezone.utc).timestamp() - days * 86400
+    moves = [dict(r) for r in s.execute(text("""
+        SELECT h.deal_id, d.name, a.display_name AS account_name, h.from_stage, h.to_stage, h.changed_at
+        FROM deal_stage_history h JOIN deals d ON d.id = h.deal_id JOIN accounts a ON a.id = d.account_id
+        WHERE d.account_id = ANY(:acl) AND h.from_stage IS NOT NULL AND h.changed_at > now() - make_interval(days => :days)
+          AND (:u IS NULL OR d.owner_user_id = :u)
+        ORDER BY h.changed_at DESC LIMIT 30"""), {"acl": acl, "days": days, "u": owner_id}).mappings()]
+    today = date.today()
+
+    def brief(d, why=""):
+        return {"id": d["id"], "name": d["name"], "account_name": d["account_name"], "stage": d["stage"],
+                "stage_label": d["stage_label"], "value_amount": d["value_amount"], "currency": d["currency"],
+                "health": d["health"].get("score"), "level": d["health"]["level"], "why": why}
+
+    at_risk = [brief(d, "; ".join(d["health"]["gaps"][:2])) for d in open_ if d["health"]["level"] == "risk"]
+    stuck = [brief(d, f"{d['health'].get('days_in_stage', 0)} days in {d['stage_label']}")
+             for d in open_ if d["health"].get("days_in_stage", 0) > 30]
+    overdue = [brief(d, f"'{d['next_step']}' was due {d['next_step_due']}") for d in open_
+               if d["next_step"] and d["next_step_due"] and d["next_step_due"] < today]
+    closing = [brief(d, f"expected close {d['expected_close']}") for d in open_
+               if d["expected_close"] and 0 <= (d["expected_close"] - today).days <= 30]
+    closed = [brief(d, d["lost_reason"] or "") for d in deals if d["stage"] in CLOSED
+              and d["stage_changed_at"] and d["stage_changed_at"].timestamp() > since]
+    probs = stage_probability(s)
+
+    def usd(d):  # USD via fx_rates (deals.amount_usd); falls back to the raw value if no rate exists
+        return d["amount_usd"] if d.get("amount_usd") is not None else (d["value_amount"] or 0)
+    total = sum(usd(d) for d in open_ if d["forecast_category"] != "omitted")
+    weighted = sum(usd(d) * (d["probability"] if d["probability"] is not None else probs.get(d["stage"], 0)) / 100
+                   for d in open_ if d["forecast_category"] != "omitted")
+    return {"days": days, "generated_at": datetime.now(timezone.utc),
+            "totals": {"open": len(open_), "value": total, "weighted": round(weighted, 2),
+                       "by_stage": {st: sum(1 for d in open_ if d["stage"] == st) for st in STAGES},
+                       "avg_health": round(sum(d["health"]["score"] or 0 for d in open_) / len(open_)) if open_ else None},
+            "moves": moves, "at_risk": at_risk, "stuck": stuck, "overdue": overdue, "closing_soon": closing, "closed": closed}
+
+
+@router.get("/pipeline/digest")
+def digest(mine: bool = False, days: int = 7, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    return digest_data(s, _acl(s, user), user.id if mine else None, max(1, min(days, 90)))
+
+
+@router.get("/{deal_id}/toolkit")
+def toolkit(deal_id: int, stage: Optional[str] = None, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    """Stage toolkit (README §21.1, D3): why-now, question bank, MEDDICC, value map, battlecard, pilot plan …"""
+    from apps.sales_deals import toolkit as tk
+    deal = _get_deal_row(s, deal_id, user)
+    st = stage or (deal["stage"] if deal["stage"] in STAGES else "contract")
+    if st not in tk.BUILDERS:
+        raise HTTPException(400, "stage must be one of " + ", ".join(STAGES))
+    return {"stage": st, "stage_label": STAGE_LABEL[st], "data": tk.BUILDERS[st](s, deal)}
+
+
+class QualificationIn(BaseModel):
+    values: Dict[str, str]
+
+
+@router.patch("/{deal_id}/qualification")
+def set_qualification(deal_id: int, body: QualificationIn, user: User = Depends(auth.get_current_user),
+                      s=Depends(_session)):
+    from apps.sales_deals.toolkit import MEDDICC
+    _get_deal_row(s, deal_id, user)
+    labels = {k: label for k, label, _ in MEDDICC}
+    vals = {k: (v or "").strip()[:1000] for k, v in body.values.items() if k in labels}
+    if not vals:
+        raise HTTPException(400, "Nothing to update.")
+    import json
+    s.execute(text("UPDATE deals SET qualification = qualification || CAST(:v AS jsonb) WHERE id = :d"),
+              {"v": json.dumps(vals), "d": deal_id})
+    _log(s, deal_id, user.id, "field", "MEDDICC updated: " + ", ".join(labels[k] for k in vals))
+    s.commit()
+    return {"qualification": s.execute(text("SELECT qualification FROM deals WHERE id = :d"), {"d": deal_id}).scalar()}
 
 
 @router.get("/{deal_id}")
@@ -355,31 +488,56 @@ def update_deal(deal_id: int, body: DealPatch, user: User = Depends(auth.get_cur
     changes = body.model_dump(exclude_unset=True)
     warnings: List[str] = []
     new_stage = changes.pop("stage", None)
+    reason = (changes.pop("reason", None) or "").strip()
     if "offerings" in changes:
         changes["offerings"] = [o for o in changes["offerings"] or [] if o in OFFERINGS]
     if "currency" in changes and changes["currency"]:
         changes["currency"] = changes["currency"].upper()
+    if "business_line_id" in changes:
+        _check_business_line(s, changes["business_line_id"])
+    if changes.pop("clear_probability", False):
+        changes["probability"] = None
+    if "forecast_category" in changes:
+        if changes["forecast_category"] not in ("pipeline", "best_case", "commit", "omitted"):
+            raise HTTPException(400, "forecast_category must be pipeline, best_case, commit or omitted.")
+        if deal["stage"] in CLOSED:
+            raise HTTPException(400, "Won and lost deals are categorised automatically.")
     for col, val in changes.items():
         s.execute(text(f"UPDATE deals SET {col} = :v, updated_at = now() WHERE id = :d"), {"v": val, "d": deal_id})
         if col in ("next_step", "value_amount", "expected_close", "name"):
             _log(s, deal_id, user.id, "field", f"{col.replace('_', ' ').capitalize()} → {val if val is not None else '—'}")
+        elif col in ("forecast_category", "probability"):
+            label = {"forecast_category": "Forecast category", "probability": "Probability"}[col]
+            shown = (str(val).replace("_", " ") + ("%" if col == "probability" else "")) if val is not None else "stage default"
+            _log(s, deal_id, user.id, "field", f"{label} → {shown}")
+        elif col == "business_line_id":
+            bl = s.execute(text("SELECT name FROM business_lines WHERE id = :b"), {"b": val}).scalar() if val else None
+            _log(s, deal_id, user.id, "field", f"Business line → {bl or '—'}")
     if new_stage and new_stage != deal["stage"]:
         if new_stage not in STAGES + CLOSED:
             raise HTTPException(400, "Unknown stage.")
+        if new_stage == "won" and deal["stage"] not in WON_FROM:
+            raise HTTPException(400, "Move the deal to Proposal or later before marking it won.")
         if new_stage == "lost" and not (changes.get("lost_reason") or deal.get("lost_reason")):
             raise HTTPException(400, "Please give a reason when marking a deal as lost.")
-        # Soft gate: moving forward past unfinished exit criteria is allowed but flagged (README §21.2)
-        if new_stage in STAGES and deal["stage"] in STAGES and STAGES.index(new_stage) > STAGES.index(deal["stage"]):
-            open_items = s.execute(text("""SELECT label FROM deal_checklist WHERE deal_id = :d AND stage = :s AND NOT done
-                                           ORDER BY ordinal"""), {"d": deal_id, "s": deal["stage"]}).scalars().all()
-            if open_items:
-                warnings.append(f"Moved on with {len(open_items)} open {STAGE_LABEL[deal['stage']]} item(s): " + "; ".join(open_items))
+        if new_stage in STAGES and deal["stage"] in STAGES:
+            step = STAGES.index(new_stage) - STAGES.index(deal["stage"])
+            if abs(step) > 1:
+                raise HTTPException(400, "Move one stage at a time.")
+            if step == -1 and not reason:
+                raise HTTPException(400, "Please give a reason for moving back a stage.")
+            if step > 0:
+                open_items = s.execute(text("""SELECT label FROM deal_checklist WHERE deal_id = :d AND stage = :s AND NOT done
+                                               ORDER BY ordinal"""), {"d": deal_id, "s": deal["stage"]}).scalars().all()
+                if open_items:
+                    warnings.append(f"Moved on with {len(open_items)} open {STAGE_LABEL[deal['stage']]} item(s): " + "; ".join(open_items))
         s.execute(text("UPDATE deals SET stage = :st, stage_changed_at = now(), updated_at = now() WHERE id = :d"),
                   {"st": new_stage, "d": deal_id})
         s.execute(text("INSERT INTO deal_stage_history (deal_id, from_stage, to_stage, changed_by) VALUES (:d, :f, :t, :u)"),
                   {"d": deal_id, "f": deal["stage"], "t": new_stage, "u": user.id})
+        stage_reason = (changes.get("lost_reason") or deal.get("lost_reason")) if new_stage == "lost" else reason
         _log(s, deal_id, user.id, "stage", f"{STAGE_LABEL[deal['stage']]} → {STAGE_LABEL[new_stage]}"
-             + (f" (reason: {changes.get('lost_reason') or deal.get('lost_reason')})" if new_stage == "lost" else ""))
+             + (f" (reason: {stage_reason})" if stage_reason else ""))
     _sync_auto_checks(s, deal_id, user.id)
     s.commit()
     out = _deal_payload(s, _get_deal_row(s, deal_id, user), full=True)
@@ -390,8 +548,8 @@ def update_deal(deal_id: int, body: DealPatch, user: User = Depends(auth.get_cur
 @router.delete("/{deal_id}")
 def delete_deal(deal_id: int, user: User = Depends(auth.get_current_user), s=Depends(_session)):
     deal = _get_deal_row(s, deal_id, user)
-    if deal["owner_user_id"] not in (None, user.id) and getattr(user, "role", None) != "super_admin":
-        raise HTTPException(403, "Only the deal owner or an admin can delete a deal.")
+    if not permissions.can(s, user, "delete", deal["account_id"], deal["owner_user_id"]):
+        raise HTTPException(403, "Only the deal owner, their manager or an admin can delete a deal.")
     s.execute(text("DELETE FROM deals WHERE id = :d"), {"d": deal_id})
     s.commit()
     return {"ok": True}
@@ -456,14 +614,18 @@ def add_task(deal_id: int, body: TaskIn, user: User = Depends(auth.get_current_u
     deal = _get_deal_row(s, deal_id, user)
     if body.priority not in ("high", "medium", "low"):
         raise HTTPException(400, "priority must be high, medium or low")
-    s.execute(text("""INSERT INTO action_items (account_id, persona_id, title, status, priority, due_date,
+    # Created assigned to the author; the page reassigns through PATCH /api/action-items/{id},
+    # which owns the "assigned to you" email.
+    task_id = s.execute(text("""INSERT INTO action_items (account_id, persona_id, title, status, priority, due_date,
                                                 assigned_to_id, created_by_id, source, source_ref_id, deal_id, created_at, updated_at)
-                      VALUES (:a, :p, :t, 'open', :pr, :due, :u, :u, 'deal', :d, :d, now(), now())"""),
+                      VALUES (:a, :p, :t, 'open', :pr, :due, :u, :u, 'deal', :d, :d, now(), now()) RETURNING id"""),
               {"a": deal["account_id"], "p": body.persona_id, "t": body.title.strip(), "pr": body.priority,
-               "due": body.due_date, "u": user.id, "d": deal_id})
+               "due": body.due_date, "u": user.id, "d": deal_id}).scalar()
     _log(s, deal_id, user.id, "field", f"Task added: {body.title.strip()}")
     s.commit()
-    return _deal_payload(s, _get_deal_row(s, deal_id, user), full=True)
+    out = _deal_payload(s, _get_deal_row(s, deal_id, user), full=True)
+    out["task_id"] = task_id
+    return out
 
 
 @router.get("/{deal_id}/candidates")

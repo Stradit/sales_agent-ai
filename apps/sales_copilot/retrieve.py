@@ -27,9 +27,7 @@ def all_account_ids(session) -> List[int]:
 
 def acl_account_ids(session, user) -> List[int]:
     """Accounts this user may see — same rule as auth.require_account_access (README §11.1)."""
-    if not auth.AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
-        return all_account_ids(session)
-    return list(auth.get_accessible_account_ids(session, user.id))
+    return auth.account_scope(session, user)
 
 
 def _or_tsquery(q: str, drop: set) -> Optional[str]:
@@ -53,14 +51,19 @@ def _keyword(session, q: str, acl: List[int], limit: int, drop: set = frozenset(
     tsq = _or_tsquery(q, drop)
     if not tsq:
         return []
+    terms = tsq.split(" | ")
+    # Coverage first: a chunk matching more of the distinct query words beats a long chunk that
+    # repeats one common word (ts_rank alone favours the latter); ts_rank breaks ties.
     rows = session.execute(text("""
-        SELECT c.chunk_hash, max(ts_rank_cd(c.tsv, to_tsquery('english', :q))) AS r
+        SELECT c.chunk_hash,
+               (SELECT count(*) FROM unnest(CAST(:terms AS text[])) t WHERE c.tsv @@ to_tsquery('english', t)) AS cov,
+               max(ts_rank_cd(c.tsv, to_tsquery('english', :q))) AS r
         FROM rag_chunks c
         JOIN rag_document_chunks dc ON dc.chunk_hash = c.chunk_hash
         JOIN rag_documents d ON d.id = dc.document_id AND d.is_current AND d.deleted_at IS NULL
         JOIN rag_document_entities e ON e.canonical_key = d.canonical_key AND e.account_id = ANY(:acl)
         WHERE c.tsv @@ to_tsquery('english', :q)
-        GROUP BY c.chunk_hash ORDER BY r DESC LIMIT :lim"""), {"q": tsq, "acl": acl, "lim": limit}).fetchall()
+        GROUP BY c.chunk_hash ORDER BY cov DESC, r DESC LIMIT :lim"""), {"q": tsq, "terms": terms, "acl": acl, "lim": limit}).fetchall()
     return [bytes(r[0]) for r in rows]
 
 

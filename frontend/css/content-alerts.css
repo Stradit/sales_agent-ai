@@ -4,7 +4,7 @@
   display: inline-flex; align-items: center; gap: 6px;
   font-size: .78rem; font-weight: 600;
   padding: 6px 12px; margin-bottom: 12px;
-  border: 1px solid var(--brand); border-radius: 6px;
+  border: 1px solid var(--brand); border-radius: 0;
   color: var(--brand); text-decoration: none;
 }
 .content-pipeline-link:hover { background: var(--brand-soft); }
@@ -19,7 +19,7 @@
 .content-channel-card {
   background: var(--input-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border-radius: 0;
   padding: 14px;
 }
 .content-channel-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -40,7 +40,7 @@
 .content-field ul { margin: 4px 0 0; padding-left: 18px; }
 
 .content-warning {
-  margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  margin-top: 10px; padding: 10px 12px; border-radius: 0;
   background: rgba(255,77,79,.07); border: 1px solid rgba(255,77,79,.2);
 }
 .content-warning-title {
@@ -54,7 +54,7 @@
 .post-card {
   background: var(--panel-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   padding: 10px 12px;
 }
 .post-card-header {
@@ -74,7 +74,7 @@
 .alert-card {
   border-left: 3px solid var(--brand);
   background: var(--panel-bg);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: 0;
   padding: 12px 14px; margin-bottom: 10px;
   border-top: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
@@ -97,7 +97,7 @@
 .expansion-card {
   border-left: 3px solid var(--brand);
   background: var(--panel-bg);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  border-radius: 0;
   padding: 14px 16px;
   margin-bottom: 12px;
   border-top: 1px solid var(--border-color);
@@ -107,8 +107,8 @@
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .expansion-card:hover {
-  box-shadow: 0 4px 14px rgba(0, 97, 255, 0.08);
-  border-right-color: rgba(0, 97, 255, 0.2);
+  box-shadow: 0 4px 14px rgba(228, 101, 33, 0.08);
+  border-right-color: rgba(228, 101, 33, 0.2);
 }
 .expansion-card:last-child { margin-bottom: 0; }
 .expansion-header {
@@ -120,14 +120,14 @@
 .expansion-icon {
   width: 34px;
   height: 34px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   background: var(--brand-soft);
   color: var(--brand);
   display: grid;
   place-items: center;
   font-size: 1.05rem;
   flex-shrink: 0;
-  border: 1px solid rgba(0, 97, 255, 0.2);
+  border: 1px solid rgba(228, 101, 33, 0.2);
 }
 .expansion-header-body { flex: 1; min-width: 0; }
 .expansion-title {
@@ -157,7 +157,7 @@
   gap: 8px;
   margin-top: 8px;
   padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--bg-main);
   border: 1px solid var(--border-mid);
 }
@@ -208,7 +208,7 @@
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   background: var(--panel-bg);
   border: 1px solid var(--border-mid);
   color: var(--brand);
@@ -227,7 +227,7 @@
 .opportunity-card {
   border-left: 3px solid var(--warning);
   background: var(--panel-bg);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: 0;
   padding: 12px 14px; margin-bottom: 10px;
   border-top: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
@@ -246,7 +246,7 @@
 .opportunity-idea {
   font-size: .78rem; color: var(--text-primary); line-height: 1.5;
   margin-top: 8px; padding: 8px 10px;
-  background: var(--brand-soft); border-radius: var(--radius-xs);
+  background: var(--brand-soft); border-radius: 0;
 }
 .opportunity-idea i { color: var(--brand); margin-right: 3px; }
 .opportunity-sponsor {
@@ -262,7 +262,7 @@
 .weekly-email-card {
   background: var(--panel-bg);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   padding: 14px 16px;
 }
 .weekly-email-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
@@ -281,7 +281,7 @@
 .weekly-email-details p { color: var(--text-secondary); line-height: 1.55; margin: 6px 0 0; }
 .weekly-email-archive-item {
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   padding: 10px 14px;
   margin-bottom: 10px;
 }
@@ -306,12 +306,12 @@
 .alert-view-account {
   display: flex; align-items: center; justify-content: center; gap: 6px;
   width: 100%; margin-top: 10px; padding: 8px;
-  border: none; border-radius: var(--radius-sm);
+  border: none; border-radius: 0;
   background: var(--brand-soft); color: var(--brand);
   font-family: inherit; font-size: .74rem; font-weight: 700;
   cursor: pointer; transition: var(--transition);
 }
-.alert-view-account:hover { background: rgba(0,97,255,.18); }
+.alert-view-account:hover { background: rgba(228, 101, 33,.18); }
 
 /* Org hierarchy disclosure */
 .alert-hierarchy { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-color); font-size: .74rem; }
@@ -329,18 +329,18 @@
 .hierarchy-group-count {
   font-size: .62rem; font-weight: 700;
   background: var(--badge-bg); color: var(--text-muted);
-  padding: 1px 6px; border-radius: 99px;
+  padding: 1px 6px; border-radius: 0;
 }
 .hierarchy-group-people { display: flex; flex-wrap: wrap; gap: 5px; }
 .hierarchy-person {
   font-size: .7rem; font-family: inherit; padding: 3px 9px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   background: var(--panel-bg); border: 1.5px solid var(--border-color);
   color: var(--text-primary); cursor: pointer; transition: var(--transition);
 }
 .hierarchy-person:hover {
   background: var(--brand-soft);
   color: var(--brand);
-  border-color: rgba(0,97,255,.25);
+  border-color: rgba(228, 101, 33,.25);
 }
 

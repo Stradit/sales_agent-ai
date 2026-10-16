@@ -18,6 +18,8 @@ import { openContactDrawer } from './contact-drawer.js';
 import { openSignalModal, closeSignalModal } from './signal-modal.js';
 import { renderSelection } from './selection.js';
 import { renderNavTree } from './nav-tree.js';
+import { mountTimeline } from './activity-timeline.js';
+import { mountAccountCrm } from './crm-extras.js';
 
 export function renderScoreRing(account) {
   const score = account.heat_score;
@@ -102,7 +104,7 @@ function renderExecutiveBriefingTab(account, lob, signals, matches) {
 
       <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:4px;">
         ${matches.length ? `
-          <div class="signal-chip" style="background:var(--brand-soft); border-color:rgba(0,97,255,.2); color:var(--brand);">
+          <div class="signal-chip" style="background:var(--brand-soft); border-color:rgba(228, 101, 33,.2); color:var(--brand);">
             <i class="bi bi-lightning-charge-fill"></i>
             <span><strong>${matches[0].label} Opportunity:</strong> ${esc(matches[0].pitch)}</span>
           </div>` : ''}
@@ -321,6 +323,7 @@ export function renderCenter(account, lob) {
   const targetKey = resolveAccountTargetKey(account);
   const postCount = targetKey ? (state.contentStore.posts[targetKey] || []).length : 0;
 
+  queueMicrotask(() => mountAccountCrm(document.getElementById('acctCrmRow'), account.id));
   let tabContent = '';
   if (state.activeSalesTab === 'committee') {
     tabContent = renderBuyingCommitteeTab(account, lob);
@@ -334,6 +337,13 @@ export function renderCenter(account, lob) {
     tabContent = renderWeeklyUpdateTab(account);
   } else if (state.activeSalesTab === 'jobs') {
     tabContent = renderAccountJobsTab(account);
+  } else if (state.activeSalesTab === 'activity') {
+    tabContent = '<div class="panel"><div id="acctActivityTimeline"></div></div>';
+    // Mounted right after the caller writes this HTML into the page.
+    queueMicrotask(() => {
+      const tl = document.getElementById('acctActivityTimeline');
+      if (tl) mountTimeline(tl, { objectType: 'account', objectId: account.id, accountId: account.id });
+    });
   } else {
     tabContent = renderExecutiveBriefingTab(account, lob, signals, matches);
   }
@@ -352,6 +362,7 @@ export function renderCenter(account, lob) {
             ${account.operating_status ? `<span class="pill" title="Current operational status"><i class="bi bi-activity"></i> ${esc(account.operating_status)}</span>` : ''}
           </div>
           <p class="acct-desc">${esc(lob ? (lob.desc || 'No description available.') : (account.desc || 'No description available.'))}</p>
+          <div class="acct-crm-row" id="acctCrmRow"></div>
         </div>
         ${renderScoreRing(account)}
       </div>
@@ -377,6 +388,9 @@ export function renderCenter(account, lob) {
       </button>
       <button type="button" class="tab-btn ${state.activeSalesTab === 'jobs' ? 'active' : ''}" data-tab="jobs" title="Organisational hiring trends, domain distribution & strategic talent radar">
         <i class="bi bi-graph-up-arrow"></i> Hiring Trend Radar <span class="tab-badge">${getAccountJobs(account).length}</span>
+      </button>
+      <button type="button" class="tab-btn ${state.activeSalesTab === 'activity' ? 'active' : ''}" data-tab="activity" title="Meetings, calls, emails and transcripts logged by the team">
+        <i class="fa-solid fa-clock-rotate-left"></i> Activity
       </button>
     </div>
 

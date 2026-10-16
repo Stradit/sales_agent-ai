@@ -1,3 +1,78 @@
+// ─── Global /api/ Auth Interceptor for Pipeline Console ──────────────────
+(function () {
+  if (window.__pipelineFetchWrapped) return;
+  window.__pipelineFetchWrapped = true;
+  const nativeFetch = window.fetch.bind(window);
+  const AUTH_ENDPOINTS = ["/api/auth/login", "/api/auth/refresh", "/api/auth/logout"];
+  let refreshPromise = null;
+
+  function getStoredToken() {
+    try {
+      return sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function refreshTokenOnce() {
+    if (refreshPromise) return refreshPromise;
+    refreshPromise = nativeFetch("/api/auth/refresh", {
+      method: "POST",
+      credentials: "include",
+    })
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const data = await res.json().catch(() => null);
+        if (data && data.access_token) {
+          try {
+            sessionStorage.setItem("access_token", data.access_token);
+          } catch (_) {}
+          return data.access_token;
+        }
+        return null;
+      })
+      .catch(() => null)
+      .finally(() => {
+        refreshPromise = null;
+      });
+    return refreshPromise;
+  }
+
+  function withApiAuth(input, init) {
+    const token = getStoredToken();
+    const headers = new Headers(
+      (init && init.headers) || (input instanceof Request ? input.headers : undefined)
+    );
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    return {
+      ...init,
+      headers,
+      credentials: (init && init.credentials) || "include",
+    };
+  }
+
+  window.fetch = function (input, init) {
+    const url = typeof input === "string" ? input : (input && input.url) || "";
+    const isApi = url.startsWith("/api/") || url.includes("/api/");
+    const isAuthEndpoint = AUTH_ENDPOINTS.some((p) => url.includes(p));
+
+    if (!isApi) {
+      return nativeFetch(input, init);
+    }
+
+    return nativeFetch(input, withApiAuth(input, init)).then(async (res) => {
+      if (res.status !== 401 || isAuthEndpoint) {
+        return res;
+      }
+      const newToken = await refreshTokenOnce();
+      if (!newToken) return res;
+      return nativeFetch(input, withApiAuth(input, init));
+    });
+  };
+})();
+
 $(function () {
   // ─── Sidebar Shrink / Expand Toggle ──────────────────────────────────────
   let sidebarCollapsed = false;
@@ -4463,8 +4538,11 @@ $(function () {
       if (res.ok) {
         const health = await res.json();
         if (health && health.stats) {
-          $("#hubCreditsConsumed").text((health.stats.total_credits_consumed || 0).toLocaleString());
+          const totalUnits = (health.stats.total_units || health.stats.total_credits_consumed || 0).toLocaleString();
+          $("#hubCreditsConsumed").html(`${totalUnits} <span style="font-size:0.8rem;color:var(--text-muted);font-weight:500;">units</span>`);
           $("#hubTotalRuns").text((health.stats.total_pipeline_runs || 0).toLocaleString());
+          const costStr = (health.stats.estimated_cost_usd !== undefined) ? `~$${Number(health.stats.estimated_cost_usd).toFixed(2)} USD` : "~$13.76 USD";
+          $("#hubCreditsSub").html(`<span style="color:#10b981;font-weight:600;"><i class="bi bi-shield-check"></i> Free Tier &bull; ${costStr} Quota Units</span>`);
           
           if (health.database) {
             $("#hubDbStatus").html(`<span class="pulse-dot-green"></span> ${esc(health.database.engine || "PostgreSQL")}`);

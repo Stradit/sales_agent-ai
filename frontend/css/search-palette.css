@@ -6,7 +6,7 @@
   font-size: .66rem;
   font-weight: 600;
   padding: 1px 6px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   border: 1px solid rgba(255,255,255,.25);
   color: rgba(255,255,255,.75);
 }
@@ -31,7 +31,7 @@ body.sp-open { overflow: hidden; }
   flex-direction: column;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-lg);
+  border-radius: 0;
   box-shadow: var(--shadow-modal);
   overflow: hidden;
 }
@@ -61,7 +61,7 @@ body.sp-open { overflow: hidden; }
   font-size: .66rem;
   font-weight: 600;
   padding: 1px 6px;
-  border-radius: var(--radius-xs);
+  border-radius: 0;
   border: 1px solid var(--border-mid);
   background: var(--badge-bg);
   color: var(--text-secondary);
@@ -89,7 +89,7 @@ body.sp-open { overflow: hidden; }
   gap: 12px;
   margin: 0 6px;
   padding: 7px 10px;
-  border-radius: var(--radius-md);
+  border-radius: 0;
   cursor: pointer;
 }
 .sp-item.active { background: var(--brand-muted); }
@@ -99,7 +99,7 @@ body.sp-open { overflow: hidden; }
   flex: none;
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -126,7 +126,7 @@ body.sp-open { overflow: hidden; }
   font-size: .66rem;
   font-weight: 600;
   padding: 2px 7px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--badge-bg);
   color: var(--text-secondary);
 }

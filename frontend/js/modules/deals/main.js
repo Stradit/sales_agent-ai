@@ -1,12 +1,14 @@
 // Deals pipeline page (/deals). Board of Intro → Discovery → Proposal → Pilot → Contract
 // with drag-and-drop, plus a deal room drawer (stage stepper, fields, health, exit
-// checklist, buying committee, activity, tasks). API: apps/sales_deals/api.py.
+// checklist, buying committee, activity, tasks, stage toolkit) and a weekly digest. API: apps/sales_deals/api.py.
 import '../fetch-instrumentation.js';
 import { initThemeToggle } from '../theme.js';
 import { initTopbarAuth } from '../topbar-auth.js';
 import { showToast } from '../toast.js';
 import { esc } from '../utils.js';
 import { downloadFile } from '../download.js';
+import { renderToolkit, copilotHref } from './toolkit.js';
+import { mountTimeline } from '../activity-timeline.js';
 import { photoAttr } from '../persona-photo.js';
 
 const $ = (id) => document.getElementById(id);
@@ -16,7 +18,13 @@ const ROLE_LABEL = { champion: 'Champion', economic_buyer: 'Economic buyer', tec
 const ACTIVITY_ICON = { note: 'fa-comment', stage: 'fa-diagram-next', checklist: 'fa-list-check', stakeholder: 'fa-user-plus',
   field: 'fa-pen', created: 'fa-flag' };
 
-const st = { meta: null, deals: [], summary: {}, accounts: [], deal: null, tab: 'checklist', dragId: null };
+const PRIORITIES = ['high', 'medium', 'low'];
+
+const st = { meta: null, deals: [], summary: {}, accounts: [], deal: null, tab: 'toolkit', dragId: null, tk: null, tkKey: '',
+  me: null, users: null, editTask: null };
+
+// Mirrors WON_FROM in apps/sales_deals/api.py: no "won" before a proposal is on the table.
+const canWin = (d) => ((st.meta && st.meta.won_from) || ['proposal', 'pilot', 'contract']).includes(d.stage);
 
 async function api(path, opts = {}) {
   const res = await fetch(`/api/deals${path}`, {
@@ -53,14 +61,15 @@ function healthBadge(h) {
 function card(d) {
   const overdue = isOverdue(d.next_step_due);
   const gap = (d.health && d.health.gaps && d.health.gaps[0]) || '';
-  return `<article class="dl-card${d.stage === 'won' ? ' dl-won' : ''}${d.stage === 'lost' ? ' dl-lost' : ''}" draggable="${OPEN_STAGES.includes(d.stage)}"
+  return `<article class="dl-card${d.stage === 'won' ? ' dl-won' : ''}${d.stage === 'lost' ? ' dl-lost' : ''}" draggable="${OPEN_STAGES.includes(d.stage) && !document.body.classList.contains('role-viewer')}"
       data-deal="${d.id}" tabindex="0" aria-label="${esc(d.name)}, ${esc(d.account_name)}">
     <div class="dl-card-top">
-      <div><div class="dl-card-name">${esc(d.name)}</div><div class="dl-card-acct">${esc(d.account_name)}</div></div>
+      <div><div class="dl-card-name">${esc(d.name)}</div><div class="dl-card-acct">${esc(d.account_name)}${d.business_line_name ? ` · ${esc(d.business_line_name)}` : ''}</div></div>
       ${healthBadge(d.health)}
     </div>
     <div class="dl-card-row">
       <span class="dl-value">${esc(money(d.value_amount, d.currency))}</span>
+      ${['commit', 'best_case'].includes(d.forecast_category) && OPEN_STAGES.includes(d.stage) ? `<span class="dl-fc-tag ${d.forecast_category}">${d.forecast_category === 'commit' ? 'Commit' : 'Best case'}</span>` : ''}
       ${d.expected_close ? `<span><i class="fa-regular fa-calendar"></i> ${esc(dateLabel(d.expected_close))}</span>` : ''}
       <span title="Buying committee"><i class="fa-solid fa-users"></i> ${d.stakeholder_count}</span>
       ${d.open_tasks ? `<span title="Open tasks"><i class="fa-solid fa-list-check"></i> ${d.open_tasks}</span>` : ''}
@@ -94,9 +103,44 @@ function renderBoard() {
     : 'No open deals yet — create one to start tracking the journey from intro to contract.';
 }
 
+// ── Weekly digest (README §21.5) ─────────────────────────────────────────────
+const DIGEST_KEY = 'dl.digest.open';
+function digestList(title, icon, items, tone) {
+  if (!items.length) return '';
+  return `<div class="dl-dg-list ${tone}"><h3><i class="fa-solid ${icon}"></i> ${esc(title)} <span>${items.length}</span></h3><ul>
+    ${items.slice(0, 5).map(x => `<li><button type="button" data-deal-open="${x.id}"><strong>${esc(x.name)}</strong>
+      <small>${esc(x.account_name)} · ${esc(x.stage_label || x.to_stage || '')}${x.why ? ` · ${esc(x.why)}` : ''}</small></button></li>`).join('')}
+    ${items.length > 5 ? `<li class="dl-dg-more">+${items.length - 5} more</li>` : ''}</ul></div>`;
+}
+
+async function loadDigest() {
+  const box = $('dlDigest');
+  try {
+    const g = await api(`/pipeline/digest?days=7${$('dlMine').checked ? '&mine=true' : ''}`);
+    const t = g.totals;
+    if (!t.open && !g.closed.length) { box.innerHTML = ''; return; }
+    const moves = g.moves.map(m => ({ id: m.deal_id, name: m.name, account_name: m.account_name,
+      stage_label: `${m.from_stage} → ${m.to_stage}` }));
+    const lists = [digestList('At risk', 'fa-heart-crack', g.at_risk, 'risk'), digestList('Overdue next steps', 'fa-clock', g.overdue, 'risk'),
+      digestList('Stuck > 30 days', 'fa-hourglass-half', g.stuck, 'watch'), digestList('Closing in 30 days', 'fa-calendar-check', g.closing_soon, 'good'),
+      digestList('Moved this week', 'fa-arrow-right', moves, 'info'), digestList('Closed this week', 'fa-flag-checkered', g.closed, 'info')].join('');
+    let open = true;
+    try { open = localStorage.getItem(DIGEST_KEY) !== '0'; } catch { /* storage unavailable */ }
+    box.innerHTML = `<details${open ? ' open' : ''}><summary><span><i class="fa-solid fa-newspaper"></i> This week in your pipeline</span>
+        <span class="dl-dg-kpis"><span><b>${t.open}</b> open</span><span><b>${esc(money(t.value))}</b> pipeline</span>
+        <span title="Value × stage probability (Intro 10% … Contract 80%)"><b>${esc(money(t.weighted))}</b> weighted</span>
+        ${t.avg_health != null ? `<span><b>${t.avg_health}</b> avg health</span>` : ''}</span></summary>
+      <div class="dl-dg-grid">${lists || '<p class="dl-dg-calm"><i class="fa-solid fa-circle-check"></i> Nothing needs attention this week.</p>'}</div></details>`;
+    box.querySelector('details').addEventListener('toggle', (e) => {
+      try { localStorage.setItem(DIGEST_KEY, e.target.open ? '1' : '0'); } catch { /* ignore */ }
+    });
+  } catch { box.innerHTML = ''; }
+}
+
 async function loadDeals() {
   const params = new URLSearchParams();
   if ($('dlAccount').value) params.set('account_id', $('dlAccount').value);
+  if ($('dlBusinessLine').value) params.set('business_line_id', $('dlBusinessLine').value);
   if ($('dlMine').checked) params.set('mine', 'true');
   if ($('dlSearch').value.trim()) params.set('q', $('dlSearch').value.trim());
   try {
@@ -104,6 +148,7 @@ async function loadDeals() {
     st.deals = data.deals;
     st.summary = data.summary;
     renderBoard();
+    loadDigest();
   } catch (err) { $('dlSummary').textContent = err.message; }
 }
 
@@ -115,6 +160,33 @@ async function moveDeal(id, stage, extra = {}) {
     if (st.deal && st.deal.id === id) { st.deal = d; renderRoom(); }
     await loadDeals();
   } catch (err) { showToast(err.message); }
+}
+
+function canStep(d, s) {
+  if (!d || !OPEN_STAGES.includes(d.stage) || s === d.stage) return false;
+  return Math.abs(OPEN_STAGES.indexOf(s) - OPEN_STAGES.indexOf(d.stage)) === 1;
+}
+
+async function moveToStage(target, dealId = null) {
+  const d = dealId ? st.deals.find(x => x.id === dealId) : st.deal;
+  if (!d || target === d.stage) return;
+  const from = OPEN_STAGES.indexOf(d.stage);
+  const to = OPEN_STAGES.indexOf(target);
+  if (from >= 0 && to >= 0) {
+    if (Math.abs(to - from) !== 1) { showToast('Move one stage at a time'); return; }
+    if (to < from) {
+      if (!st.deal || st.deal.id !== d.id) await openDeal(d.id);
+      const targetLabel = (st.meta.stages.find(x => x.key === target) || {}).label || target;
+      const reason = await askReason(`Why move back to ${targetLabel}? (required)`, 'Move back', false);
+      if (reason) {
+        if (st.deal && st.deal.id === d.id) patchDeal({ stage: target, reason });
+        else moveDeal(d.id, target, { reason });
+      }
+      return;
+    }
+  }
+  if (st.deal && st.deal.id === d.id) patchDeal({ stage: target });
+  else moveDeal(d.id, target);
 }
 
 // ── Deal room ────────────────────────────────────────────────────────────────
@@ -132,15 +204,18 @@ function renderRoom() {
     <div class="dl-room-head">
       <div class="dl-room-head-row">
         <div><h2 class="dl-room-title" id="dlRoomTitle">${esc(d.name)}</h2>
-          <div class="dl-room-acct"><a href="/?account=${d.account_id}">${esc(d.account_name)}</a>${d.owner && d.owner.name ? ` · owner ${esc(d.owner.name)}` : ''}</div></div>
+          <div class="dl-room-acct"><a href="/?account=${d.account_id}">${esc(d.account_name)}</a>${d.owner && d.owner.name ? ` · owner ${esc(d.owner.name)}` : ''}
+            ${d.introduction ? ` · <a href="/introductions?intro=${d.introduction.id}" title="Sourced by a warm introduction"><i class="fa-solid fa-handshake"></i> Introduced by ${esc(d.introduction.connector_name)}${d.introduction.attribution_pct != null ? ` (${d.introduction.attribution_pct}%)` : ''}</a>` : ''}</div></div>
         <button type="button" class="dl-icon" data-close-room aria-label="Close deal"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="dl-stepper" role="group" aria-label="Stage">${OPEN_STAGES.map((s, i) => {
         const lbl = st.meta.stages.find(x => x.key === s).label;
-        return `<button type="button" class="dl-step${i < idx ? ' done' : ''}${s === d.stage ? ' current' : ''}" data-stage-step="${s}" aria-current="${s === d.stage ? 'step' : 'false'}">${esc(lbl)}</button>`;
+        const allowed = canStep(d, s);
+        return `<button type="button" class="dl-step${i < idx ? ' done' : ''}${s === d.stage ? ' current' : ''}" data-stage-step="${s}" aria-current="${s === d.stage ? 'step' : 'false'}"${allowed ? '' : ' disabled'}${!allowed && s !== d.stage && OPEN_STAGES.includes(d.stage) ? ' title="Move one stage at a time"' : ''}>${esc(lbl)}</button>`;
       }).join('')}</div>
       ${OPEN_STAGES.includes(d.stage) ? `<div class="dl-close-btns">
-          <button type="button" class="dl-btn" data-close-deal="won"><i class="fa-solid fa-trophy"></i> Mark won</button>
+          ${canWin(d) ? '<button type="button" class="dl-btn" data-close-deal="won"><i class="fa-solid fa-trophy"></i> Mark won</button>'
+            : '<span class="dl-hint"><i class="fa-solid fa-lock"></i> Mark won unlocks at Proposal</span>'}
           <button type="button" class="dl-btn dl-btn-danger" data-close-deal="lost"><i class="fa-solid fa-circle-xmark"></i> Mark lost</button></div>`
         : `<div class="dl-warn">This deal is <strong>${esc(d.stage_label)}</strong>${d.lost_reason ? ` — ${esc(d.lost_reason)}` : ''}. <button type="button" class="dl-btn" data-stage-step="contract">Reopen</button></div>`}
     </div>
@@ -151,6 +226,12 @@ function renderRoom() {
         ${field('Next step', `<input data-field="next_step" maxlength="500" value="${esc(d.next_step || '')}" placeholder="What happens next?">`, true)}
         ${field('Next step due', `<input type="date" data-field="next_step_due" value="${d.next_step_due ? String(d.next_step_due).slice(0, 10) : ''}">`)}
         ${field('Deal name', `<input data-field="name" maxlength="200" value="${esc(d.name)}">`)}
+        ${OPEN_STAGES.includes(d.stage) ? field('Forecast category', `<select data-field="forecast_category">${[['pipeline', 'Pipeline'], ['best_case', 'Best case'], ['commit', 'Commit'], ['omitted', 'Omitted']]
+          .map(([k, l]) => `<option value="${k}"${k === d.forecast_category ? ' selected' : ''}>${l}</option>`).join('')}</select>`) : ''}
+        ${OPEN_STAGES.includes(d.stage) ? field('Probability %', `<input type="number" min="0" max="100" step="5" data-field="probability" value="${d.probability ?? ''}"
+          placeholder="${d.stage_probability ?? ''} (stage default)">`) : ''}
+        ${field('Business line', `<select data-field="business_line_id"><option value="">— Not set —</option>${(st.meta.business_lines || []).map(b =>
+          `<option value="${b.id}"${b.id === d.business_line_id ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`)}
         <div class="dl-field dl-field-wide">StradIT offerings<div class="dl-chips">${offerings}</div></div>
       </div>
 
@@ -164,8 +245,10 @@ function renderRoom() {
           </div>
         </div></div>` : ''}
 
-      <div class="dl-tabs" role="tablist">${[['checklist', 'Exit criteria'], ['committee', `Buying committee (${d.stakeholders.length})`], ['activity', 'Activity'], ['tasks', `Tasks (${d.tasks.filter(t => !['done', 'cancelled'].includes(t.status)).length})`]]
+      <div class="dl-tabs" role="tablist">${[['toolkit', 'Stage toolkit'], ['checklist', 'Exit criteria'], ['committee', `Buying committee (${d.stakeholders.length})`], ['activity', 'Activity'], ['tasks', `Tasks (${d.tasks.filter(t => !['done', 'cancelled'].includes(t.status)).length})`]]
         .map(([k, l]) => `<button type="button" class="dl-tab${st.tab === k ? ' active' : ''}" data-tab="${k}" role="tab" aria-selected="${st.tab === k}">${esc(l)}</button>`).join('')}</div>
+
+      <div class="dl-pane${st.tab === 'toolkit' ? ' active' : ''}" role="tabpanel" id="dlToolkit">${st.tab === 'toolkit' ? renderToolkit(st.tk, d, openStages()) : ''}</div>
 
       <div class="dl-pane${st.tab === 'checklist' ? ' active' : ''}" role="tabpanel">
         ${byStage.map(({ s, items }) => {
@@ -199,30 +282,129 @@ function renderRoom() {
       </div>
 
       <div class="dl-pane${st.tab === 'activity' ? ' active' : ''}" role="tabpanel">
-        <form class="dl-note-form" id="dlNoteForm"><textarea id="dlNote" maxlength="2000" placeholder="Log a meeting note, decision or update…" aria-label="Note"></textarea>
+        <div id="dlTimeline"></div>
+        <details class="dl-changelog"><summary>Deal change log (${d.activity.length})</summary>
+        <form class="dl-note-form" id="dlNoteForm"><textarea id="dlNote" maxlength="2000" placeholder="Internal note about the deal (not a customer interaction)…" aria-label="Internal note"></textarea>
           <button type="submit" class="dl-btn dl-btn-primary">Add</button></form>
         <ul class="dl-timeline">${d.activity.map(a => `<li><i class="fa-solid ${ACTIVITY_ICON[a.kind] || 'fa-circle'}"></i>
           <div>${esc(a.text)}<div class="dl-when">${esc(a.by || 'System')} · ${esc(ago(a.created_at))}</div></div></li>`).join('')}</ul>
+        </details>
       </div>
 
       <div class="dl-pane${st.tab === 'tasks' ? ' active' : ''}" role="tabpanel">
-        <form class="dl-add-row" id="dlTaskForm" style="margin-top:0">
-          <input id="dlTaskTitle" maxlength="500" placeholder="New task — e.g. Send the governance one-pager" aria-label="Task title" required>
-          <input id="dlTaskDue" type="date" aria-label="Due date">
-          <select id="dlTaskPriority" aria-label="Priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
-          <button type="submit" class="dl-btn dl-btn-primary">Add task</button>
+        <form class="dl-task-form" id="dlTaskForm">
+          <label class="dl-task-title">New task<input id="dlTaskTitle" maxlength="500" placeholder="e.g. Send the governance one-pager" required></label>
+          <label>Due<input id="dlTaskDue" type="date"></label>
+          <label>Priority<select id="dlTaskPriority">${priorityOptions('medium')}</select></label>
+          <label>Assignee<select id="dlTaskAssignee">${assigneeOptions(st.me && st.me.id)}</select></label>
+          <div class="dl-task-submit"><button type="submit" class="dl-btn dl-btn-primary"><i class="fa-solid fa-plus"></i> Add task</button></div>
         </form>
-        ${d.tasks.map(t => `<div class="dl-task${['done', 'cancelled'].includes(t.status) ? ' done' : ''}">
-          <span>${esc(t.title)}</span><span class="dl-pill">${esc(t.priority)}</span><span class="dl-pill">${esc(t.status.replace('_', ' '))}</span>
-          ${t.due_date ? `<span class="${isOverdue(t.due_date) && !['done', 'cancelled'].includes(t.status) ? 'dl-overdue' : ''}" style="margin-left:auto;font-size:.72rem">${esc(dateLabel(t.due_date))}</span>` : ''}</div>`).join('')
-          || '<p style="font-size:.8rem;color:var(--text-muted)">No tasks yet. Tasks added here also appear on <a href="/tasks">My Tasks</a>.</p>'}
+        ${d.tasks.length ? `<ul class="dl-task-list">${d.tasks.map(taskRow).join('')}</ul>`
+          : '<p class="dl-task-empty">No tasks yet. Tasks added here also appear on <a href="/tasks">My Tasks</a>.</p>'}
       </div>
     </div>
     <div class="dl-room-foot">
-      <a class="dl-btn" href="/copilot?account_id=${d.account_id}" title="Ask the Sales Copilot about this account"><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Copilot</a>
+      <a class="dl-btn" href="${esc(copilotHref(d, ''))}" title="Ask the Sales Copilot about this deal"><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Copilot</a>
       <button type="button" class="dl-btn" data-export><i class="fa-regular fa-file-excel"></i> Export</button>
       <button type="button" class="dl-btn dl-btn-danger" data-delete style="margin-left:auto"><i class="fa-regular fa-trash-can"></i> Delete</button>
     </div>`;
+  if (st.tab === 'toolkit') loadToolkit();
+  if (st.tab === 'activity' && $('dlTimeline')) {
+    mountTimeline($('dlTimeline'), { objectType: 'deal', objectId: d.id, accountId: d.account_id, dealId: d.id,
+      onChange: () => { api(`/${d.id}`).then(fresh => { if (st.deal && st.deal.id === fresh.id) { st.deal.tasks = fresh.tasks; st.deal.health = fresh.health; } loadDeals(); }).catch(() => {}); } });
+  }
+}
+
+// ── Tasks ────────────────────────────────────────────────────────────────────
+const isClosedTask = (t) => ['done', 'cancelled'].includes(t.status);
+const priorityOptions = (sel) => PRIORITIES.map(p => `<option value="${p}"${p === sel ? ' selected' : ''}>${p[0].toUpperCase()}${p.slice(1)}</option>`).join('');
+
+function assigneeOptions(sel) {
+  const people = [...(st.users || [])];
+  if (st.me && !people.some(u => u.id === st.me.id)) people.unshift({ id: st.me.id, name: st.me.full_name || st.me.email });
+  return people.map(u => `<option value="${u.id}"${u.id === sel ? ' selected' : ''}>${esc(u.id === (st.me && st.me.id) ? `${u.name} (me)` : u.name)}</option>`).join('');
+}
+
+function taskRow(t) {
+  const closed = isClosedTask(t);
+  if (st.editTask === t.id) {
+    return `<li class="dl-task" data-task="${t.id}"><span></span><form class="dl-task-edit" data-task-edit="${t.id}">
+      <label class="dl-task-title">Task<input name="title" maxlength="500" value="${esc(t.title)}" required></label>
+      <label>Due<input name="due_date" type="date" value="${t.due_date ? String(t.due_date).slice(0, 10) : ''}"></label>
+      <label>Priority<select name="priority">${priorityOptions(t.priority)}</select></label>
+      <label>Assignee<select name="assigned_to_id">${assigneeOptions(t.assigned_to_id)}</select></label>
+      <footer><button type="button" class="dl-btn" data-task-cancel>Cancel</button><button type="submit" class="dl-btn dl-btn-primary">Save</button></footer>
+    </form></li>`;
+  }
+  const overdue = t.due_date && !closed && isOverdue(t.due_date);
+  return `<li class="dl-task${closed ? ' done' : ''}" data-task="${t.id}">
+    <input type="checkbox" data-task-done="${t.id}"${t.status === 'done' ? ' checked' : ''} aria-label="${t.status === 'done' ? 'Reopen' : 'Complete'}: ${esc(t.title)}">
+    <div><div class="dl-task-name">${esc(t.title)}</div>
+      <div class="dl-task-meta">
+        <span class="dl-pill ${esc(t.priority)}">${esc(t.priority)}</span>
+        ${t.status === 'in_progress' || t.status === 'cancelled' ? `<span class="dl-pill">${esc(t.status.replace('_', ' '))}</span>` : ''}
+        ${t.due_date ? `<span class="${overdue ? 'dl-overdue' : ''}"><i class="fa-regular fa-calendar"></i> ${overdue ? 'Overdue · ' : ''}${esc(dateLabel(t.due_date))}</span>` : ''}
+        <span class="dl-task-who" title="Assignee">${t.assignee ? `<span class="dl-avatar" aria-hidden="true">${esc(initials(t.assignee))}</span>${esc(t.assignee)}` : '<i class="fa-regular fa-user"></i> Unassigned'}</span>
+      </div></div>
+    <div class="dl-task-actions">${closed ? '' : `<button type="button" class="dl-icon" data-task-editbtn="${t.id}" aria-label="Edit ${esc(t.title)}"><i class="fa-solid fa-pen"></i></button>`}</div>
+  </li>`;
+}
+
+async function loadUsers() {
+  if (st.users) return;
+  try { st.users = ((await (await fetch('/api/users')).json()).users) || []; } catch { st.users = []; }
+}
+
+// Task edits go through the shared action-items API (it owns access checks and the "assigned to you" email).
+async function patchTask(id, body) {
+  const res = await fetch(`/api/action-items/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `Couldn't update the task (${res.status})`);
+  return data;
+}
+
+async function refreshDeal() {
+  const fresh = await api(`/${st.deal.id}`);
+  if (st.deal && st.deal.id === fresh.id) { st.deal = fresh; renderRoom(); }
+  loadDeals();
+}
+
+function openStages() { return (st.meta ? st.meta.stages : []).filter(s => OPEN_STAGES.includes(s.key)); }
+
+// Toolkit data is cached per deal + stage + last update, so edits elsewhere refresh it.
+async function loadToolkit(stage) {
+  const d = st.deal;
+  const want = stage || (st.tk && st.tk.dealId === d.id ? st.tk.stage : null) || (OPEN_STAGES.includes(d.stage) ? d.stage : 'contract');
+  const key = `${d.id}|${want}|${d.updated_at}|${d.stakeholders.length}|${d.offerings.join(',')}`;
+  if (key === st.tkKey && st.tk) return;
+  st.tkKey = key;
+  const pane = () => $('dlToolkit');
+  if (!st.tk || st.tk.dealId !== d.id || st.tk.stage !== want) {
+    st.tk = null;
+    if (pane()) pane().innerHTML = renderToolkit(null, d, openStages());
+    const nav = pane() && pane().querySelector(`[data-tk-stage="${want}"]`);
+    if (nav) nav.classList.add('active');
+  }
+  try {
+    const res = await api(`/${d.id}/toolkit?stage=${want}`);
+    if (!st.deal || st.deal.id !== d.id || st.tkKey !== key) return;
+    st.tk = { ...res, dealId: d.id };
+  } catch (err) {
+    st.tk = { stage: want, dealId: d.id, error: err.message };
+  }
+  if (pane() && st.tab === 'toolkit') pane().innerHTML = renderToolkit(st.tk, st.deal, openStages());
+}
+
+let medTimer = null;
+async function saveQualification(key, value) {
+  try {
+    const res = await api(`/${st.deal.id}/qualification`, { method: 'PATCH', body: { values: { [key]: value } } });
+    st.deal.qualification = res.qualification;
+    const box = $('dlToolkit') && $('dlToolkit').querySelector(`[data-med="${key}"]`);
+    if (box) box.closest('.tk-med').classList.toggle('filled', !!value);
+    clearTimeout(medTimer);
+    medTimer = setTimeout(() => showToast('MEDDICC saved'), 150);
+  } catch (err) { showToast(err.message); }
 }
 
 async function openDeal(id) {
@@ -270,7 +452,10 @@ function wireRoom() {
     const t = e.target;
     if (t.closest('[data-close-room]')) { closeRoom(); return; }
     const step = t.closest('[data-stage-step]');
-    if (step && step.dataset.stageStep !== st.deal.stage) { patchDeal({ stage: step.dataset.stageStep }); return; }
+    if (step && step.dataset.stageStep !== st.deal.stage) {
+      if (!step.disabled) moveToStage(step.dataset.stageStep);
+      return;
+    }
     const close = t.closest('[data-close-deal]');
     if (close) {
       if (close.dataset.closeDeal === 'lost') {
@@ -288,6 +473,30 @@ function wireRoom() {
     }
     const tab = t.closest('[data-tab]');
     if (tab) { st.tab = tab.dataset.tab; renderRoom(); return; }
+    const tkStage = t.closest('[data-tk-stage]');
+    if (tkStage) { loadToolkit(tkStage.dataset.tkStage); return; }
+    const tkAdd = t.closest('[data-tk-add]');
+    if (tkAdd) {
+      try {
+        st.deal = await api(`/${st.deal.id}/stakeholders`, { method: 'POST', body: { persona_id: Number(tkAdd.dataset.tkAdd), role: 'influencer' } });
+        showToast('Added as influencer — set the role in Buying committee'); renderRoom(); loadDeals();
+      } catch (err) { showToast(err.message); }
+      return;
+    }
+    const tkCheck = t.closest('[data-tk-check]');
+    if (tkCheck) {
+      const [stage, key] = tkCheck.dataset.tkCheck.split('|');
+      try { st.deal = await api(`/${st.deal.id}/checklist/${stage}/${key}`, { method: 'PATCH', body: { done: true } }); showToast('Exit criterion ticked'); renderRoom(); loadDeals(); }
+      catch (err) { showToast(err.message); }
+      return;
+    }
+    const medUse = t.closest('[data-med-use]');
+    if (medUse) {
+      const box = $('dlToolkit').querySelector(`[data-med="${medUse.dataset.medUse}"]`);
+      box.value = medUse.dataset.medText; medUse.remove();
+      saveQualification(medUse.dataset.medUse, box.value);
+      return;
+    }
     const rm = t.closest('[data-remove-person]');
     if (rm) {
       try { st.deal = await api(`/${st.deal.id}/stakeholders/${rm.dataset.removePerson}`, { method: 'DELETE' }); renderRoom(); loadDeals(); }
@@ -303,16 +512,37 @@ function wireRoom() {
       return;
     }
     if (t.closest('[data-export]')) { downloadFile(`/api/deals/${st.deal.id}/export`, 'deal.xlsx').catch(err => showToast(err.message)); return; }
+    const editBtn = t.closest('[data-task-editbtn]');
+    if (editBtn) {
+      await loadUsers();
+      st.editTask = Number(editBtn.dataset.taskEditbtn); renderRoom();
+      const input = room.querySelector('[data-task-edit] input[name="title"]');
+      if (input) input.focus();
+      return;
+    }
+    if (t.closest('[data-task-cancel]')) { st.editTask = null; renderRoom(); return; }
     if (t.closest('[data-delete]')) {
-      if (!await confirmInline('Delete this deal? Its tasks stay on My Tasks.')) return;
+      if (!await confirmDelete(st.deal)) return;
       try { await api(`/${st.deal.id}`, { method: 'DELETE' }); closeRoom(); loadDeals(); showToast('Deal deleted'); }
       catch (err) { showToast(err.message); }
     }
   });
   room.addEventListener('change', async (e) => {
     const t = e.target;
+    if (t.dataset.taskDone) {
+      t.disabled = true;
+      try {
+        await patchTask(Number(t.dataset.taskDone), { status: t.checked ? 'done' : 'open' });
+        showToast(t.checked ? 'Task completed' : 'Task reopened');
+        await refreshDeal();
+      } catch (err) { showToast(err.message); t.checked = !t.checked; t.disabled = false; }
+      return;
+    }
+    if (t.closest('[data-task-edit]')) return;
+    if (t.dataset.med) { saveQualification(t.dataset.med, t.value.trim()); return; }
     if (t.dataset.field) {
-      const v = t.type === 'number' ? (t.value === '' ? null : Number(t.value)) : (t.value || null);
+      const v = (t.type === 'number' || t.dataset.field === 'business_line_id') ? (t.value === '' ? null : Number(t.value)) : (t.value || null);
+      if (t.dataset.field === 'forecast_category' && !v) return;
       if (t.dataset.field === 'name' && !v) { t.value = st.deal.name; return; }
       patchDeal({ [t.dataset.field]: v });
     } else if (t.dataset.check) {
@@ -343,9 +573,36 @@ function wireRoom() {
       catch (err) { showToast(err.message); }
     } else if (e.target.id === 'dlTaskForm') {
       const body = { title: $('dlTaskTitle').value.trim(), due_date: $('dlTaskDue').value || null, priority: $('dlTaskPriority').value };
-      if (!body.title) return;
-      try { st.deal = await api(`/${st.deal.id}/tasks`, { method: 'POST', body }); renderRoom(); loadDeals(); showToast('Task added — also on My Tasks'); }
-      catch (err) { showToast(err.message); }
+      if (!body.title) { $('dlTaskTitle').focus(); return; }
+      const assignee = Number($('dlTaskAssignee').value) || null;
+      try {
+        const out = await api(`/${st.deal.id}/tasks`, { method: 'POST', body });
+        st.deal = out;
+        if (assignee && st.me && assignee !== st.me.id && out.task_id) {
+          try { await patchTask(out.task_id, { assigned_to_id: assignee }); st.deal = await api(`/${st.deal.id}`); }
+          catch (err) { showToast(`Task added, but not reassigned: ${err.message}`); }
+        }
+        renderRoom(); loadDeals(); showToast('Task added — also on My Tasks');
+      } catch (err) { showToast(err.message); }
+    } else if (e.target.matches('[data-task-edit]')) {
+      const f = e.target;
+      const id = Number(f.dataset.taskEdit);
+      const cur = st.deal.tasks.find(x => x.id === id);
+      const title = f.elements.title.value.trim();
+      if (!title) { f.elements.title.focus(); return; }
+      const body = {};
+      if (title !== cur.title) body.title = title;
+      if (f.elements.priority.value !== cur.priority) body.priority = f.elements.priority.value;
+      const due = f.elements.due_date.value;
+      if (due !== String(cur.due_date || '').slice(0, 10)) body.due_date = due || null;   // empty clears it
+      const who = Number(f.elements.assigned_to_id.value) || null;
+      if (who && who !== cur.assigned_to_id) body.assigned_to_id = who;
+      try {
+        if (Object.keys(body).length) await patchTask(id, body);
+        st.editTask = null;
+        await refreshDeal();
+        if (Object.keys(body).length) showToast('Task updated');
+      } catch (err) { showToast(err.message); }
     }
   });
   document.addEventListener('click', (e) => {
@@ -355,26 +612,63 @@ function wireRoom() {
 }
 
 // Small inline prompts instead of window.prompt/confirm (keyboard- and screen-reader friendly)
-function askReason() {
+function askReason(placeholder = 'Why was it lost? (required)', okLabel = 'Mark lost', isDanger = true) {
   return new Promise((resolve) => {
     const foot = $('dlRoom').querySelector('.dl-close-btns');
-    foot.innerHTML = `<input id="dlLostReason" maxlength="500" placeholder="Why was it lost? (required)" style="flex:1" aria-label="Lost reason">
-      <button type="button" class="dl-btn dl-btn-danger" id="dlLostGo">Mark lost</button><button type="button" class="dl-btn" id="dlLostCancel">Cancel</button>`;
-    $('dlLostReason').focus();
-    $('dlLostGo').onclick = () => { const v = $('dlLostReason').value.trim(); if (!v) { showToast('Please add a reason'); return; } resolve(v); };
+    if (!foot) { resolve(null); return; }
+    foot.innerHTML = `<input id="dlLostReason" maxlength="500" placeholder="${esc(placeholder)}" style="flex:1;min-width:180px" aria-label="${esc(placeholder)}">
+      <button type="button" class="dl-btn ${isDanger ? 'dl-btn-danger' : 'dl-btn-primary'}" id="dlLostGo">${esc(okLabel)}</button><button type="button" class="dl-btn" id="dlLostCancel">Cancel</button>`;
+    const input = $('dlLostReason');
+    input.focus();
+    $('dlLostGo').onclick = () => { const v = input.value.trim(); if (!v) { showToast('Please add a reason'); input.focus(); return; } resolve(v); };
     $('dlLostCancel').onclick = () => { renderRoom(); resolve(null); };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); $('dlLostGo').click(); }
+      if (e.key === 'Escape') { e.stopPropagation(); $('dlLostCancel').click(); }
+    };
   });
 }
 
-function confirmInline(text) {
+// A real dialog, focus on Cancel, and Delete armed only after a beat — so a double-click on the
+// drawer's Delete button can't go straight through.
+function confirmDelete(d) {
   return new Promise((resolve) => {
-    const foot = $('dlRoom').querySelector('.dl-room-foot');
-    const prev = foot.innerHTML;
-    foot.innerHTML = `<span style="font-size:.82rem;align-self:center">${esc(text)}</span>
-      <button type="button" class="dl-btn dl-btn-danger" id="dlYes" style="margin-left:auto">Delete</button><button type="button" class="dl-btn" id="dlNo">Cancel</button>`;
-    $('dlNo').focus();
-    $('dlYes').onclick = () => resolve(true);
-    $('dlNo').onclick = () => { foot.innerHTML = prev; resolve(false); };
+    const wrap = $('dlConfirm');
+    const yes = $('dlConfirmYes');
+    const no = $('dlConfirmNo');
+    const opener = document.activeElement;
+    $('dlConfirmText').innerHTML = `<strong>${esc(d.name)}</strong> at ${esc(d.account_name)}${d.value_amount != null ? ` · ${esc(money(d.value_amount, d.currency))}` : ''}`;
+    yes.disabled = true;
+    wrap.hidden = false;
+    no.focus();
+    const arm = setTimeout(() => { yes.disabled = false; }, 600);
+    const done = (ok) => {
+      clearTimeout(arm);
+      wrap.hidden = true;
+      yes.onclick = null; no.onclick = null;
+      wrap.removeEventListener('keydown', onKey, true);
+      if (!ok && opener && opener.focus) opener.focus();
+      resolve(ok);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
+      if (e.key === 'Tab') { e.preventDefault(); (document.activeElement === no && !yes.disabled ? yes : no).focus(); }
+    };
+    wrap.addEventListener('keydown', onKey, true);
+    yes.onclick = () => done(true);
+    no.onclick = () => done(false);
+  });
+}
+
+function wireBack() {
+  // Go back to wherever the user came from in this app; a direct visit falls back to Accounts.
+  $('dlBack').addEventListener('click', (e) => {
+    let internal = false;
+    try {
+      const ref = document.referrer ? new URL(document.referrer) : null;
+      internal = !!ref && ref.origin === location.origin && ref.pathname !== location.pathname && !ref.pathname.startsWith('/login');
+    } catch { /* ignore */ }
+    if (internal && history.length > 1) { e.preventDefault(); history.back(); }
   });
 }
 
@@ -407,8 +701,9 @@ function wireBoard() {
     e.preventDefault();
     col.classList.remove('drop-hover');
     const d = st.deals.find(x => x.id === st.dragId);
-    if (d && d.stage !== col.dataset.stage) moveDeal(d.id, col.dataset.stage);
+    const id = st.dragId;
     st.dragId = null;
+    if (d && d.stage !== col.dataset.stage) moveToStage(col.dataset.stage, id);
   });
   document.addEventListener('click', (e) => {
     const c = e.target.closest('.dl-card');
@@ -421,10 +716,14 @@ function wireBoard() {
     if (c && e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
       const d = st.deals.find(x => x.id === Number(c.dataset.deal));
       const i = OPEN_STAGES.indexOf(d.stage) + (e.key === 'ArrowRight' ? 1 : -1);
-      if (i >= 0 && i < OPEN_STAGES.length) { e.preventDefault(); moveDeal(d.id, OPEN_STAGES[i]); }
+      if (i >= 0 && i < OPEN_STAGES.length) { e.preventDefault(); moveToStage(OPEN_STAGES[i], d.id); }
     }
-    if (e.key === 'Escape' && !$('dlRoom').hidden) closeRoom();
-    if (e.key === 'Escape' && !$('dlModal').hidden) $('dlModal').hidden = true;
+    if (e.key === 'Escape') {
+      if (!$('dlModal').hidden) {
+        if (st.newDirty) showToast('Unsaved deal — use Cancel to discard it');
+        else closeNewDeal();
+      } else if (!$('dlRoom').hidden) closeRoom();
+    }
   });
   $('dlOverlay').addEventListener('click', closeRoom);
 }
@@ -448,17 +747,32 @@ async function openNewDeal() {
   $('dlNewOfferings').innerHTML = st.meta.offerings.map(o => `<button type="button" class="dl-chip" data-new-offering="${o.key}" aria-pressed="false">${esc(o.label)}</button>`).join('');
   $('dlNewStage').innerHTML = st.meta.stages.filter(s => OPEN_STAGES.includes(s.key)).map(s => `<option value="${s.key}">${esc(s.label)}</option>`).join('');
   $('dlNewForm').reset();
+  $('dlNewBusinessLine').innerHTML = '<option value="">— Not set —</option>'
+    + (st.meta.business_lines || []).map(b => `<option value="${b.id}"${String(b.id) === $('dlBusinessLine').value ? ' selected' : ''}>${esc(b.name)}</option>`).join('');
+  st.newDirty = false;
   $('dlModal').hidden = false;
   $('dlNewName').focus();
 }
 
+function closeNewDeal() {
+  $('dlModal').hidden = true;
+  st.newDirty = false;
+}
+
 function wireNewDeal() {
   $('dlNew').addEventListener('click', openNewDeal);
+  // Only the Close / Cancel buttons dismiss the form — a stray click outside must not lose the input.
   $('dlModal').addEventListener('click', (e) => {
-    if (e.target === $('dlModal') || e.target.closest('[data-close-modal]')) $('dlModal').hidden = true;
+    if (e.target.closest('[data-close-modal]')) closeNewDeal();
     const chip = e.target.closest('[data-new-offering]');
-    if (chip) { chip.classList.toggle('on'); chip.setAttribute('aria-pressed', chip.classList.contains('on')); }
+    if (chip) {
+      chip.classList.toggle('on');
+      chip.setAttribute('aria-pressed', chip.classList.contains('on'));
+      st.newDirty = true;
+    }
   });
+  $('dlNewForm').addEventListener('input', () => { st.newDirty = true; });
+  $('dlNewForm').addEventListener('change', () => { st.newDirty = true; });
   $('dlNewForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = {
@@ -466,11 +780,12 @@ function wireNewDeal() {
       value_amount: $('dlNewValue').value ? Number($('dlNewValue').value) : null, currency: $('dlNewCurrency').value,
       expected_close: $('dlNewClose').value || null, next_step: $('dlNewNext').value.trim() || null,
       next_step_due: $('dlNewNextDue').value || null, stage: $('dlNewStage').value,
+      business_line_id: $('dlNewBusinessLine').value ? Number($('dlNewBusinessLine').value) : null,
       offerings: [...$('dlNewOfferings').querySelectorAll('.dl-chip.on')].map(c => c.dataset.newOffering),
     };
     try {
       const d = await api('', { method: 'POST', body });
-      $('dlModal').hidden = true;
+      closeNewDeal();
       showToast('Deal created — add the buying committee next');
       await loadDeals();
       st.tab = 'committee';
@@ -490,10 +805,20 @@ async function init() {
   let t = null;
   $('dlSearch').addEventListener('input', () => { clearTimeout(t); t = setTimeout(loadDeals, 250); });
   $('dlAccount').addEventListener('change', loadDeals);
+  $('dlBusinessLine').innerHTML = '<option value="">All business lines</option>'
+    + ((st.meta && st.meta.business_lines) || []).map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  if (params.get('business_line_id')) $('dlBusinessLine').value = params.get('business_line_id');
+  $('dlBusinessLine').addEventListener('change', loadDeals);
   $('dlMine').addEventListener('change', loadDeals);
+  $('dlDigest').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-deal-open]');
+    if (b) openDeal(Number(b.dataset.dealOpen));
+  });
+  wireBack();
   wireBoard();
   wireRoom();
   wireNewDeal();
+  loadUsers().then(() => { if (st.deal && st.tab === 'tasks') renderRoom(); });
   await loadDeals();
   if (params.get('deal')) openDeal(Number(params.get('deal')));
   if (params.get('new') === '1') openNewDeal();
@@ -502,5 +827,6 @@ async function init() {
 initThemeToggle();
 initTopbarAuth().then((user) => {
   if (!user) { document.body.style.display = 'none'; location.replace(`/login?next=${encodeURIComponent(location.pathname + location.search)}`); return; }
+  st.me = user;
   init();
 });

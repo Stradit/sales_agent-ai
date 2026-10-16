@@ -6,6 +6,7 @@ import { loadRealAccounts, resolveRealAccount } from './real-accounts.js';
 import { esc } from './utils.js';
 import { renderSkeleton } from '../skeleton.js';
 import { createTask } from './actions.js';
+import { ccState, matchesCurrentAccount } from './state.js';
 
 // Cache for lightweight summaries
 const summaryCache = new Map();
@@ -228,8 +229,13 @@ export async function renderHiringSignals(days = currentHiringDays) {
 
     const results = await Promise.all(summaryPromises);
 
+    const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+
     // Filter accounts with monitored roles in this timeframe
-    const activeOrgs = results.filter(r => r.summary && r.summary.total_roles > 0);
+    let activeOrgs = results.filter(r => r.summary && r.summary.total_roles > 0);
+    if (hasFilter) {
+      activeOrgs = activeOrgs.filter(r => matchesCurrentAccount(r.account?.id, r.account?.name || r.account?.display_name));
+    }
 
     // Update panel note with total aggregated jobs
     const totalJobsAll = activeOrgs.reduce((sum, a) => sum + (a.summary?.total_roles || 0), 0);
@@ -239,7 +245,7 @@ export async function renderHiringSignals(days = currentHiringDays) {
     }
 
     if (!activeOrgs.length) {
-      list.innerHTML = `<li class="cc-drawer-empty">No active hiring signals recorded ${days ? `in the last ${days} days` : 'in the database'}.</li>`;
+      list.innerHTML = `<li class="cc-drawer-empty">No active hiring signals recorded ${days ? `in the last ${days} days` : 'in the database'}${hasFilter ? ' for the selected account(s)' : ''}.</li>`;
       return;
     }
 
@@ -302,8 +308,8 @@ export async function renderHiringSignals(days = currentHiringDays) {
             </div>
             <div class="hs-action-text">${esc(actionStep.recommendation)}</div>
             <div class="hs-action-footer">
-              <button type="button" class="cc-btn cc-btn-primary cc-btn-xs hs-task-btn" data-account-name="${esc(shortName)}" data-task-title="${esc(actionStep.taskTitle)}" data-task-desc="${esc(actionStep.taskDescription)}" title="Create assigned task in My Tasks">
-                <i class="fa-solid fa-plus"></i> Create Action Task
+              <button type="button" class="cc-btn cc-btn-primary cc-btn-xs hs-task-btn" data-account-id="${account.id}" data-account-name="${esc(shortName)}" data-task-title="${esc(actionStep.taskTitle)}" data-task-desc="${esc(actionStep.taskDescription)}" title="Create assigned task in My Tasks">
+                <i class="fa-solid fa-plus"></i> Create task
               </button>
               <a class="hs-explore-link" href="/?account=${account.id}&tab=jobs" title="View all open requisitions">
                 Requisitions <i class="fa-solid fa-arrow-right"></i>
@@ -314,10 +320,11 @@ export async function renderHiringSignals(days = currentHiringDays) {
       `;
     }).join('');
 
-    // 4. Click handlers for Action Task buttons
+    // 4. Click handlers for Create Task buttons
     list.querySelectorAll('.hs-task-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
+        const accountId = btn.dataset.accountId ? Number(btn.dataset.accountId) : null;
         const accountName = btn.dataset.accountName;
         const title = btn.dataset.taskTitle;
         const description = btn.dataset.taskDesc;
@@ -325,8 +332,13 @@ export async function renderHiringSignals(days = currentHiringDays) {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating...';
         try {
-          await createTask(accountName, title, { description, score: 85 });
-          btn.innerHTML = '<i class="fa-solid fa-check"></i> Added';
+          const ok = await createTask(accountName, title, { accountId, description, score: 85, source: 'signal_feed' });
+          if (ok) {
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> Added';
+          } else {
+            btn.innerHTML = origHtml;
+            btn.disabled = false;
+          }
         } catch {
           btn.innerHTML = origHtml;
           btn.disabled = false;

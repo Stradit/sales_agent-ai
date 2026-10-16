@@ -226,9 +226,59 @@ def is_locked_out(user: User) -> bool:
 # super_admin bypasses this table entirely (sees everything) — callers
 # should check `user.role == "super_admin"` before consulting these.
 
-def get_accessible_account_ids(session, user_id: int) -> list:
+#
+# CRM roles (apps/sales_crm/README.md §5). 'user' is the sales rep — the value
+# is kept so existing rows and checks keep working.
+ROLES = ("super_admin", "sales_manager", "user", "viewer", "partner")
+ROLE_LABELS = {"super_admin": "Super Admin", "sales_manager": "Sales Manager", "user": "Sales Rep",
+               "viewer": "Viewer", "partner": "Partner / Advisor"}
+READ_ONLY_ROLES = ("viewer", "partner")
+
+
+def get_granted_account_ids(session, user_id: int) -> list:
+    """The user's own explicit grants only (what the admin picker shows)."""
     rows = session.query(UserAccountAccess.account_id).filter_by(user_id=user_id).all()
     return [r[0] for r in rows]
+
+
+def team_user_ids(session, manager_id: int) -> list:
+    """Everyone reporting to this user, directly or indirectly (users.manager_id)."""
+    rows = session.execute(text("""
+        WITH RECURSIVE team AS (
+            SELECT id FROM users WHERE manager_id = :m
+            UNION SELECT u.id FROM users u JOIN team t ON u.manager_id = t.id)
+        SELECT id FROM team"""), {"m": manager_id}).fetchall()
+    return [r[0] for r in rows]
+
+
+def get_accessible_account_ids(session, user_id: int) -> list:
+    """Accounts this (non-super-admin) user may open.
+
+    rep / viewer → their own grants; sales_manager → own grants + their team's
+    grants; partner → none (partners only see their introductions, via the
+    partner endpoints)."""
+    role = session.execute(text("SELECT role FROM users WHERE id = :u"), {"u": user_id}).scalar()
+    if role == "partner":
+        return []
+    ids = set(get_granted_account_ids(session, user_id))
+    if role == "sales_manager":
+        team = team_user_ids(session, user_id)
+        if team:
+            ids.update(r[0] for r in session.query(UserAccountAccess.account_id)
+                       .filter(UserAccountAccess.user_id.in_(team)).all())
+    return sorted(ids)
+
+
+def account_scope(session, user) -> list:
+    """Account ids a request may touch — every account for super_admin (or when
+    auth is not enforced), otherwise get_accessible_account_ids()."""
+    if not AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
+        return [r[0] for r in session.execute(text("SELECT id FROM accounts")).fetchall()]
+    return get_accessible_account_ids(session, user.id)
+
+
+def _has_account(session, user, account_id: int) -> bool:
+    return account_id in get_accessible_account_ids(session, user.id)
 
 
 def grant_account_access(session, user_id: int, account_id: int, granted_by_id: int) -> bool:
@@ -369,8 +419,7 @@ def require_account_access(account_id: int, user: User = Depends(get_current_use
         return user
     session = get_session()
     try:
-        allowed = session.query(UserAccountAccess).filter_by(user_id=user.id, account_id=account_id).first()
-        if not allowed:
+        if not _has_account(session, user, account_id):
             raise HTTPException(status_code=403, detail="You do not have access to this account")
         return user
     finally:
@@ -388,8 +437,7 @@ def require_persona_account_access(persona_id: int, user: User = Depends(get_cur
         persona = session.query(Persona).filter_by(id=persona_id).first()
         if not persona:
             raise HTTPException(status_code=404, detail="Persona not found")
-        allowed = session.query(UserAccountAccess).filter_by(user_id=user.id, account_id=persona.account_id).first()
-        if not allowed:
+        if not _has_account(session, user, persona.account_id):
             raise HTTPException(status_code=403, detail="You do not have access to this account")
         return user
     finally:
@@ -408,9 +456,54 @@ def require_action_item_account_access(item_id: int, user: User = Depends(get_cu
         item = session.query(ActionItem).filter_by(id=item_id).first()
         if not item:
             raise HTTPException(status_code=404, detail="Action item not found")
-        allowed = session.query(UserAccountAccess).filter_by(user_id=user.id, account_id=item.account_id).first()
-        if not allowed:
+        if not _has_account(session, user, item.account_id):
             raise HTTPException(status_code=403, detail="You do not have access to this account")
         return user
     finally:
         session.close()
+
+
+# ── CRM hardening (apps/sales_crm/README.md §5.2, M5) ─────────────────────────
+
+def require_editor(user: User = Depends(get_current_user)) -> User:
+    """Rejects read-only roles (viewer, partner) on write endpoints."""
+    if AUTH_ENFORCED and user.role in READ_ONLY_ROLES:
+        raise HTTPException(status_code=403, detail="Your role is read-only.")
+    return user
+
+
+def _require_account_of(sql: str, key: int, user: User, missing: str) -> User:
+    if not AUTH_ENFORCED or user.role == "super_admin":
+        return user
+    session = get_session()
+    try:
+        account_id = session.execute(text(sql), {"k": key}).scalar()
+        if account_id is None:
+            raise HTTPException(status_code=404, detail=missing)
+        if not _has_account(session, user, account_id):
+            raise HTTPException(status_code=403, detail="You do not have access to this account")
+        return user
+    finally:
+        session.close()
+
+
+def require_lob_account_access(lob_id: int, user: User = Depends(get_current_user)) -> User:
+    return _require_account_of("SELECT account_id FROM lobs WHERE id = :k", lob_id, user, "LOB not found")
+
+
+def require_sub_lob_account_access(sub_lob_id: int, user: User = Depends(get_current_user)) -> User:
+    return _require_account_of("SELECT l.account_id FROM sub_lobs s JOIN lobs l ON l.id = s.lob_id WHERE s.id = :k",
+                               sub_lob_id, user, "Sub-LOB not found")
+
+
+def require_entity_account_access(entity_type: str, entity_id: int, user: User = Depends(get_current_user)) -> User:
+    """For /api/verify/{entity_type}/{entity_id}: account, lob, sub_lob or persona."""
+    kind = entity_type.lower().replace("-", "_").rstrip("s")
+    kind = {"person": "persona", "sublob": "sub_lob"}.get(kind, kind)
+    sql = {"account": "SELECT id FROM accounts WHERE id = :k",
+           "lob": "SELECT account_id FROM lobs WHERE id = :k",
+           "sub_lob": "SELECT l.account_id FROM sub_lobs s JOIN lobs l ON l.id = s.lob_id WHERE s.id = :k",
+           "persona": "SELECT account_id FROM personas WHERE id = :k"}
+    if kind not in sql:
+        raise HTTPException(status_code=400, detail="Unknown entity type")
+    return _require_account_of(sql[kind], entity_id, user, "Record not found")

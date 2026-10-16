@@ -14,6 +14,8 @@ import { renderPostCard } from './profile-render.js';
 import { resolvePersonaTargetKey } from './utils.js';
 import { initThemeToggle } from './theme.js';
 import { initTopbarAuth } from './topbar-auth.js';
+import { mountTimeline } from './activity-timeline.js';
+import { openContactEditor } from './crm-extras.js';
 
 initThemeToggle();
 
@@ -210,7 +212,7 @@ async function init() {
 
     persona.company_name = account.name || '';
 
-    document.title = `${persona.name || 'Contact'} — Executive Profile`;
+    document.title = `${persona.name || 'Contact'} — Executive Profile | Doshin`;
     el('profilePageTitle').textContent = document.title;
 
     state.activeAccountId = accountId;
@@ -220,6 +222,14 @@ async function init() {
     wireProfileGeneration(main, persona);
     wireCallPrepGeneration(main, persona);
     loadProfileReadiness(main, persona);
+    main.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-edit-contact]')) return;
+      openContactEditor({ accountId, contact: { id: persona.id, name: persona.name, title: persona.title, email: persona.email,
+        phone: persona.phone, linkedin_url: persona.linkedin_url, source: persona.source },
+      onSaved: (c) => { if (c) location.reload(); else location.replace(`/?account=${accountId}`); } });
+    });
+    const tl = el('profileActivityTimeline');
+    if (tl) mountTimeline(tl, { objectType: 'persona', objectId: persona.id, accountId });
   } catch (err) {
     console.error('Failed to load contact profile', err);
     main.innerHTML = `<div class="profile-page-error">Could not load this profile — ${err.message}. Try reopening it from the dashboard.</div>`;

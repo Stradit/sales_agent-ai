@@ -181,11 +181,14 @@ async function loadAccounts(user) {
 }
 
 // Account data is access-controlled server-side.
-// Unauthenticated users are redirected to login.
+// Unauthenticated users: a bare visit to / shows the public landing page; deep links
+// (/?account=…) go to login and come back to the same view afterwards.
 initTopbarAuth().then((user) => {
   if (!user) {
     document.body.style.display = 'none';
-    window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    window.location.replace(window.location.pathname === '/' && !window.location.search
+      ? '/welcome'
+      : `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     return;
   }
   // Hide quick-jump nav links for dashboards the user has had revoked

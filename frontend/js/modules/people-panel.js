@@ -2,7 +2,7 @@ import { state } from './state.js';
 import { el, dashPeople } from './dom.js';
 import { esc, initials, getPersonasFor } from './utils.js';
 import { showToast } from './toast.js';
-import { hasDossier, openContactDrawer } from './contact-drawer.js';
+import { openContactDrawer } from './contact-drawer.js';
 import { downloadFile } from './download.js';
 import { photoAttr } from './persona-photo.js';
 
@@ -11,13 +11,12 @@ export function renderContactsList(personas) {
   if (!personas.length) return '<div class="people-empty">No contacts match.</div>';
   return personas.slice(0, 12).map((p, idx) => {
     const tag = p.tier || p.decision_authority || (p.departments && p.departments[0]) || null;
-    const dossierReady = hasDossier(p);
     return `
       <div class="contact-card">
         <button type="button" class="contact-main" data-contact-idx="${idx}" title="View full contact details">
           <div class="contact-avatar" ${photoAttr(p)}>${esc(initials(p.name))}</div>
           <div class="contact-body">
-            <div class="contact-name">${esc(p.name || 'Unnamed')} ${dossierReady ? '<i class="fa-solid fa-star dossier-badge" title="AI call-prep dossier available"></i>' : ''}</div>
+            <div class="contact-name">${esc(p.name || 'Unnamed')}</div>
             <div class="contact-title">${esc(p.title || 'Title unknown')}</div>
             ${tag ? `<div class="contact-tags"><span class="tag">${esc(tag)}</span></div>` : ''}
           </div>

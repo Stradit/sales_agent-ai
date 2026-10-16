@@ -1,84 +1,110 @@
-/* ── Dastone Design Tokens ──────────────────────────────────── */
-/* Palette sourced from the Dastone v2.1.0 admin template's SCSS
-   (src/assets/scss/config/_variables.scss / _variables-dark.scss):
-   primary purple $primary (#6f6af8), its gray/status-color scale, and its
-   .25rem-based border-radius scale. Variable NAMES are unchanged from
-   before this remap — every component file already consumes these names,
-   so this file is the only one that needed new values.
-   Exception: --topbar-bg. Dastone's own light-mode topbar is white, but
-   this app's shell.css hardcodes white text/borders on the topbar (not
-   token-driven) — adopting white here would make that text invisible.
-   Kept the topbar dark, shifted into the new purple family instead of a
-   blind copy; the dark-theme value below IS Dastone's real dark topbar
-   color, since white text stays legible there. */
+/* ── EliteHost Design Tokens ───────────────────────────────── */
+/* Palette from the EliteHost HTML template (assets/scss/default/_variables.scss):
+   primary orange --color-primary #E46521, navy --color-secondary #001233, peach
+   section background --body-bg-2 #FFF5EF, light-orange card border --border-color
+   #FFD4BD, body text --btc #4C5671, Roboto throughout.
+   Variable NAMES are unchanged — every component file already consumes these, so
+   remapping here re-themes the app; elitehost.css (loaded last) adds the template's
+   card / button / tab shapes on top.
+   The topbar uses the template's navy (its hero colour) rather than its white nav
+   bar: shell.css and topbar-auth.js style topbar text white, and navy keeps all of
+   that legible. EliteHost ships no dark theme; the dark values below are its navy
+   family so the app's existing theme toggle keeps working.
+   Brand orange is the template's #FD5D07 with the neon taken out: same hue and
+   lightness, saturation .98 -> .78 (#E46521). It still reads as EliteHost orange
+   but no longer glares; contrast on white rises from 3.1:1 to 3.4:1 (fine for the
+   bold links/labels and button text it is used for).
+   Accent discipline: orange is reserved for primary actions, the active state and
+   small highlights. Borders, badges and surfaces are neutral — large areas of
+   orange tire the eyes in a tool people look at all day. The landing page
+   re-tints its own borders orange (landing.css), like the template. */
 :root {
-  /* Brand */
-  --brand: #6F6AF8;
-  --brand-hover: #5854C6;
-  --brand-light: #8D89FA;
-  --brand-soft: #EEEDFE;
-  --brand-muted: rgba(111, 106, 248, 0.10);
+  /* Brand (Original EliteHost Orange shade) */
+  --brand: #E46521;
+  --brand-hover: #C9541A;
+  --brand-light: #F0894F;
+  --brand-soft: #FFF7F2;
+  --brand-muted: rgba(228, 101, 33, 0.10);
+  --brand-gradient: linear-gradient(180deg, #F0894F 0%, #E46521 100%);
+  --navy: #001233;
+  --navy-2: #0A1F44;
 
   /* Surfaces */
-  --content-bg: #F4F6F9;
+  --content-bg: #F5F6F9;
+  --section-bg: #FFF5EF;          /* EliteHost alternating "body-bg-2" sections */
   --panel-bg: #FFF;
-  --panel-border: #EAF0F9;
-  --input-bg: #EAEFF5;
-  --badge-bg: #F4F6F9;
+  --panel-border: #E7EAF0;
+  --input-bg: #F4F6FA;
+  --badge-bg: #F1F3F7;
+  --hover-bg: #F6F7FA;
+  --avatar-bg: #E9EDF5;
+  --avatar-fg: #001233;
 
   /* Shadows */
-  --shadow: 0 0 2px 2px rgba(61,71,81,.05);
-  --shadow-hover: 0 0 4px 3px rgba(61,71,81,.05);
-  --shadow-modal: 0 0 5px 5px rgba(61,71,81,.1);
+  --shadow: 0 4px 16px rgba(0, 18, 51, .06);
+  --shadow-hover: 0 8px 28px rgba(0, 18, 51, .10);
+  --shadow-modal: 0 20px 60px rgba(0, 18, 51, .18);
 
   /* Text */
-  --text-primary: #303E67;
-  --text-secondary: #656D9A;
-  --text-muted: #96A0B5;
+  --text-primary: #001233;
+  --text-secondary: #4C5671;
+  --text-muted: #8D9097;
 
   /* Border */
-  --border-color: #EAF0F9;
-  --border-mid: #D9E1EC;
-  --border-dark: #A8B5D1;
+  --border-color: #EEF0F5;
+  --border-mid: #DCE1E9;
+  --border-dark: #C3CBD8;
 
   /* Status */
-  --success: #22B783;
-  --warning: #FFB822;
-  --danger: #F5325C;
+  --success: #26CF4B;
+  --warning: #FF8F3C;
+  --danger: #FF0003;
+  --info: #1BA2DB;
 
   /* Shape */
-  --radius-xs: 3px;
-  --radius-sm: 4px;
-  --radius-md: 5px;
-  --radius-lg: 11px;
-  --radius-xl: 21px;
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius: 0;            /* a few rules read var(--radius, 10px) */
 
   /* Motion */
-  --transition: all .2s ease-in-out;
-  --transition-slow: all .35s ease-in-out;
+  --transition: all .25s ease;
+  --transition-slow: all .4s ease;
 
   /* Chrome */
-  --topbar-bg: #221E3D;
+  --topbar-bg: #001233;
+  --topbar-accent: #E46521;
   --topbar-height: 64px;
   --nav-width: 320px;
 }
 
-/* ── Dark Theme ─────────────────────────────────────────────── */
+/* ── Dark Theme (EliteHost navy family) ─────────────────────── */
 [data-theme="dark"] {
-  --content-bg: #0F111A;
-  --panel-bg: #131621;
-  --panel-border: #1C202B;
-  --shadow: 0 2px 2px rgba(0,0,0,.4);
+  --content-bg: #000B20;
+  --section-bg: #04163A;
+  --panel-bg: #071A3D;
+  --panel-border: #13295A;
+  --shadow: 0 2px 4px rgba(0,0,0,.4);
   --shadow-hover: 0 4px 12px rgba(0,0,0,.5), 0 8px 32px rgba(0,0,0,.35);
   --shadow-modal: 0 20px 60px rgba(0,0,0,.6), 0 8px 24px rgba(0,0,0,.4);
-  --text-primary: #F1F5F9;
-  --text-secondary: #C3C3C3;
-  --text-muted: #AAB0B9;
-  --border-color: #1C202B;
-  --border-mid: #333645;
-  --border-dark: #4A5568;
-  --input-bg: #171B27;
-  --badge-bg: #171B27;
-  --brand-soft: rgba(111, 106, 248, .18);
-  --topbar-bg: #0F111A;
+  --text-primary: #F3F5FA;
+  --text-secondary: #C3CAD9;
+  --text-muted: #8D97AD;
+  --border-color: #13295A;
+  --border-mid: #1E3A70;
+  --border-dark: #3A5590;
+  --input-bg: #0B2048;
+  --badge-bg: #0B2048;
+  --brand: #E46521;
+  --brand-hover: #F0894F;
+  --brand-light: #F4A170;
+  --brand-soft: rgba(238, 125, 64, .12);
+  --brand-muted: rgba(238, 125, 64, .14);
+  --topbar-accent: #E46521;
+  --hover-bg: rgba(255, 255, 255, .04);
+  --avatar-bg: #13295A;
+  --avatar-fg: #F3F5FA;
+  --topbar-bg: #000B20;
 }

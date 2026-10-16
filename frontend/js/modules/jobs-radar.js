@@ -271,7 +271,7 @@ export function renderHiringTrendRadar(account, jobs) {
         <div class="radar-kpi-card">
           <div class="radar-kpi-header">
             <span class="radar-kpi-label">Top Booming Domain</span>
-            <span class="radar-kpi-icon" style="color:#6366f1;"><i class="${topDomain ? topDomain.icon : 'fa-solid fa-star'}"></i></span>
+            <span class="radar-kpi-icon" style="color:var(--brand);"><i class="${topDomain ? topDomain.icon : 'fa-solid fa-star'}"></i></span>
           </div>
           <div class="radar-kpi-value">${topDomain ? esc(topDomain.name) : 'Balanced'}</div>
           <div class="radar-kpi-sub">
@@ -371,7 +371,7 @@ export function renderHiringTrendRadar(account, jobs) {
         );
         if (!contractRoles.length) return '';
         return `
-          <div class="radar-section" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(6, 95, 70, 0.04)); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius, 10px); padding: 16px;">
+          <div class="radar-section" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(6, 95, 70, 0.04)); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 0; padding: 16px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
               <div style="font-size: 0.85rem; font-weight: 700; color: #059669; display: flex; align-items: center; gap: 6px;">
                 <i class="fa-solid fa-briefcase"></i> Immediate Staff Augmentation Opportunities (${contractRoles.length} Roles)
@@ -383,7 +383,7 @@ export function renderHiringTrendRadar(account, jobs) {
             </p>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px;">
               ${contractRoles.slice(0, 6).map(j => `
-                <div style="background: var(--surface-bg, #ffffff); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 6px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px;">
+                <div style="background: var(--surface-bg, #ffffff); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 0; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px;">
                   <a href="${j.job_url ? esc(j.job_url) : '#'}" target="_blank" rel="noopener" style="font-size: 0.78rem; font-weight: 600; color: var(--brand); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
                     ${esc(j.title)} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.65rem;"></i>
                   </a>
@@ -431,7 +431,7 @@ export function renderHiringTrendRadar(account, jobs) {
           <span><i class="fa-solid fa-folder-open" style="color:var(--brand);"></i> Live LinkedIn Requisitions Browser (${total} Monitored Roles)</span>
           <span style="font-size: 0.7rem; font-weight: 500; color: var(--text-muted);">Verified PostgreSQL Database Records</span>
         </div>
-        <div style="max-height: 480px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg, #ffffff);">
+        <div style="max-height: 480px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 0; background: var(--card-bg, #ffffff);">
           ${jobs.slice(0, 50).map(j => {
             const isContract = (j.employment_type || '').toLowerCase() === 'contract' || /\(contract\)/i.test(j.title || '');
             const isLead = /director|\bvp\b|vice president|\bsvp\b|head of|chief|lead/i.test(j.title || '');

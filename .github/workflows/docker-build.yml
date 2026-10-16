@@ -1,0 +1,100 @@
+name: Docker image build & smoke test
+
+# Builds the production image on a Linux runner and starts it against a throwaway
+# Postgres 18 with production-like settings (AUTH_ENFORCED=true, background loops off,
+# no outbound email). Proves the image starts, creates its schema on an empty DB,
+# answers /api/health, serves the public pages and lets the seeded admin sign in.
+# Nothing is pushed anywhere. See DEPLOYMENT_REVIEW.md, Phase 1.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ["Dockerfile", ".dockerignore", "requirements.txt", "api.py", "auth.py", "config.py",
+            "db/**", "apps/sales_*/**", "services/**", ".github/workflows/docker-build.yml"]
+  push:
+    branches: [feature/crm-core-phase1, feature/sales-intelligence-pipeline]
+    paths: ["Dockerfile", ".dockerignore", "requirements.txt", ".github/workflows/docker-build.yml"]
+
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: salesai
+          POSTGRES_PASSWORD: smoke-test-only
+          POSTGRES_DB: sales_ai
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U salesai -d sales_ai"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t salesai:smoke .
+
+      - name: Image size
+        run: docker image ls salesai:smoke --format '{{.Repository}}:{{.Tag}}  {{.Size}}'
+
+      - name: Start container
+        run: |
+          docker run -d --name salesai --network host \
+            -e DATABASE_URL=postgresql://salesai:smoke-test-only@127.0.0.1:5432/sales_ai \
+            -e AUTH_ENFORCED=true \
+            -e JWT_SECRET_KEY="$(openssl rand -hex 32)" \
+            -e CONFIG_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+            -e COOKIE_SECURE=false \
+            -e COPILOT_AUTOSYNC=0 -e CRM_BACKGROUND=0 -e CRM_NOTIFY_SUPPRESS=1 \
+            -e SEED_ADMIN_EMAIL=smoke-admin@example.invalid \
+            -e SEED_ADMIN_PASSWORD=smoke-test-password-123 \
+            salesai:smoke
+
+      - name: Wait for /api/health
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' http://127.0.0.1:8000/api/health || true)
+            if [ "$code" = "200" ]; then cat /tmp/health.json; echo; exit 0; fi
+            sleep 3
+          done
+          echo "App never became healthy"; docker logs salesai; exit 1
+
+      - name: Smoke checks
+        run: |
+          set -e
+          check() {  # check <expected-code> <path> [curl args...]
+            want=$1; path=$2; shift 2
+            got=$(curl -s -o /tmp/out -w '%{http_code}' "$@" "http://127.0.0.1:8000$path")
+            if [ "$got" = "$want" ]; then echo "ok   $path -> $got"; else echo "FAIL $path -> $got (expected $want)"; head -c 400 /tmp/out; echo; exit 1; fi
+          }
+          check 200 /
+          check 200 /login
+          check 200 /robots.txt
+          check 200 /sitemap.xml
+          check 200 /favicon.ico
+          check 401 /api/deals
+          TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"email":"smoke-admin@example.invalid","password":"smoke-test-password-123"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+          [ -n "$TOKEN" ] && echo "ok   seeded admin signs in"
+          check 200 /api/deals -H "Authorization: Bearer $TOKEN"
+          check 200 /api/crm/introductions -H "Authorization: Bearer $TOKEN"
+          check 200 /api/crm/roles -H "Authorization: Bearer $TOKEN"
+          docker inspect --format 'container user: {{.Config.User}}' salesai
+
+      - name: Container health status
+        run: |
+          sleep 35   # one HEALTHCHECK interval
+          docker inspect --format 'docker health: {{.State.Health.Status}}' salesai
+
+      - name: Logs on failure
+        if: failure()
+        run: docker logs salesai || true

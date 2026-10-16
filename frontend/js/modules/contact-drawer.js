@@ -47,12 +47,11 @@ export function renderSocialActivity(p) {
 
 export function renderDrawerPinned(p) {
   const tag = p.tier || p.decision_authority || (p.departments && p.departments[0]) || null;
-  const dossierReady = hasDossier(p);
   return `
     <div class="drawer-contact-header">
       <div class="drawer-avatar" ${photoAttr(p)}>${esc(initials(p.name))}</div>
       <div>
-        <div class="drawer-contact-name">${esc(p.name || 'Unnamed')} ${dossierReady ? '<i class="fa-solid fa-star" title="AI call-prep dossier available"></i>' : ''}</div>
+        <div class="drawer-contact-name">${esc(p.name || 'Unnamed')}</div>
         <div class="drawer-contact-title">${esc(p.title || 'Title unknown')}</div>
         ${tag ? `<div class="contact-tags" style="margin-top:6px;"><span class="tag">${esc(tag)}</span></div>` : ''}
       </div>
@@ -106,7 +105,7 @@ export function renderContactDrawer(p) {
     </div>
 
     <div class="drawer-section" id="drawer-sec-dossier">
-      <div class="drawer-section-title"><i class="fa-solid fa-star"></i> AI Call-Prep Dossier</div>
+      <div class="drawer-section-title"><i class="fa-solid fa-comments"></i> AI Call-Prep Dossier</div>
       ${renderDossier(p)}
     </div>
 

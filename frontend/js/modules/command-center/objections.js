@@ -1,221 +1,206 @@
-// Operational Pain Points & Common Objections widgets
-// - Operational Pain Points: Severity Tiered Grouping (Linear / Stripe Style Matrix)
-// - Common Objections: Category Tag List (Simplest & Cleanest)
-
+// Operational Pain Points & Common Objections Widgets
+// Enterprise B2B SaaS Clean Layout — Previous Data Only, Perfectly Arranged
 import { esc } from './utils.js';
 import { renderSkeleton } from '../skeleton.js';
-import { ccState } from './state.js';
+import { ccState, matchesCurrentAccount } from './state.js';
+import { loadRealAccounts } from './real-accounts.js';
+import { clearGlobalAccountFilter } from './account-filter.js';
 
 let objectionsPromise = null;
-let painChart = null;
-let objectionChart = null;
 
-function loadObjectionsData() {
+export function loadObjectionsData() {
   if (!objectionsPromise) {
-    objectionsPromise = fetch('/api/objections?limit=8')
+    objectionsPromise = fetch('/api/objections')
+      .then(res => res.ok ? res : fetch('/api/command-center/objections'))
       .then(res => {
-        if (!res.ok) throw new Error(`Failed to load objections (${res.status})`);
+        if (!res.ok) throw new Error(`Failed to load objections: ${res.status}`);
         return res.json();
       });
   }
   return objectionsPromise;
 }
 
-function getAccountList(item) {
-  const personas = item.personas || [];
+function getAccountList(item, realAccounts) {
   const accountMap = new Map();
 
-  personas.forEach(p => {
+  (item.personas || []).forEach(p => {
     if (p.account && !accountMap.has(p.account)) {
-      let profileUrl = '';
-      if (p.account_id && p.id) {
-        profileUrl = `/profile?account=${encodeURIComponent(p.account_id)}&persona_id=${encodeURIComponent(p.id)}`;
-      } else if (p.account_id) {
-        profileUrl = `/?account=${encodeURIComponent(p.account_id)}&tab=personas`;
-      } else {
-        profileUrl = `/?account_key=${encodeURIComponent(p.account)}&tab=personas`;
-      }
-
-      accountMap.set(p.account, {
-        name: p.account,
-        accountId: p.account_id,
-        personaId: p.id,
-        personaName: p.name || 'Executive',
-        url: profileUrl,
-      });
+      const url = p.account_id
+        ? `/?account=${encodeURIComponent(p.account_id)}`
+        : `/?account_key=${encodeURIComponent(p.account)}&tab=personas`;
+      accountMap.set(p.account, { name: p.account, url });
     }
   });
 
-  // Fallback for accounts in item.accounts not in personas list
   (item.accounts || []).forEach(name => {
     if (!accountMap.has(name)) {
-      accountMap.set(name, {
-        name: name,
-        accountId: null,
-        personaId: null,
-        personaName: 'Executive',
-        url: `/?account_key=${encodeURIComponent(name)}&tab=personas`,
-      });
+      let url = `/?account_key=${encodeURIComponent(name)}&tab=personas`;
+      if (realAccounts && realAccounts.length) {
+        const target = name.toLowerCase().trim();
+        const found = realAccounts.find(r => {
+          const rn = (r.name || r.display_name || '').toLowerCase().trim();
+          return rn === target || rn.includes(target) || target.includes(rn);
+        });
+        if (found) {
+          url = `/?account=${encodeURIComponent(found.id)}`;
+        }
+      }
+      accountMap.set(name, { name, url });
     }
   });
 
   return Array.from(accountMap.values());
 }
 
-function groupPainPointsBySeverity(items) {
-  const high = [];
-  const moderate = [];
-  const emerging = [];
+function matchesActiveAccount(item, realAccounts) {
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  if (!hasFilter) return true;
 
-  const maxCount = Math.max(...items.map(i => i.count || 1), 1);
-
-  items.forEach((item, idx) => {
-    const count = item.count || 1;
-    if (count >= 3 || (maxCount < 3 && idx === 0)) {
-      high.push({ ...item, globalRank: idx + 1 });
-    } else if (count === 2 || (maxCount >= 3 && count >= 2) || (maxCount < 3 && idx < 3)) {
-      moderate.push({ ...item, globalRank: idx + 1 });
-    } else {
-      emerging.push({ ...item, globalRank: idx + 1 });
-    }
-  });
-
-  return [
-    {
-      id: 'high',
-      title: 'High Impact',
-      subtitle: 'Critical blockers across accounts',
-      dotClass: 'tier-dot-high',
-      badgeClass: 'tier-badge-high',
-      items: high
-    },
-    {
-      id: 'moderate',
-      title: 'Moderate Friction',
-      subtitle: 'Shared operational challenges',
-      dotClass: 'tier-dot-med',
-      badgeClass: 'tier-badge-med',
-      items: moderate
-    },
-    {
-      id: 'emerging',
-      title: 'Emerging Signals',
-      subtitle: 'Early detected account signals',
-      dotClass: 'tier-dot-low',
-      badgeClass: 'tier-badge-low',
-      items: emerging
-    }
-  ].filter(group => group.items.length > 0);
-}
-
-function renderSeverityMatrix(items, emptyText) {
-  if (!items || !items.length) {
-    return `<div class="cc-drawer-empty">${esc(emptyText)}</div>`;
+  // Check personas
+  for (const p of (item.personas || [])) {
+    if (matchesCurrentAccount(p.account_id, p.account)) return true;
   }
 
-  const groups = groupPainPointsBySeverity(items);
+  // Check accounts
+  for (const accName of (item.accounts || [])) {
+    if (matchesCurrentAccount(null, accName)) return true;
+  }
 
+  return false;
+}
+
+function getSeverity(count) {
+  if (count >= 200) return { cls: 'cc-sev-critical', dotCls: 'dot-critical' };
+  if (count >= 50) return { cls: 'cc-sev-high', dotCls: 'dot-high' };
+  return { cls: 'cc-sev-med', dotCls: 'dot-med' };
+}
+
+function renderFilterBar(filteredCount, totalCount, onClearId) {
+  const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
+  if (!hasFilter) return '';
+  const names = ccState.selectedAccountNames || [];
+  const label = names.length === 1 ? names[0] : (names.length > 1 ? `${names.length} Selected Accounts` : (ccState.selectedAccountName || 'Selected Accounts'));
   return `
-    <div class="cc-severity-matrix">
-      ${groups.map(group => `
-        <div class="cc-severity-group cc-group-${group.id}">
-          
-          <!-- Group Header -->
-          <div class="cc-severity-group-header">
-            <div class="cc-severity-group-title-wrap">
-              <span class="cc-severity-dot ${group.dotClass}"></span>
-              <span class="cc-severity-group-title">${esc(group.title)}</span>
-              <span class="cc-severity-group-subtitle">${esc(group.subtitle)}</span>
-            </div>
-            <span class="cc-severity-group-count ${group.badgeClass}">
-              ${group.items.length} ${group.items.length === 1 ? 'issue' : 'issues'}
-            </span>
-          </div>
-
-          <!-- Group Rows -->
-          <ul class="cc-severity-list">
-            ${group.items.map(item => {
-              const accountList = getAccountList(item);
-
-              return `
-                <li class="cc-severity-row">
-                  <div class="cc-severity-row-main">
-                    <span class="cc-severity-rank">#${item.globalRank}</span>
-                    <span class="cc-severity-text" title="${esc(item.text)}">${esc(item.text)}</span>
-                  </div>
-
-                  <div class="cc-severity-row-meta">
-                    ${accountList.length <= 1 ? `
-                      <div class="cc-severity-accounts">
-                        <span class="cc-chip cc-chip-plain">${esc(accountList[0] ? accountList[0].name : '')}</span>
-                      </div>
-                      ${accountList[0] ? `
-                        <a href="${accountList[0].url}" class="cc-view-btn" title="View Executive Profile Dossier at ${esc(accountList[0].name)}">
-                          View <i class="bi bi-arrow-up-right"></i>
-                        </a>
-                      ` : ''}
-                    ` : `
-                      <div class="cc-severity-accounts">
-                        ${accountList.slice(0, 3).map(acc => `
-                          <a href="${acc.url}" class="cc-view-btn cc-view-btn-chip" title="View Executive Profile Dossier at ${esc(acc.name)}">
-                            ${esc(acc.name)} <i class="bi bi-arrow-up-right"></i>
-                          </a>
-                        `).join('')}
-                      </div>
-                    `}
-                  </div>
-                </li>
-              `;
-            }).join('')}
-          </ul>
-
-        </div>
-      `).join('')}
+    <div class="cc-intel-filter-strip">
+      <span class="cc-intel-filter-info">
+        <i class="fa-solid fa-filter"></i> Filtered by <strong>${esc(label)}</strong> (${filteredCount} of ${totalCount})
+      </span>
+      <button type="button" class="cc-intel-filter-clear" id="${onClearId}">
+        Show All <i class="fa-solid fa-xmark"></i>
+      </button>
     </div>
   `;
 }
 
-function renderCleanObjections(items, emptyText) {
+function renderPainPointsList(items, realAccounts, emptyText) {
   if (!items || !items.length) {
     return `<div class="cc-drawer-empty">${esc(emptyText)}</div>`;
   }
+
+  const filtered = items.filter(it => matchesActiveAccount(it, realAccounts));
+  if (!filtered.length) {
+    return `
+      ${renderFilterBar(0, items.length, 'ccClearPainFilter')}
+      <div class="cc-drawer-empty">No pain points recorded for <strong>${esc(ccState.selectedAccountName || 'this account')}</strong>.</div>
+    `;
+  }
+
   return `
-    <ul class="cc-obj-category-list">
-      ${items.map(item => {
-        const accountList = getAccountList(item);
+    ${renderFilterBar(filtered.length, items.length, 'ccClearPainFilter')}
+    <div class="cc-intel-scroll-wrap">
+      <ul class="cc-intel-card-list">
+        ${filtered.slice(0, 10).map((item, idx) => {
+          const accountList = getAccountList(item, realAccounts);
+          const count = item.count || 1;
+          const sev = getSeverity(count);
 
-        return `
-          <li class="cc-obj-category-row">
-            <div class="cc-obj-row-left">
-              <span class="cc-obj-quote-icon"><i class="bi bi-chat-quote-fill"></i></span>
-              <span class="cc-obj-quote-text" title="${esc(item.text)}">${esc(item.text)}</span>
-            </div>
-
-            <div class="cc-obj-row-right">
-              ${accountList.length <= 1 ? `
-                <div class="cc-obj-accounts">
-                  <span class="cc-chip cc-chip-plain">${esc(accountList[0] ? accountList[0].name : '')}</span>
+          return `
+            <li class="cc-intel-card cc-pain-card ${sev.cls}">
+              <div class="cc-intel-row-top">
+                <div class="cc-intel-lead">
+                  <span class="cc-intel-rank">#${String(idx + 1).padStart(2, '0')}</span>
+                  <span class="cc-intel-title" title="${esc(item.text)}">${esc(item.text)}</span>
                 </div>
-                ${accountList[0] ? `
-                  <a href="${accountList[0].url}" class="cc-view-btn" title="View Executive Profile Dossier at ${esc(accountList[0].name)}">
-                    View <i class="bi bi-arrow-up-right"></i>
-                  </a>
-                ` : ''}
-              ` : `
-                <div class="cc-obj-accounts">
-                  ${accountList.slice(0, 3).map(acc => `
-                    <a href="${acc.url}" class="cc-view-btn cc-view-btn-chip" title="View Executive Profile Dossier at ${esc(acc.name)}">
-                      ${esc(acc.name)} <i class="bi bi-arrow-up-right"></i>
+              </div>
+              <div class="cc-intel-row-bottom">
+                <span class="cc-intel-label"><i class="fa-regular fa-building"></i> Target Accounts:</span>
+                <div class="cc-intel-accounts">
+                  ${accountList.map(acc => `
+                    <a href="${acc.url}" class="cc-account-pill" title="View Dossier for ${esc(acc.name)}">
+                      <span class="cc-acc-name">${esc(acc.name)}</span>
+                      <i class="fa-solid fa-arrow-up-right-from-square cc-ext-icon"></i>
                     </a>
                   `).join('')}
                 </div>
-              `}
-            </div>
-          </li>
-        `;
-      }).join('')}
-    </ul>
+              </div>
+            </li>
+          `;
+        }).join('')}
+      </ul>
+    </div>
   `;
+}
+
+function renderObjectionsList(items, realAccounts, emptyText) {
+  if (!items || !items.length) {
+    return `<div class="cc-drawer-empty">${esc(emptyText)}</div>`;
+  }
+
+  const filtered = items.filter(it => matchesActiveAccount(it, realAccounts));
+  if (!filtered.length) {
+    return `
+      ${renderFilterBar(0, items.length, 'ccClearObjFilter')}
+      <div class="cc-drawer-empty">No objections recorded for <strong>${esc(ccState.selectedAccountName || 'this account')}</strong>.</div>
+    `;
+  }
+
+  return `
+    ${renderFilterBar(filtered.length, items.length, 'ccClearObjFilter')}
+    <div class="cc-intel-scroll-wrap">
+      <ul class="cc-intel-card-list">
+        ${filtered.slice(0, 10).map((item, idx) => {
+          const accountList = getAccountList(item, realAccounts);
+          const count = item.count || 1;
+
+          return `
+            <li class="cc-intel-card cc-objection-card">
+              <div class="cc-intel-row-top">
+                <div class="cc-intel-lead">
+                  <span class="cc-intel-rank cc-rank-obj">#${String(idx + 1).padStart(2, '0')}</span>
+                  <span class="cc-intel-title cc-obj-text" title="${esc(item.text)}">
+                    <i class="fa-solid fa-quote-left cc-quote-icon"></i> "${esc(item.text)}"
+                  </span>
+                </div>
+              </div>
+              <div class="cc-intel-row-bottom">
+                <span class="cc-intel-label"><i class="fa-regular fa-building"></i> Target Accounts:</span>
+                <div class="cc-intel-accounts">
+                  ${accountList.map(acc => `
+                    <a href="${acc.url}" class="cc-account-pill" title="View Dossier for ${esc(acc.name)}">
+                      <span class="cc-acc-name">${esc(acc.name)}</span>
+                      <i class="fa-solid fa-arrow-up-right-from-square cc-ext-icon"></i>
+                    </a>
+                  `).join('')}
+                </div>
+              </div>
+            </li>
+          `;
+        }).join('')}
+      </ul>
+    </div>
+  `;
+}
+
+function bindClearHandlers() {
+  const clearHandler = () => {
+    clearGlobalAccountFilter();
+  };
+
+  const btn1 = document.getElementById('ccClearPainFilter');
+  if (btn1) btn1.addEventListener('click', clearHandler);
+
+  const btn2 = document.getElementById('ccClearObjFilter');
+  if (btn2) btn2.addEventListener('click', clearHandler);
 }
 
 export async function renderObjections() {
@@ -225,9 +210,12 @@ export async function renderObjections() {
   if (painPointsBody) painPointsBody.innerHTML = renderSkeleton('lines');
   if (objectionsBody) objectionsBody.innerHTML = renderSkeleton('lines');
 
-  let data;
+  let data, realAccounts = [];
   try {
-    data = await loadObjectionsData();
+    [data, realAccounts] = await Promise.all([
+      loadObjectionsData(),
+      loadRealAccounts().catch(() => []),
+    ]);
   } catch (err) {
     console.error('Failed to load objections & pain points data:', err);
     if (painPointsBody) painPointsBody.innerHTML = '<div class="cc-drawer-empty">Could not load pain points data.</div>';
@@ -236,13 +224,19 @@ export async function renderObjections() {
   }
 
   if (painPointsBody) {
-    painPointsBody.innerHTML = renderSeverityMatrix(data.pain_points || [], 'No pain points captured yet for your accounts.');
+    painPointsBody.innerHTML = renderPainPointsList(
+      data.pain_points || [],
+      realAccounts,
+      'No operational pain points captured yet for your accounts.'
+    );
   }
   if (objectionsBody) {
-    objectionsBody.innerHTML = renderCleanObjections(data.objections || [], 'No objections captured yet for your accounts.');
+    objectionsBody.innerHTML = renderObjectionsList(
+      data.objections || [],
+      realAccounts,
+      'No common objections captured yet for your accounts.'
+    );
   }
+
+  bindClearHandlers();
 }
-
-
-
-

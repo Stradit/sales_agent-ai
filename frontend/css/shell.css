@@ -19,12 +19,12 @@
 
 .topbar-icon {
   width: 36px; height: 36px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: var(--brand);
   display: grid; place-items: center;
   font-size: 1rem; color: #fff;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(0,97,255,.4);
+  box-shadow: 0 2px 8px rgba(228, 101, 33,.4);
 }
 
 .topbar-title {
@@ -56,7 +56,7 @@
   font-size: 0.72rem;
   font-weight: 600;
   padding: 4px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   white-space: nowrap;
 }
 .topbar-ticker-pill i {
@@ -72,7 +72,7 @@
   text-decoration: none;
   padding: 6px 14px;
   border: 1px solid rgba(255,255,255,.14);
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   transition: var(--transition);
   display: flex; align-items: center; gap: 6px;
 }
@@ -100,7 +100,7 @@
   gap: 7px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 20px;
+  border-radius: 0;
   padding: 3px 10px 3px 4px;
   color: #fff;
   font-family: inherit;
@@ -122,7 +122,7 @@
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  background: linear-gradient(135deg, var(--brand), var(--brand));
   color: #fff;
   font-size: 0.7rem;
   font-weight: 700;
@@ -158,7 +158,7 @@
   width: 250px;
   background: #0f172a;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 10px;
   box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.55), 0 8px 16px -6px rgba(0, 0, 0, 0.4);
   z-index: 1050;
@@ -193,7 +193,7 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  background: linear-gradient(135deg, var(--brand), var(--brand));
   color: #fff;
   font-size: 0.9rem;
   font-weight: 700;
@@ -201,7 +201,7 @@
   place-items: center;
   text-transform: uppercase;
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 2px 6px rgba(228, 101, 33, 0.4);
 }
 
 .profile-dropdown-info {
@@ -241,15 +241,15 @@
   font-size: 0.65rem;
   font-weight: 700;
   padding: 2px 8px;
-  border-radius: 5px;
+  border-radius: 0;
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
 
 .profile-role-tag.role-super-admin {
-  background: rgba(99, 102, 241, 0.16);
+  background: rgba(228, 101, 33, 0.16);
   color: #818cf8;
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  border: 1px solid rgba(228, 101, 33, 0.3);
 }
 
 .profile-role-tag.role-user {
@@ -275,7 +275,7 @@
   align-items: center;
   gap: 9px;
   padding: 7px 9px;
-  border-radius: 7px;
+  border-radius: 0;
   font-size: 0.76rem;
   font-weight: 500;
   color: var(--text-secondary, #cbd5e1);
@@ -301,7 +301,7 @@
 }
 
 .profile-dropdown-item:hover i {
-  color: var(--brand, #6366f1);
+  color: var(--brand, var(--brand));
 }
 
 .profile-dropdown-logout {
@@ -323,7 +323,7 @@
 
 .topbar-theme-btn {
   width: 34px; height: 34px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   font-size: .88rem;
   background: rgba(255,255,255,.07);
   border: 1px solid rgba(255,255,255,.12);
@@ -357,3 +357,20 @@
 .global-loading-bar.active { opacity: 1; width: 70%; }
 .global-loading-bar.done { width: 100%; transition: width 0.2s ease, opacity 0.3s ease 0.15s; opacity: 0; }
 
+
+
+/* ── Viewer role (read-only): hide edit controls app-wide (apps/sales_crm README §5, M5).
+   The API refuses writes regardless; this just keeps the UI honest. ── */
+.topbar-readonly { display: inline-flex; align-items: center; gap: 5px; font-size: .72rem; font-weight: 700; color: #B7800F;
+  background: rgba(255, 184, 34, .16); border-radius: 0; padding: 3px 10px; margin-right: 8px; white-space: nowrap; }
+.role-viewer #dlNew, .role-viewer .dl-close-btns, .role-viewer [data-delete], .role-viewer #dlNoteForm, .role-viewer #dlTaskForm,
+.role-viewer .dl-add-row, .role-viewer [data-remove-person], .role-viewer [data-tk-add], .role-viewer [data-tk-check],
+.role-viewer [data-med-use], .role-viewer [data-reopen], .role-viewer #fcTargetsBtn, .role-viewer #fcFxBtn,
+.role-viewer .add-action-item-btn, .role-viewer [data-action="add-task"], .role-viewer [data-action="delete-task"],
+.role-viewer [data-action="take"], .role-viewer [data-action="complete"], .role-viewer [data-action="delete"],
+.role-viewer [data-action="approve"], .role-viewer [data-action="reject"], .role-viewer [data-action="remind"],
+.role-viewer #personaActionItemQuickAdd, .role-viewer #personaActionItemFormWrap, .role-viewer #fetchDiffbotBtn,
+.role-viewer #fetchSecBtn, .role-viewer #generateCallPrepBtn, .role-viewer [data-generate-profile] { display: none !important; }
+.role-viewer [data-action="set-status"] { pointer-events: none; opacity: .75; }
+.role-viewer .dl-room input, .role-viewer .dl-room select, .role-viewer .dl-room textarea, .role-viewer .dl-step,
+.role-viewer .dl-chip, .role-viewer .dl-check-item input, .role-viewer .fc-cat-select { pointer-events: none; opacity: .75; }

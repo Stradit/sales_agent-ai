@@ -40,6 +40,7 @@ function renderHeroCard(p) {
         <a class="profile-action-btn ${p.email ? '' : 'disabled'}" ${p.email ? `href="mailto:${esc(p.email)}"` : ''}><i class="fa-solid fa-envelope"></i> Email</a>
         <a class="profile-action-btn ${p.phone ? '' : 'disabled'}" ${p.phone ? `href="tel:${esc(p.phone)}"` : ''}><i class="fa-solid fa-phone"></i> Call</a>
         <a class="profile-action-btn ${p.linkedin_url ? '' : 'disabled'}" ${p.linkedin_url ? `href="${esc(p.linkedin_url)}" target="_blank" rel="noopener"` : ''}><i class="fa-brands fa-linkedin"></i> LinkedIn</a>
+        <button type="button" class="profile-action-btn" data-edit-contact title="Edit this contact's work details"><i class="fa-solid fa-pen"></i> Edit</button>
         <a class="profile-action-btn btn-primary" href="/copilot?persona_id=${encodeURIComponent(p.id)}&account_id=${encodeURIComponent(p.account_id || '')}" title="Ask the Sales Copilot about ${esc(p.name || 'this contact')}"><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Copilot</a>
       </div>
     </div>
@@ -154,6 +155,15 @@ export function renderFullProfile(p) {
     <div class="profile-bento-grid">
       ${renderPersonalityProfileWidget(digestEntry, p)}
       ${renderPsychologicalProfileWidget(digestEntry, p)}
+    </div>
+
+    <!-- Customer interactions logged by the team (CRM activities) -->
+    <div class="profile-widget profile-activity-widget">
+      <div class="profile-widget-header">
+        <div class="profile-widget-title"><i class="fa-solid fa-clock-rotate-left"></i> Customer Activity</div>
+        <span class="profile-widget-tag">Meetings, calls, emails &amp; transcripts</span>
+      </div>
+      <div id="profileActivityTimeline"></div>
     </div>
 
     <!-- Multi-Channel Signals & Public Activity Feed -->

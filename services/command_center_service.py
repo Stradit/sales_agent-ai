@@ -43,7 +43,7 @@ _NEWS_KEYWORDS = re.compile(
 )
 
 
-# ── Date helpers ────────────────────────────────────────────────
+# ── Date helpers ──────────────────────────────────────────────
 
 def _parse_date(value: Any) -> Optional[datetime]:
     """Best-effort parse of the mixed date strings scraped sources store
@@ -89,7 +89,7 @@ def _clamp(n: float, lo: float = 0, hi: float = 100) -> int:
     return int(round(max(lo, min(hi, n))))
 
 
-# ── DB collection ───────────────────────────────────────────────
+# ── DB collection ─────────────────────────────────────────────
 
 def _target_key_map(accounts: Iterable[Account]) -> Dict[str, Account]:
     """Same matching api.py's _build_target_key_to_account_map uses —
@@ -135,7 +135,7 @@ def collect_raw_signals(session, account_ids: Optional[List[int]], now: datetime
         raw.append({
             "kind": "exec", "account_id": acct.id, "account_name": _account_name(acct), "detected_at": d,
             "ref_id": m.id, "person": m.person_name, "designation": m.designation or "",
-            "event_type": (m.event_type or "").lower().strip(), "context": m.context or "",
+            "event_type": (m.event_type or "").lower().strip(), "context": (m.context or "").strip(),
             "url": m.article_url,
         })
 
@@ -168,13 +168,15 @@ def collect_raw_signals(session, account_ids: Optional[List[int]], now: datetime
         acct = tmap.get(p.target_key)
         r = p.raw or {}
         body = (p.body or "").strip()
-        title = r.get("title") or (body.splitlines()[0][:200] if body else None)
+        title = r.get("title") or (body.splitlines()[0] if body else None)
         d = _first_date(p.published_at, p.first_seen)
         if not acct or not title or not d or d < since or d > now + timedelta(days=1):
             continue
+        summary_candidate = r.get("summary") or r.get("description") or (body if body and body != title else "")
         raw.append({
             "kind": "news", "account_id": acct.id, "account_name": _account_name(acct), "detected_at": d,
             "ref_id": p.id, "title": title, "source": p.author or r.get("source") or "", "url": p.post_url,
+            "summary_text": summary_candidate,
         })
 
     opps = (
@@ -190,13 +192,13 @@ def collect_raw_signals(session, account_ids: Optional[List[int]], now: datetime
             "kind": "opportunity", "account_id": o.account_id, "account_name": _account_name(acct),
             "detected_at": _parse_date(o.first_seen), "ref_id": o.id, "title": o.title,
             "theme": o.category,
-            "summary": details.get("rationale") or details.get("summary") or details.get("description") or "",
+            "summary": (details.get("rationale") or details.get("summary") or details.get("description") or "").strip(),
             "url": None,
         })
     return raw
 
 
-# ── Scoring ─────────────────────────────────────────────────────
+# ── Scoring ───────────────────────────────────────────────────
 
 def _recency_factor(age_days: float) -> float:
     return max(0.6, 1 - age_days / 20)
@@ -219,7 +221,7 @@ def score_signal(r: Dict[str, Any], now: datetime) -> Dict[str, Any]:
             f" {designation}" if designation and r["event_type"] == "promoted" else
             f" the {designation} role" if designation else "")
         title = f"{r['person']} {verb}{role}".strip()
-        summary = (r["context"][:220] if r["context"] else
+        summary = (r["context"].strip() if r.get("context") else
                    "New leaders reset vendor priorities in their first 90 days — reach out early.")
         category = "Exec change"
         extra = {"person": r["person"], "designation": designation, "event_type": r["event_type"]}
@@ -233,13 +235,13 @@ def score_signal(r: Dict[str, Any], now: datetime) -> Dict[str, Any]:
         hits = {m.group(0).lower() for m in _NEWS_KEYWORDS.finditer(r["title"])}
         base = 35 + min(30, 10 * len(hits))
         title = r["title"]
-        summary = f"In the news{(' via ' + r['source']) if r['source'] else ''}."
+        summary = (r.get("summary_text") or "").strip() or f"In the news{(' via ' + r['source']) if r['source'] else ''}."
         category = "News"
         extra = {"keywords": sorted(hits)}
     else:
         base = 55
         title = r["title"]
-        summary = r["summary"] or "Recurring growth theme detected in this account's content."
+        summary = (r.get("summary") or "").strip() or "Recurring growth theme detected in this account's content."
         category = "Opportunity"
         extra = {"theme": r.get("theme")}
 
@@ -274,7 +276,7 @@ def _cap_news(scored: List[Dict[str, Any]], now: datetime) -> List[Dict[str, Any
     return out
 
 
-# ── Velocity & playbook ─────────────────────────────────────────
+# ── Velocity & playbook ───────────────────────────────────────
 
 def compute_velocity(signals: List[Dict[str, Any]], now: datetime) -> Dict[str, Any]:
     """Signals detected per 7-day window. trend is oldest -> newest,
@@ -298,20 +300,32 @@ def _play_for(sig: Dict[str, Any], now: datetime) -> Dict[str, str]:
     when = "today" if age == 0 else f"{age} day{'s' if age != 1 else ''} ago"
     kind = sig["kind"]
     if kind == "exec":
-        who = sig["person"] + (f" ({sig['designation']})" if sig["designation"] else "")
+        who = sig["person"] + (f" ({sig['designation']})" if sig.get("designation") else "")
+        exec_ctx = f" {sig['summary']}" if sig.get("summary") and not sig["summary"].startswith("New leaders reset") else ""
         if sig["event_type"] in ("joined", "promoted"):
-            return {"title": f"Send a congratulations note to {who} at {acct}",
-                    "rationale": f"Leadership change {when} — new leaders reset vendor priorities in their first 90 days."}
-        return {"title": f"Find out who replaces {who} at {acct}",
-                "rationale": f"Departure {when} — the relationship and any open deal need a new owner."}
+            return {
+                "title": f"Send a congratulations note to {who} at {acct}",
+                "rationale": f"Leadership change {when} — new leaders reset vendor priorities in their first 90 days.{exec_ctx}".strip(),
+            }
+        return {
+            "title": f"Find out who replaces {who} at {acct}",
+            "rationale": f"Departure {when} — the relationship and any open deal need a new owner.{exec_ctx}".strip(),
+        }
     if kind == "hiring":
-        return {"title": f"Reach the hiring leaders behind {acct}'s {sig['count']} new roles",
-                "rationale": f"Hiring push detected {when}. {sig['summary']}"}
+        return {
+            "title": f"Reach the hiring leaders behind {acct}'s {sig['count']} new roles",
+            "rationale": f"Hiring push detected {when}. {sig['summary']}".strip(),
+        }
     if kind == "news":
-        return {"title": f"Reference \"{sig['title'][:90]}\" in outreach to {acct}",
-                "rationale": f"Score {sig['score']} news signal {when} — a timely, specific reason to reach out."}
-    return {"title": f"Build a point of view on \"{sig['title'][:90]}\" for {acct}",
-            "rationale": f"Active growth theme first seen {when}. {sig['summary']}"[:300]}
+        news_detail = f": {sig['summary']}" if sig.get("summary") and not sig["summary"].startswith("In the news") else ""
+        return {
+            "title": f'Reference "{sig["title"]}" in outreach to {acct}',
+            "rationale": f'News signal {when} — {sig["title"]}{news_detail}. A timely, specific reason to initiate outreach and align with {acct}\'s active priorities.'.strip(),
+        }
+    return {
+        "title": f'Build a point of view on "{sig["title"]}" for {acct}',
+        "rationale": f"Active growth theme first seen {when}. {sig['summary']}".strip(),
+    }
 
 
 def build_playbook(signals: List[Dict[str, Any]], now: datetime) -> List[Dict[str, Any]]:
@@ -329,7 +343,7 @@ def build_playbook(signals: List[Dict[str, Any]], now: datetime) -> List[Dict[st
         play = _play_for(s, now)
         plays.append({
             "rank": len(plays) + 1,
-            "title": play["title"][:480],
+            "title": play["title"],
             "rationale": play["rationale"],
             "impact": "high" if s["score"] >= 75 else "medium",
             "account_id": s["account_id"],

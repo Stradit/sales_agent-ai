@@ -42,7 +42,7 @@ export function renderProfileReadiness(r) {
     ? `<div style="margin-top:8px; color:var(--text-muted);"><i class="fa-solid fa-bolt"></i> Uses about ${r.llm_requests} AI requests (one per channel + two profile syntheses).</div>`
     : '';
 
-  return `<div style="font-size:.78rem; line-height:1.45; border:1px solid var(--border-color); border-radius:8px; padding:10px 12px;">
+  return `<div style="font-size:.78rem; line-height:1.45; border:1px solid var(--border-color); border-radius:0; padding:10px 12px;">
       <div style="font-weight:700; margin-bottom:2px;"><i class="fa-solid fa-list-check"></i> What this profile is generated from</div>
       ${tracked}${activity}${background}${cost}
     </div>`;

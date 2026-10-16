@@ -150,6 +150,11 @@ def route(q: str, ents: Dict[str, Any]) -> str:
         return "remember"
     if re.search(r"\bwhat('?s| has| have)? changed\b|\bchanges since\b|\bany changes\b", ql):
         return "what_changed"
+    if re.search(r"\b(deals?|pipeline|opportunit(y|ies))\b", ql) and \
+            not re.search(r"\b(draft|write|compose)\b", ql) and \
+            re.search(r"\b(my|our|open|stuck|risk|at-risk|closing|close|overdue|stalled|list|show|which|how many|status|"
+                      r"health|summary|digest|week|pipeline|all)\b", ql):
+        return "deals"
     people_words = r"\b(vps?|vice presidents?|directors?|c-?suite|cxos?|chiefs?|executives|managers|people|contacts|personas|leaders|stakeholders|decision[- ]makers)\b"
     if re.search(r"\b(list|which|who are|show( me)?|all|how many|find)\b", ql) and re.search(people_words, ql) \
             and not (ents["persona"] and ents["persona_source"] == "question"):
@@ -583,6 +588,7 @@ def begin_turn(session, user, q: str, session_id: Optional[str], context: Dict[s
     friendly reply — neither searches nor calls the AI."""
     q = (q or "").strip()[:2000]
     context = {k: v for k, v in (context or {}).items() if v}
+    deal_id = context.pop("deal_id", None)
     pre = pre_route(q)
     q = pre["stored"]
     acl = retrieve.acl_account_ids(session, user)
@@ -618,7 +624,8 @@ def begin_turn(session, user, q: str, session_id: Optional[str], context: Dict[s
             "prefs": _prefs(session, user.id), "citations": [], "evidence": [], "notes": [], "persona_info": {},
             "extras": {"entities": {"persona": ents["persona"],
                                     "accounts": [{"id": a["id"], "name": a["name"]} for a in ents["accounts"]]}},
-            "answer": None, "mode": "database", "prompt": None, "llm_info": {}, "smalltalk": small}
+            "answer": None, "mode": "database", "prompt": None, "llm_info": {}, "deal_id": deal_id,
+            "smalltalk": small}
 
 
 def answer_without_llm(session, t: Dict[str, Any]) -> bool:
@@ -665,6 +672,9 @@ def answer_without_llm(session, t: Dict[str, Any]) -> bool:
             if rows else f"No people match that{scope}. Try a broader title or tier."
         extras["followups"] = followups("list_people", q, None, accounts, rows)
         return True
+    if t["intent"] == "deals":
+        _answer_deals(session, t)
+        return True
     if t["intent"] == "what_changed":
         rows = tool_what_changed(session, t["acl"], persona, accounts)
         who = persona["name"] if persona else (accounts[0]["name"] if accounts else "your accounts")
@@ -674,6 +684,81 @@ def answer_without_llm(session, t: Dict[str, Any]) -> bool:
         extras["followups"] = followups("what_changed", q, persona, accounts, [])
         return True
     return False
+
+
+DEAL_BUCKETS = [(r"\b(stuck|stalled|slow)\b", "stuck", "stuck for more than 30 days"),
+                (r"\b(risk|at-risk|unhealthy|trouble)\b", "at_risk", "at risk"),
+                (r"\b(overdue|late)\b", "overdue", "with an overdue next step"),
+                (r"\b(closing|close this month|close soon)\b", "closing_soon", "expected to close in the next 30 days"),
+                (r"\b(won|lost|closed)\b", "closed", "closed in the last 7 days")]
+
+
+def _answer_deals(session, t: Dict[str, Any]) -> None:
+    """Pipeline questions ("which deals are stuck?", "my pipeline at BNY") straight from the deals tables — no LLM."""
+    from apps.sales_deals import api as deals_api
+    ql = t["q"].lower()
+    acl = [a for a in t["acl"] if not t["account_ids"] or a in t["account_ids"]]
+    owner = t["user"].id if re.search(r"\b(my|mine)\b", ql) else None
+    g = deals_api.digest_data(session, acl, owner, days=7)
+    key, label = None, "open"
+    for pattern, k, lbl in DEAL_BUCKETS:
+        if re.search(pattern, ql):
+            key, label = k, lbl
+            break
+    if key:
+        rows = g[key]
+    else:
+        rows = []
+        for r in session.execute(text("""
+                SELECT d.*, a.display_name AS account_name, l.lob_name, NULL AS owner_name, NULL AS owner_email
+                FROM deals d JOIN accounts a ON a.id = d.account_id LEFT JOIN lobs l ON l.id = d.lob_id
+                WHERE d.account_id = ANY(:acl) AND d.stage NOT IN ('won','lost')
+                  AND (CAST(:u AS int) IS NULL OR d.owner_user_id = :u)
+                ORDER BY array_position(ARRAY['contract','pilot','proposal','discovery','intro'], d.stage),
+                         d.value_amount DESC NULLS LAST LIMIT 200"""), {"acl": acl, "u": owner}).mappings():
+            d = deals_api._deal_payload(session, dict(r))
+            rows.append({"id": d["id"], "name": d["name"], "account_name": d["account_name"], "stage_label": d["stage_label"],
+                         "value_amount": d["value_amount"], "currency": d["currency"], "health": d["health"].get("score"),
+                         "why": "; ".join(d["health"]["gaps"][:2]) or d["next_step"] or ""})
+    table_rows = [{"deal": r["name"], "account": r["account_name"], "stage": r.get("stage_label"),
+                   "value": f"{r['value_amount']:,.0f} {r['currency']}" if r.get("value_amount") is not None else "",
+                   "health": r.get("health"), "note": r.get("why") or "", "deal_id": r["id"]} for r in rows]
+    scope = (" at " + ", ".join(a["name"] for a in t["accounts"])) if t["accounts"] else ""
+    whose = "your" if owner else "the team's"
+    tot = g["totals"]
+
+    def n_deals(n, adj=""):
+        return f"**{n}** {adj}deal{'' if n == 1 else 's'}"
+    if table_rows and key:
+        t["answer"] = f"{n_deals(len(table_rows))} {label}{scope} ({whose} pipeline)."
+    elif table_rows:
+        t["answer"] = (f"{whose.capitalize()} pipeline{scope}: {n_deals(tot['open'], 'open ')}, **{tot['value']:,.0f}** total value, "
+                       f"**{tot['weighted']:,.0f}** weighted by stage.")
+    elif key:
+        t["answer"] = f"No deals {label}{scope} ({whose} pipeline)."
+    else:
+        t["answer"] = f"No open deals{scope} yet. Create one on the [Deals pipeline](/deals) page."
+    t["extras"]["table"] = {"columns": ["deal", "account", "stage", "value", "health", "note"], "rows": table_rows[:100], "kind": "deals"}
+    t["extras"]["followups"] = [f for f, k in [("Which deals are at risk?", "at_risk"), ("Which deals are stuck?", "stuck"),
+                                               ("Which deals close this month?", "closing_soon")] if k != key][:2]
+
+
+def deal_context(session, acl: List[int], deal_id: int) -> Dict[str, Any]:
+    """Compact deal summary for the prompt when the chat was opened from a deal room (?deal_id=)."""
+    from apps.sales_deals import api as deals_api
+    row = session.execute(text("""
+        SELECT d.*, a.display_name AS account_name, l.lob_name, NULL AS owner_name, NULL AS owner_email
+        FROM deals d JOIN accounts a ON a.id = d.account_id LEFT JOIN lobs l ON l.id = d.lob_id WHERE d.id = :d"""),
+        {"d": deal_id}).mappings().fetchone()
+    if not row or row["account_id"] not in acl:
+        return {}
+    d = deals_api._deal_payload(session, dict(row), full=True)
+    return {"name": d["name"], "account": d["account_name"], "stage": d["stage_label"],
+            "offerings": [deals_api.OFFERINGS.get(o, o) for o in d["offerings"]],
+            "next_step": d["next_step"], "health_gaps": d["health"]["gaps"][:4],
+            "buying_committee": [{"name": s["name"], "title": s["title"], "role": s["role"], "sentiment": s["sentiment"]}
+                                 for s in d["stakeholders"]],
+            "qualification": {k: v for k, v in (d.get("qualification") or {}).items() if v}}
 
 
 def gather(session, t: Dict[str, Any]) -> None:
@@ -700,6 +785,10 @@ def gather(session, t: Dict[str, Any]) -> None:
     tool_results = {"person": {k: v for k, v in t["persona_info"].items() if k not in ("id", "account_id")}} if t["persona_info"] else {}
     if t["intent"] == "account_brief" and accounts:
         tool_results["account"] = accounts[0]["name"]
+    if t.get("deal_id"):
+        deal = deal_context(session, t["acl"], t["deal_id"])
+        if deal:
+            tool_results["deal"] = deal
     ev_hash = _sha("|".join([settings.collection_name(), PROMPT_VERSION, t["intent"], q.lower(), t["prefs"]["answer_style"],
                              *sorted(e["chunk_hash"].hex() for e in t["evidence"]),
                              *[str(n["id"]) for n in t["notes"]], json.dumps(tool_results, sort_keys=True, default=str)]))
