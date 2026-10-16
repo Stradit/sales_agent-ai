@@ -170,3 +170,22 @@ GitHub → repository **Settings → Environments → New environment `productio
 
 The `.env` is written to `/opt/salesai/.env` (mode 600) on every deploy, so change settings by
 editing the `ENV_FILE` secret and re-running the workflow.
+
+---
+
+# Phase 5 — Copy the database and first deploy
+
+Production reads only `DATABASE_URL` (RDS). The source is today's local PostgreSQL 18.4.
+
+1. **Freeze writes:** stop the local app (and anything else using the local DB).
+2. **Dump** (this PC, Git Bash, repo root): `bash deploy/dump_local_db.sh`
+   → `salesai_<date>.dump` + `salesai_<date>.counts.txt` (exact row counts per table).
+3. **Upload:** `scp -i salesai-admin.pem salesai_<date>.dump salesai_<date>.counts.txt deploy/restore_db.sh ubuntu@<EC2_HOST>:/tmp/`
+4. **Put the production `.env` on the server once** (the deploy workflow rewrites it later):
+   `sudo -u deploy tee /opt/salesai/.env >/dev/null` → paste → Ctrl+D → `sudo chmod 600 /opt/salesai/.env`
+5. **Restore** (EC2, before any deploy): `sudo bash /tmp/restore_db.sh /tmp/salesai_<date>.dump`
+   → refuses a non-empty database; ends with "All N tables match row for row".
+6. **Deploy:** GitHub → Actions → *Deploy to production* → Run workflow → approve.
+7. **Copilot index:** sign in as admin → `/copilot-pipeline` → **Full re-embed**. (The vector store
+   lives on disk, not in Postgres; the copied ledger says "indexed", so a normal sync wouldn't refill it.)
+8. Delete the dump files from your PC and `/tmp` on the server — they contain all customer data.
