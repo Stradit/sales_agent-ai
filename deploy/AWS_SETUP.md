@@ -116,7 +116,9 @@ From the repo folder on your PC:
 ```bash
 scp -i salesai-admin.pem -r deploy ubuntu@<EC2_HOST>:/tmp/
 ssh -i salesai-admin.pem ubuntu@<EC2_HOST>
-sudo bash /tmp/deploy/setup_server.sh <your-domain> <your-email>
+sudo bash /tmp/deploy/setup_server.sh <ELASTIC_IP>                    # for now: HTTPS with a self-signed certificate
+# later, once the subdomain's A record points here:
+# sudo bash /tmp/deploy/setup_server.sh <subdomain> <your-email>      # real Let's Encrypt certificate
 sudo cp /tmp/deploy/docker-compose.prod.yml /tmp/deploy/remote_deploy.sh /opt/salesai/
 sudo chown deploy:deploy /opt/salesai/docker-compose.prod.yml /opt/salesai/remote_deploy.sh
 sudo tee -a /home/deploy/.ssh/authorized_keys < /dev/stdin   # paste salesai_deploy.pub, Enter, Ctrl+D
@@ -126,7 +128,7 @@ Checks on the server:
 docker --version && aws --version && nginx -t
 aws ecr describe-repositories --region us-east-1 --repository-names sales-ai   # proves the instance role works
 sudo docker run --rm -it postgres:18 psql "postgresql://saadmin@<RDS_ENDPOINT>:5432/sales_ai?sslmode=require" -c 'select version()'   # proves EC2 → RDS (asks for the password)
-curl -sI https://<your-domain> | head -1    # 502 is expected until the first deploy
+curl -skI https://<ELASTIC_IP> | head -1    # 502 is expected until the first deploy (-k: self-signed while on the IP)
 ```
 From your PC: `ssh -i ~/.ssh/salesai_deploy deploy@<EC2_HOST> docker ps` must work (that's how GitHub will log in).
 
@@ -151,16 +153,17 @@ GitHub → repository **Settings → Environments → New environment `productio
 - **Required reviewers:** yourself (every deploy waits for an approval click)
 - **Deployment branches:** *Selected branches* → your release branch(es)
 
-**Environment variables** (not secret):
+**Environment VARIABLES** — the *Variables* tab, not Secrets. GitHub won't pass a value derived from a
+secret between jobs (the image name comes from `ECR_REPOSITORY_URI`), so these four must be variables:
 
 | Name | Value |
 |---|---|
 | `AWS_DEPLOY_ROLE_ARN` | `arn:aws:iam::<AWS_ACCOUNT_ID>:role/salesai-github-deploy` |
 | `ECR_REPOSITORY_URI` | `<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/sales-ai` |
 | `EC2_HOST` | the Elastic IP |
-| `SITE_URL` | `https://<your-domain>` |
+| `SITE_URL` | `https://<ELASTIC_IP>` for now (`https://<subdomain>` later) |
 
-**Environment secrets:**
+**Environment SECRETS** (only these three; `APP_BASE_URL` etc. go inside `ENV_FILE`):
 
 | Name | Value |
 |---|---|
@@ -189,3 +192,18 @@ Production reads only `DATABASE_URL` (RDS). The source is today's local PostgreS
 7. **Copilot index:** sign in as admin → `/copilot-pipeline` → **Full re-embed**. (The vector store
    lives on disk, not in Postgres; the copied ledger says "indexed", so a normal sync wouldn't refill it.)
 8. Delete the dump files from your PC and `/tmp` on the server — they contain all customer data.
+
+---
+
+# Running on the IP now, moving to a subdomain later
+
+**Now (IP):** in `ENV_FILE` set `SITE_URL`, `APP_BASE_URL` and `CORS_ALLOWED_ORIGINS` to
+`https://<ELASTIC_IP>` and keep `COOKIE_SECURE=true` (HTTPS still works, with a self-signed
+certificate: each browser warns once). Search engines won't index an IP site.
+
+**Switch to the subdomain:**
+1. DNS: A record `<subdomain>` → the Elastic IP; wait until `nslookup <subdomain>` shows it.
+2. Server: `sudo bash /tmp/deploy/setup_server.sh <subdomain> <your-email>` (gets the real certificate).
+3. GitHub: variable `SITE_URL` → `https://<subdomain>`; in `ENV_FILE`, the three URLs above →
+   `https://<subdomain>`. Re-run *Deploy to production*.
+4. Microsoft 365 capture (if used): add `https://<subdomain>/api/crm/capture/callback/microsoft` as a redirect URI.
