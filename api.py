@@ -117,7 +117,7 @@ try:
         Depends,
         BackgroundTasks,
     )
-    from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
@@ -160,6 +160,21 @@ if FASTAPI_AVAILABLE:
         if not icon.exists():
             return Response(status_code=204)
         return FileResponse(icon, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
+
+    @app.get("/api/health", include_in_schema=False)
+    def health():
+        """Liveness + DB check for the container HEALTHCHECK, the deploy script and the load
+        balancer. Public (no auth) and reveals nothing beyond up/down."""
+        session = get_session()
+        try:
+            session.execute(sql_text("SELECT 1"))
+            db_ok = True
+        except Exception:
+            db_ok = False
+        finally:
+            session.close()
+        return JSONResponse({"status": "ok" if db_ok else "degraded", "db": "ok" if db_ok else "down"},
+                            status_code=200 if db_ok else 503, headers={"Cache-Control": "no-store"})
 
     @app.on_event("startup")
     def on_startup():

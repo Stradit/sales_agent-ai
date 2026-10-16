@@ -14,6 +14,12 @@ from db.models import Base
 from sqlalchemy import text, inspect
 
 def seed_default_admin_if_missing():
+    """First super admin for an empty database. Comes ONLY from SEED_ADMIN_EMAIL /
+    SEED_ADMIN_PASSWORD (+ optional SEED_ADMIN_NAME) — never a password in the code, so a
+    fresh production database can't come up with a publicly known login. Unset: skipped."""
+    import os
+    email = (os.getenv("SEED_ADMIN_EMAIL") or "").strip()
+    password = os.getenv("SEED_ADMIN_PASSWORD") or ""
     try:
         from db.models import User
         from db.connection import get_session
@@ -21,11 +27,16 @@ def seed_default_admin_if_missing():
         session = get_session()
         try:
             admin = session.query(User).filter(User.role == "super_admin").first()
-            if not admin:
+            if not admin and not (email and password):
+                print("[DB] No super admin yet. Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD and restart to create one.")
+            elif not admin:
+                if len(password) < 12:
+                    print("[DB] SEED_ADMIN_PASSWORD must be at least 12 characters — super admin not created.")
+                    return
                 user = User(
-                    email="ankita@stradit.com",
-                    hashed_password=auth.hash_password("ankita@123"),
-                    full_name="Ankita",
+                    email=email.lower(),
+                    hashed_password=auth.hash_password(password),
+                    full_name=(os.getenv("SEED_ADMIN_NAME") or "Administrator").strip(),
                     role="super_admin",
                     is_active=True,
                     has_dashboard_access=True,
@@ -35,7 +46,7 @@ def seed_default_admin_if_missing():
                 )
                 session.add(user)
                 session.commit()
-                print("[DB] Default super admin created (ankita@stradit.com).")
+                print(f"[DB] First super admin created ({email.lower()}). Remove SEED_ADMIN_PASSWORD from the environment now.")
         finally:
             session.close()
     except Exception as e:
