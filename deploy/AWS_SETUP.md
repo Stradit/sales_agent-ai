@@ -133,3 +133,40 @@ From your PC: `ssh -i ~/.ssh/salesai_deploy deploy@<EC2_HOST> docker ps` must wo
 ---
 When all checks pass, send me the five values from the table at the top (no passwords or keys)
 and we start Phase 4.
+
+---
+
+# Phase 4 — GitHub configuration
+
+Workflow: `.github/workflows/deploy.yml` (manual: **Actions → Deploy to production → Run workflow**).
+It runs the tests, builds the image, pushes it to ECR as `sales-ai:<commit>`, uploads the compose
+file / deploy script / `.env` to the server, runs `remote_deploy.sh` (automatic rollback if the new
+version isn't healthy) and finally checks `https://<your-domain>/api/health`.
+
+> GitHub only shows the **Run workflow** button for workflows that exist on the repository's
+> **default branch**. Merge this branch first, or run it from the CLI:
+> `gh workflow run deploy.yml --repo Stradit/sales_agent-ai --ref feature/crm-core-phase1`
+
+GitHub → repository **Settings → Environments → New environment `production`**:
+- **Required reviewers:** yourself (every deploy waits for an approval click)
+- **Deployment branches:** *Selected branches* → your release branch(es)
+
+**Environment variables** (not secret):
+
+| Name | Value |
+|---|---|
+| `AWS_DEPLOY_ROLE_ARN` | `arn:aws:iam::<AWS_ACCOUNT_ID>:role/salesai-github-deploy` |
+| `ECR_REPOSITORY_URI` | `<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/sales-ai` |
+| `EC2_HOST` | the Elastic IP |
+| `SITE_URL` | `https://<your-domain>` |
+
+**Environment secrets:**
+
+| Name | Value |
+|---|---|
+| `DEPLOY_SSH_KEY` | contents of `~/.ssh/salesai_deploy` (the private key from Step 8) |
+| `EC2_KNOWN_HOSTS` | output of `ssh-keyscan -t ed25519 <EC2_HOST>` run from your PC (pins the server's identity) |
+| `ENV_FILE` | the whole production `.env`, filled in from `deploy/.env.production.example` |
+
+The `.env` is written to `/opt/salesai/.env` (mode 600) on every deploy, so change settings by
+editing the `ENV_FILE` secret and re-running the workflow.
