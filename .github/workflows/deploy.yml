@@ -200,6 +200,36 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
 
+      - name: Check the server (SSH, deploy user, Docker, folders)
+        # Turns "Connection closed" into a specific reason. Prints no secrets.
+        run: |
+          host="${{ vars.EC2_HOST }}"
+          echo "Server: deploy@$host"
+          if [ ! -s ~/.ssh/known_hosts ] || ! grep -q . ~/.ssh/known_hosts; then
+            echo "  FAIL  EC2_KNOWN_HOSTS secret is empty — add the output of: ssh-keyscan -t ed25519 $host"; exit 1
+          fi
+          if ! timeout 8 bash -c "</dev/tcp/$host/22" 2>/dev/null; then
+            echo "  FAIL  port 22 unreachable — instance stopped, wrong EC2_HOST, or salesai-ec2-sg doesn't allow SSH"; exit 1
+          fi
+          echo "  ok    port 22 reachable"
+          out="$(ssh -o BatchMode=yes app 'echo SSH_OK; id -nG; test -d /opt/salesai && test -w /opt/salesai && echo DIR_OK; docker info >/dev/null 2>&1 && echo DOCKER_OK; command -v aws >/dev/null && echo AWS_OK; cat /etc/os-release 2>/dev/null | grep -E "^PRETTY_NAME="' 2>&1)" || true
+          case "$out" in
+            *"Host key verification failed"*|*"REMOTE HOST IDENTIFICATION HAS CHANGED"*)
+              echo "  FAIL  host key doesn't match EC2_KNOWN_HOSTS — the server was replaced? Re-run ssh-keyscan -t ed25519 $host and update the secret"; exit 1;;
+            *"Permission denied"*)
+              echo "  FAIL  login refused for user 'deploy' — run setup_server.sh on the server and put the DEPLOY_SSH_KEY public key in /home/deploy/.ssh/authorized_keys"; exit 1;;
+            *SSH_OK*) echo "  ok    logged in as deploy";;
+            *) echo "  FAIL  SSH failed: $(echo "$out" | tail -3 | tr '\n' ' ')"
+               echo "        'Connection closed' usually means the 'deploy' user doesn't exist yet (setup_server.sh not run) or the server isn't Ubuntu"; exit 1;;
+          esac
+          echo "$out" | grep -q PRETTY_NAME && echo "  info  $(echo "$out" | grep PRETTY_NAME | cut -d= -f2 | tr -d '"')"
+          fail=0
+          echo "$out" | grep -q '\bdocker\b'  && echo "  ok    deploy is in the docker group" || { echo "  FAIL  deploy isn't in the docker group (setup_server.sh adds it)"; fail=1; }
+          echo "$out" | grep -q DIR_OK    && echo "  ok    /opt/salesai exists and is writable" || { echo "  FAIL  /opt/salesai missing or not writable by deploy (run setup_server.sh)"; fail=1; }
+          echo "$out" | grep -q DOCKER_OK && echo "  ok    Docker is running"               || { echo "  FAIL  Docker not available to deploy"; fail=1; }
+          echo "$out" | grep -q AWS_OK    && echo "  ok    AWS CLI installed"               || { echo "  FAIL  AWS CLI missing (setup_server.sh installs it)"; fail=1; }
+          exit $fail
+
       - name: Upload compose file, deploy script and .env
         run: |
           scp -q deploy/docker-compose.prod.yml deploy/remote_deploy.sh app:/opt/salesai/
