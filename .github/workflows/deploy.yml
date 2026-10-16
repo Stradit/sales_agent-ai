@@ -192,7 +192,21 @@ jobs:
       - name: SSH setup
         run: |
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          # tr -d '\r': a key pasted from Windows may carry CRLF line endings, which ssh rejects
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          if ! grep -q -- '-----BEGIN .*PRIVATE KEY-----' ~/.ssh/deploy; then
+            echo "DEPLOY_SSH_KEY doesn't look like a private key (no '-----BEGIN … PRIVATE KEY-----' line)."
+            echo "Paste the whole PRIVATE key file (not the .pub), including the BEGIN/END lines."; exit 1
+          fi
+          if ! ssh-keygen -y -P '' -f ~/.ssh/deploy > /tmp/deploy.pub 2>/dev/null; then
+            echo "DEPLOY_SSH_KEY can't be loaded without a passphrase — GitHub can't type one."
+            echo "Create a key with no passphrase: ssh-keygen -t ed25519 -N \"\" -f ~/.ssh/salesai_deploy"; exit 1
+          fi
+          # The fingerprint is public (safe to print). Compare it on the server with:
+          #   sudo ssh-keygen -lf /home/deploy/.ssh/authorized_keys
+          echo "Deploy key fingerprint: $(ssh-keygen -lf /tmp/deploy.pub)"
+          echo "Its public half (this exact line must be in /home/deploy/.ssh/authorized_keys):"
+          cat /tmp/deploy.pub
           printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
           printf 'Host app\n  HostName %s\n  User deploy\n  IdentityFile ~/.ssh/deploy\n  StrictHostKeyChecking yes\n  ConnectTimeout 20\n' \
             "${{ vars.EC2_HOST }}" > ~/.ssh/config
