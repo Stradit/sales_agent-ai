@@ -53,22 +53,89 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check configuration
+        # Prints a status line for every setting (variable VALUES are shown — they aren't
+        # sensitive; secrets only as present / missing, never their values), then fails once
+        # with the full list of problems.
         run: |
-          missing=""
-          for v in AWS_DEPLOY_ROLE_ARN ECR_REPOSITORY_URI EC2_HOST SITE_URL; do
-            [ -n "${!v}" ] || missing="$missing $v"
-          done
-          if [ -n "$missing" ]; then
-            echo "Missing:$missing"
-            echo "Add them under Settings → Environments → production → Environment VARIABLES (not secrets)."
-            echo "Values stored as secrets can't be passed between jobs, so the deploy would fail later."
-            exit 1
+          fail=0
+          ok()  { printf '  ok    %-22s %s\n' "$1" "$2"; }
+          bad() { printf '  FAIL  %-22s %s\n' "$1" "$2"; fail=1; }
+          warn(){ printf '  WARN  %-22s %s\n' "$1" "$2"; }
+
+          echo "Variables (Settings → Environments → production → Variables):"
+          SITE_URL="${SITE_URL%/}"
+          if [ -z "$AWS_DEPLOY_ROLE_ARN" ]; then bad AWS_DEPLOY_ROLE_ARN "missing"
+          elif echo "$AWS_DEPLOY_ROLE_ARN" | grep -Eq '^arn:aws:iam::[0-9]{12}:role/.+'; then ok AWS_DEPLOY_ROLE_ARN "$AWS_DEPLOY_ROLE_ARN"
+          else bad AWS_DEPLOY_ROLE_ARN "$AWS_DEPLOY_ROLE_ARN  <- must be IAM → Roles → salesai-github-deploy → ARN (…:role/…)"; fi
+          if [ -z "$ECR_REPOSITORY_URI" ]; then bad ECR_REPOSITORY_URI "missing"
+          elif echo "$ECR_REPOSITORY_URI" | grep -Eq '^[0-9]{12}[.]dkr[.]ecr[.]us-east-1[.]amazonaws[.]com/[a-z0-9._/-]+$'; then ok ECR_REPOSITORY_URI "$ECR_REPOSITORY_URI"
+          else bad ECR_REPOSITORY_URI "$ECR_REPOSITORY_URI  <- expected <account>.dkr.ecr.us-east-1.amazonaws.com/sales-ai (no :tag)"; fi
+          if [ -z "$EC2_HOST" ]; then bad EC2_HOST "missing"; else ok EC2_HOST "$EC2_HOST"; fi
+          if [ -z "$SITE_URL" ]; then bad SITE_URL "missing"
+          elif echo "$SITE_URL" | grep -Eq '^https://[^/]+$'; then ok SITE_URL "$SITE_URL"
+          else bad SITE_URL "$SITE_URL  <- expected https://<host>"; fi
+
+          echo "Same names also saved as SECRETS (delete these — the workflow reads the variables):"
+          dup=""
+          [ "$S_ROLE" = yes ] && dup="$dup AWS_DEPLOY_ROLE_ARN"
+          [ "$S_ECR" = yes ]  && dup="$dup ECR_REPOSITORY_URI"
+          [ "$S_HOST" = yes ] && dup="$dup EC2_HOST"
+          [ "$S_SITE" = yes ] && dup="$dup SITE_URL"
+          [ "$S_ABU" = yes ]  && dup="$dup APP_BASE_URL(belongs-inside-ENV_FILE)"
+          echo "  ${dup:-none}"
+
+          echo "Secrets (present / missing only; the SSH ones are used by the deploy job, so only warned here):"
+          if [ "$S_SSH" = yes ]; then ok DEPLOY_SSH_KEY present; else warn DEPLOY_SSH_KEY "missing — the deploy job will stop"; fi
+          if [ "$S_KNOWN" = yes ]; then ok EC2_KNOWN_HOSTS present; else warn EC2_KNOWN_HOSTS "missing — add: ssh-keyscan -t ed25519 <EC2_HOST>; the deploy job will stop"; fi
+          if [ "$S_ENV" = yes ]; then ok ENV_FILE present; else bad ENV_FILE missing; fi
+
+          if [ "$S_ENV" = yes ]; then
+            echo "ENV_FILE contents (setting names only, never values):"
+            printf '%s\n' "$ENV_FILE" > /tmp/envcheck
+            for k in DATABASE_URL JWT_SECRET_KEY CONFIG_ENCRYPTION_KEY SITE_URL APP_BASE_URL; do
+              if grep -Eq "^$k=.+" /tmp/envcheck; then ok "$k" set; else bad "$k" "missing or empty"; fi
+            done
+            if grep -Eq '^AUTH_ENFORCED=true$' /tmp/envcheck; then ok AUTH_ENFORCED true; else bad AUTH_ENFORCED "must be exactly AUTH_ENFORCED=true"; fi
+            if grep -Eq '^COOKIE_SECURE=true$' /tmp/envcheck; then ok COOKIE_SECURE true; else bad COOKIE_SECURE "must be COOKIE_SECURE=true (served over HTTPS)"; fi
+            grep -Eq '^DATABASE_URL=postgres(ql)?://[^@]+@.+' /tmp/envcheck || bad DATABASE_URL "doesn't look like postgresql://user:password@host:5432/db"
+            if grep -Eq '^(DATABASE_URL_NEON|DB_USE_LOCAL)=' /tmp/envcheck; then bad NEON/LOCAL "remove DATABASE_URL_NEON / DB_USE_LOCAL — production uses DATABASE_URL only"; fi
+            if grep -Eq '^[A-Z0-9_]+=.*[[:space:]]#' /tmp/envcheck; then bad "inline comments" "a value is followed by '# …' — Docker keeps that as part of the value"; fi
+            rm -f /tmp/envcheck
           fi
+
+          echo "Run: commit ${GITHUB_SHA::12} on ${GITHUB_REF_NAME}"
+          if [ "$fail" != 0 ]; then echo; echo "Fix the FAIL lines above, then start a NEW run (Run workflow, not Re-run)."; exit 1; fi
         env:
           AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
           EC2_HOST: ${{ vars.EC2_HOST }}
           SITE_URL: ${{ vars.SITE_URL }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          S_ROLE: ${{ secrets.AWS_DEPLOY_ROLE_ARN != '' && 'yes' || 'no' }}
+          S_ECR: ${{ secrets.ECR_REPOSITORY_URI != '' && 'yes' || 'no' }}
+          S_HOST: ${{ secrets.EC2_HOST != '' && 'yes' || 'no' }}
+          S_SITE: ${{ secrets.SITE_URL != '' && 'yes' || 'no' }}
+          S_ABU: ${{ secrets.APP_BASE_URL != '' && 'yes' || 'no' }}
+          S_SSH: ${{ secrets.DEPLOY_SSH_KEY != '' && 'yes' || 'no' }}
+          S_KNOWN: ${{ secrets.EC2_KNOWN_HOSTS != '' && 'yes' || 'no' }}
+          S_ENV: ${{ secrets.ENV_FILE != '' && 'yes' || 'no' }}
+
+      - name: Show the OIDC claims AWS will check
+        # Prints only the claims the role's trust policy compares (never the token itself),
+        # so a trust-policy mismatch can be fixed by copying the exact "sub" value.
+        run: |
+          echo "commit           = ${GITHUB_SHA::12} (branch ${GITHUB_REF_NAME})"
+          echo "role to assume   = ${{ vars.AWS_DEPLOY_ROLE_ARN }}"
+          echo "region           = $AWS_REGION"
+          echo "--- token claims (the role's trust policy must match sub and aud) ---"
+          tok=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | python3 -c 'import sys,json; print(json.load(sys.stdin)["value"])')
+          printf '%s' "$tok" | cut -d. -f2 | python3 -c '
+          import sys, json, base64
+          p = sys.stdin.read().strip(); p += "=" * (-len(p) % 4)
+          c = json.loads(base64.urlsafe_b64decode(p))
+          for k in ("sub", "aud", "repository", "environment", "ref", "repository_owner"):
+              print(f"{k:17}= {c.get(k)}")'
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -126,13 +193,16 @@ jobs:
       - name: Public health check
         run: |
           # While the site runs on its bare IP the certificate is self-signed: skip verification then.
-          host="$(echo "${{ vars.SITE_URL }}" | sed -E 's#^https?://([^/:]+).*#\1#')"
+          site="${SITE_URL%/}"
+          host="$(echo "$site" | sed -E 's#^https?://([^/:]+).*#\1#')"
           insecure=""; echo "$host" | grep -Eq '^[0-9]+(\.[0-9]+){3}$' && insecure="-k"
           for i in $(seq 1 12); do
-            if curl -fsS $insecure --max-time 10 "${{ vars.SITE_URL }}/api/health"; then echo; exit 0; fi
+            if curl -fsS $insecure --max-time 10 "$site/api/health"; then echo; exit 0; fi
             sleep 5
           done
           echo "Public health check failed"; exit 1
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
 
       - name: Clean up key
         if: always()
