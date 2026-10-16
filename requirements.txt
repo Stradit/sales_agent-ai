@@ -13,7 +13,7 @@ python-dotenv>=1.0.0
 pydantic>=2.5.0
 
 # Database & ORM Layer (PostgreSQL)
-sqlalchemy>=2.0.0
+sqlalchemy>=2.0.40,<2.1  # 2.1 changes the default Postgres driver; tested on 2.0.x
 psycopg2-binary>=2.9.9
 
 # API Server Layer (Frontend UI Endpoints)
