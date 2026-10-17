@@ -60,6 +60,9 @@ def main() -> int:
     app.include_router(activities.router)
     from apps.sales_crm import views as saved_views
     app.include_router(saved_views.router)
+    from apps.sales_deals import buyer_room
+    app.include_router(buyer_room.router)
+    app.include_router(buyer_room.public_router)
     c = TestClient(app)
 
     s = get_session()
@@ -70,6 +73,7 @@ def main() -> int:
     T0 = s.execute(text("SELECT now()")).scalar()
     created_users: List[int] = []
     created_deals: List[int] = []
+    created_wanted: List[int] = []
     created_connectors: List[int] = []
     results: List[Tuple[str, int, int]] = []
     try:
@@ -335,6 +339,81 @@ def main() -> int:
         dg = c.get("/api/deals/pipeline/digest", headers=H["rep"], params={"days": 90}).json()
         dg_ids = {x["id"] for k in ("at_risk", "stuck", "overdue", "closing_soon", "closed") for x in dg[k]} | {m["deal_id"] for m in dg["moves"]}
         results.append(("rep's digest has no colleague's deals", 0 if mdid in dg_ids else 1, 1))
+        # Close plan (#10): dated milestones on a deal
+        pl = check("rep adds standard close plan", c.post(f"/api/deals/{fdid}/plan/template", headers=H["rep"]), 200).json()["close_plan"]
+        results.append(("standard plan has 7 dated steps", 1 if len(pl) == 7 and all(x["due_date"] for x in pl) else 0, 1))
+        check("standard plan twice", c.post(f"/api/deals/{fdid}/plan/template", headers=H["rep"]), 400)
+        check("viewer adds plan step", c.post(f"/api/deals/{fdid}/plan", headers=H["viewer"], json={"title": "x"}), 403)
+        check("outsider adds plan step", c.post(f"/api/deals/{fdid}/plan", headers=H["outsider"], json={"title": "x"}), 404)
+        check("plan step with bad side", c.post(f"/api/deals/{fdid}/plan", headers=H["rep"], json={"title": "x", "side": "them"}), 400)
+        pl = check("rep adds overdue step", c.post(f"/api/deals/{fdid}/plan", headers=H["rep"], json={
+            "title": "Matrix overdue step", "side": "customer", "owner_name": "Their CISO",
+            "due_date": str(date.today() - timedelta(days=3))}), 200).json()["close_plan"]
+        step = [x for x in pl if x["title"] == "Matrix overdue step"][0]
+        results.append(("new step is flagged overdue", 1 if step["overdue"] else 0, 1))
+        dd = c.get(f"/api/deals/{fdid}", headers=H["rep"]).json()
+        results.append(("health shows the overdue plan", 1 if "plan_overdue" in dd["health"]["gap_codes"] else 0, 1))
+        results.append(("plan progress on the deal", 1 if dd["plan_progress"] == {"done": 0, "total": 8, "overdue": 1} else 0, 1))
+        check("plan step with bad status", c.patch(f"/api/deals/{fdid}/plan/{step['id']}", headers=H["rep"], json={"status": "maybe"}), 400)
+        pl = check("rep marks step done", c.patch(f"/api/deals/{fdid}/plan/{step['id']}", headers=H["rep"], json={"status": "done"}), 200).json()["close_plan"]
+        results.append(("done step no longer overdue", 1 if not [x for x in pl if x["id"] == step["id"]][0]["overdue"] else 0, 1))
+        dd = c.get(f"/api/deals/{fdid}", headers=H["rep"]).json()
+        results.append(("health gap clears when done", 0 if "plan_overdue" in dd["health"]["gap_codes"] else 1, 1))
+        check("viewer reads the plan", c.get(f"/api/deals/{fdid}", headers=H["viewer"]), 200)
+        check("plan step of another deal", c.patch(f"/api/deals/{fdid}/plan/{step['id'] + 10**9}", headers=H["rep"], json={"status": "done"}), 404)
+        check("rep removes step", c.delete(f"/api/deals/{fdid}/plan/{step['id']}", headers=H["rep"]), 200)
+        # Buyer room (#11): a public, read-only page behind an unguessable token
+        results.append(("no buyer room yet", 1 if c.get(f"/api/deals/{fdid}/room", headers=H["rep"]).json()["room"] is None else 0, 1))
+        check("viewer creates buyer room", c.post(f"/api/deals/{fdid}/room", headers=H["viewer"], json={}), 403)
+        check("outsider creates buyer room", c.post(f"/api/deals/{fdid}/room", headers=H["outsider"], json={}), 404)
+        check("partner creates buyer room", c.post(f"/api/deals/{fdid}/room", headers=H["partner"], json={}), 403)
+        check("buyer room link with a quote", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={
+            "resources": [{"title": "x", "url": 'https://evil.example/" onmouseover="alert(1)'}]}), 400)
+        check("buyer room link over http", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={
+            "resources": [{"title": "x", "url": "http://example.com/a"}]}), 400)
+        check("buyer room javascript link", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={
+            "resources": [{"title": "x", "url": "javascript:alert(1)//https://a"}]}), 400)
+        room = check("rep creates buyer room", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={
+            "welcome_note": "Matrix welcome", "resources": [{"title": "Proposal", "url": "https://example.com/proposal.pdf"}]}), 200).json()["room"]
+        tok = room["link"].rsplit("/room/", 1)[1]
+        pub = c.get(f"/api/room/{tok}")                                        # no sign-in
+        results.append(("public room opens without sign-in", 1 if pub.status_code == 200 else 0, 1))
+        body = pub.json()
+        leaked = {"value_amount", "stage", "health", "probability", "stakeholders", "next_step", "notes", "deal_id", "owner_user_id"} & set(body)
+        results.append(("public room leaks no deal internals", 0 if leaked or "Matrix" not in str(body.get("welcome_note")) else 1, 1))
+        results.append(("public room shows the close plan", 1 if isinstance(body.get("plan"), list) and body["plan"] else 0, 1))
+        results.append(("public room is no-store + noindex", 1 if pub.headers.get("cache-control") == "no-store"
+                        and "noindex" in pub.headers.get("x-robots-tag", "") else 0, 1))
+        r2 = c.get(f"/api/deals/{fdid}/room", headers=H["rep"]).json()["room"]
+        results.append(("rep sees the customer opened it", 1 if r2["view_count"] == 1 and r2["first_viewed_at"] else 0, 1))
+        acts = s.execute(text("SELECT count(*) FROM deal_activity WHERE deal_id = :d AND text LIKE 'Buyer room: the customer opened%'"), {"d": fdid}).scalar()
+        results.append(("first view logged on the deal", 1 if acts == 1 else 0, 1))
+        c.get(f"/api/room/{tok}")
+        acts = s.execute(text("SELECT count(*) FROM deal_activity WHERE deal_id = :d AND text LIKE 'Buyer room: the customer opened%'"), {"d": fdid}).scalar()
+        results.append(("second view not logged again", 1 if acts == 1 else 0, 1))
+        check("unknown room token", c.get("/api/room/" + "x" * 43), 404)
+        check("too-short room token", c.get("/api/room/abc"), 404)
+        check("viewer edits buyer room", c.patch(f"/api/deals/{fdid}/room", headers=H["viewer"], json={"title": "x"}), 403)
+        check("rep edits buyer room", c.patch(f"/api/deals/{fdid}/room", headers=H["rep"], json={"title": "Matrix room"}), 200)
+        results.append(("edit keeps the same link", 1 if c.get(f"/api/room/{tok}").json().get("title") == "Matrix room" else 0, 1))
+        new = check("rep replaces the link", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={}), 200).json()["room"]
+        tok2 = new["link"].rsplit("/room/", 1)[1]
+        check("old link after replace", c.get(f"/api/room/{tok}"), 404)
+        results.append(("new link keeps the page content", 1 if c.get(f"/api/room/{tok2}").json().get("title") == "Matrix room" else 0, 1))
+        s.execute(text("UPDATE deal_buyer_rooms SET expires_at = now() - interval '1 minute' WHERE deal_id = :d AND revoked_at IS NULL"), {"d": fdid})
+        s.commit()
+        check("expired link", c.get(f"/api/room/{tok2}"), 404)
+        check("rep turns the room off", c.delete(f"/api/deals/{fdid}/room", headers=H["rep"]), 200)
+        check("turning it off twice", c.delete(f"/api/deals/{fdid}/room", headers=H["rep"]), 404)
+        stored = s.execute(text("SELECT count(*) FROM deal_buyer_rooms WHERE token_hash IN (:a, :b)"), {"a": tok, "b": tok2}).scalar()
+        results.append(("raw tokens are never stored", 1 if stored == 0 else 0, 1))
+        old_limit = buyer_room.RATE_LIMIT
+        buyer_room.RATE_LIMIT = 3
+        buyer_room._HITS.clear()
+        codes = [c.get("/api/room/" + "y" * 43).status_code for _ in range(5)]
+        buyer_room.RATE_LIMIT = old_limit
+        buyer_room._HITS.clear()
+        results.append(("public room is rate-limited", 1 if codes[:3] == [404] * 3 and codes[3:] == [429, 429] else 0, 1))
         # Win/loss analytics (#9): scoped like the deal list
         an = check("rep reads deal analytics", c.get("/api/deals/analytics", headers=H["rep"], params={"days": 3650}), 200).json()
         results.append(("analytics: funnel covers every stage + won", 1 if [f["stage"] for f in an["funnel"]][-1] == "won" and len(an["funnel"]) == 6 else 0, 1))
@@ -363,6 +442,41 @@ def main() -> int:
         if other_p:
             check("warm paths with a contact from another account", c.get("/api/crm/warm-paths", headers=H["rep"],
                   params={"account_id": a_in, "persona_id": other_p}), 400)
+        # Wanted introductions (#8): the team's wishlist, answered from the partner portal
+        check("viewer adds to wishlist", c.post("/api/crm/wanted", headers=H["viewer"],
+              json={"account_id": a_in, "role_wanted": "Matrix CIO"}), 403)
+        check("rep adds wishlist item, other account", c.post("/api/crm/wanted", headers=H["rep"],
+              json={"account_id": a_out, "role_wanted": "Matrix CIO"}), 404)
+        check("wishlist role too short", c.post("/api/crm/wanted", headers=H["rep"],
+              json={"account_id": a_in, "role_wanted": "x"}), 422)
+        w = check("rep adds to wishlist", c.post("/api/crm/wanted", headers=H["rep"],
+                  json={"account_id": a_in, "role_wanted": "Matrix CIO", "note": "Matrix partner-visible note"}), 200).json()
+        created_wanted.append(w["id"])
+        wl = check("viewer reads wishlist", c.get("/api/crm/wanted", headers=H["viewer"]), 200).json()["wanted"]
+        results.append(("viewer sees the open item", 1 if any(x["id"] == w["id"] for x in wl) else 0, 1))
+        check("partner reads internal wishlist", c.get("/api/crm/wanted", headers=H["partner"]), 403)
+        check("outsider closes rep's item", c.patch(f"/api/crm/wanted/{w['id']}", headers=H["outsider"], json={"status": "closed"}), 404)
+        pw = check("partner reads portal wishlist", c.get("/api/partner/wanted", headers=H["partner"]), 200).json()["wanted"]
+        mine_w = [x for x in pw if x["id"] == w["id"]]
+        results.append(("partner sees company, role and note only",
+                        1 if mine_w and set(mine_w[0]) == {"id", "account_name", "role_wanted", "note", "business_line_name",
+                                                           "created_at", "submitted"} and not mine_w[0]["submitted"] else 0, 1))
+        check("rep reads portal wishlist", c.get("/api/partner/wanted", headers=H["rep"]), 403)
+        r = check("partner answers the wishlist", c.post("/api/partner/introductions", headers=H["partner"], json={
+            "account_name": "Typed by partner", "contact_name": "Matrix Wanted Contact",
+            "context": "Answering the wishlist from the matrix", "wanted_id": w["id"]}), 200).json()
+        row = s.execute(text("SELECT wanted_id, account_id FROM introductions WHERE id = :i"), {"i": r["id"]}).fetchone()
+        results.append(("answer linked to item and its account", 1 if tuple(row) == (w["id"], a_in) else 0, 1))
+        pw = c.get("/api/partner/wanted", headers=H["partner"]).json()["wanted"]
+        results.append(("portal marks it answered", 1 if any(x["id"] == w["id"] and x["submitted"] for x in pw) else 0, 1))
+        wl = c.get("/api/crm/wanted", headers=H["rep"]).json()["wanted"]
+        results.append(("team sees one answer", 1 if any(x["id"] == w["id"] and x["claims"] == 1 for x in wl) else 0, 1))
+        check("manager closes rep's item", c.patch(f"/api/crm/wanted/{w['id']}", headers=H["manager"], json={"status": "closed"}), 200)
+        pw = c.get("/api/partner/wanted", headers=H["partner"]).json()["wanted"]
+        results.append(("closed item leaves the portal", 0 if any(x["id"] == w["id"] for x in pw) else 1, 1))
+        check("partner answers a closed item", c.post("/api/partner/introductions", headers=H["partner"], json={
+            "account_name": "x co", "contact_name": "Matrix Late", "context": "Too late for this one", "wanted_id": w["id"]}), 400)
+        check("bad status value", c.patch(f"/api/crm/wanted/{w['id']}", headers=H["rep"], json={"status": "maybe"}), 422)
         check("forecast export", c.get("/api/forecast/export", headers=H["rep"], params={"period": per}), 200)
 
         # ── M3 activities ──
@@ -479,6 +593,8 @@ def main() -> int:
         results.append(("partner grant ignored", int(auth.get_accessible_account_ids(s, partner) == []), 1))
     finally:
         s.rollback()
+        for wid in created_wanted:
+            s.execute(text("DELETE FROM crm_wanted_intros WHERE id = :w"), {"w": wid})
         for cid in created_connectors:
             s.execute(text("DELETE FROM introductions WHERE connector_id = :c"), {"c": cid})
         for d in created_deals:

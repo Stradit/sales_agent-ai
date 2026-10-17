@@ -3,7 +3,8 @@
 // notification log. APIs: /api/crm/business-lines, /api/crm/settings, /api/crm/notifications/*.
 import { showToast } from './toast.js';
 
-const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
+// Escapes for HTML text AND attribute values (quotes too: many callers build href="${esc(x)}").
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const STAGES = [['intro', 'Intro'], ['discovery', 'Discovery'], ['proposal', 'Proposal'], ['pilot', 'Pilot'], ['contract', 'Contract']];
 const STATUS_TONE = { sent: 'ok', logged: 'warn', held: 'muted', skipped: 'muted', queued: 'warn', failed: 'bad' };

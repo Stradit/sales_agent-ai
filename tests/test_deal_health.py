@@ -50,3 +50,10 @@ def test_no_economic_buyer_not_required_at_intro():
 def test_closed_deal_has_no_gaps():
     h = health(deal(stage="won"), [], [], None, 0)
     assert h["gaps"] == [] and h["gap_codes"] == []
+
+
+def test_overdue_close_plan_is_a_gap():
+    h = health(deal(), [CHAMP, EB], [{"stage": "discovery", "done": True}], NOW - timedelta(days=2), 0, plan_overdue=2)
+    assert codes(h) == ["plan_overdue"] and "2 milestones overdue" in h["gaps"][0]
+    ok = health(deal(), [CHAMP, EB], [{"stage": "discovery", "done": True}], NOW - timedelta(days=2), 0, plan_overdue=0)
+    assert h["score"] < ok["score"]

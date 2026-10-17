@@ -23,6 +23,7 @@ PUBLIC = {
     ("POST", "/api/auth/forgot-password"), ("POST", "/api/auth/reset-password"), ("GET", "/api/auth/reset-password/validate"),
     ("GET", "/api/crm/capture/callback/microsoft"),      # authenticated by the sealed OAuth state instead
     ("GET", "/api/health"), ("GET", "/api/crm/deals/meta"), ("GET", "/api/deals/meta"),
+    ("GET", "/api/room/{token}"),                         # buyer room: the unguessable token is the access (#11)
 }
 
 

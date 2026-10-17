@@ -480,3 +480,53 @@
   .dl-list-count { margin-left: 0; }
 }
 .dl-warm-link { margin-left: 8px; font-weight: 600; color: var(--brand); white-space: nowrap; }
+
+/* Close plan (#10) */
+.dl-plan-head { margin-bottom: 10px; }
+.dl-plan-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: .78rem; color: var(--text-muted); margin-top: 6px; }
+.dl-plan-copy { margin-left: auto; padding: 4px 9px; font-size: .74rem; }
+.dl-plan-empty { border: 1px dashed var(--border-mid); padding: 14px; display: grid; gap: 8px; font-size: .8rem; margin-bottom: 12px; }
+.dl-plan-empty p { margin: 0; }
+.dl-plan-empty .dl-btn { justify-self: start; }
+.dl-plan-list { list-style: none; margin: 0 0 12px; padding: 0; counter-reset: plan; }
+.dl-plan-item { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: start; padding: 9px 4px;
+  border-bottom: 1px solid var(--border-color); counter-increment: plan; }
+.dl-plan-item > input[type="checkbox"] { margin-top: 3px; width: 16px; height: 16px; }
+.dl-plan-item.s-done .dl-plan-name { text-decoration: line-through; color: var(--text-muted); }
+.dl-plan-item.is-overdue { box-shadow: inset 3px 0 0 var(--warning); }
+.dl-plan-item.s-blocked { box-shadow: inset 3px 0 0 #b91c1c; }
+.dl-plan-name { font-weight: 600; font-size: .84rem; }
+.dl-plan-name::before { content: counter(plan) ". "; color: var(--text-muted); font-weight: 400; }
+.dl-plan-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .74rem; color: var(--text-muted); margin-top: 3px; }
+.dl-plan-side { font-weight: 700; text-transform: uppercase; letter-spacing: .03em; font-size: .66rem; padding: 1px 6px; border: 1px solid currentColor; }
+.dl-plan-side.side-us { color: var(--brand); }
+.dl-plan-side.side-customer { color: #7c3aed; }
+.dl-plan-side.side-both { color: var(--success); }
+.dl-plan-blocked { color: #b91c1c; font-weight: 600; }
+.dl-plan-note { font-size: .76rem; margin-top: 4px; }
+.dl-plan-ctl { display: flex; gap: 2px; }
+.dl-plan-item.editing { display: block; }
+.dl-plan-form, .dl-plan-edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px 10px; align-items: end; font-size: .78rem; }
+.dl-plan-form label, .dl-plan-edit label { display: grid; gap: 4px; color: var(--text-muted); }
+.dl-plan-form .dl-plan-title, .dl-plan-edit .dl-plan-title { grid-column: span 2; }
+.dl-plan-form input, .dl-plan-form select, .dl-plan-edit input, .dl-plan-edit select { font: inherit; padding: 6px 8px;
+  border: 1px solid var(--border-mid); background: var(--panel-bg); color: var(--text-primary); min-width: 0; }
+@media (max-width: 600px) { .dl-plan-form .dl-plan-title, .dl-plan-edit .dl-plan-title { grid-column: 1 / -1; } }
+
+/* Buyer room sharing (#11) */
+.dl-share { border: 1px solid var(--border-color); background: var(--panel-bg); padding: 12px 14px; margin-bottom: 14px; font-size: .8rem; display: grid; gap: 8px; }
+.dl-share h3 { margin: 0; font-size: .86rem; }
+.dl-share h3 i { color: var(--brand); margin-right: 4px; }
+.dl-share p { margin: 0; }
+.dl-share > .dl-btn { justify-self: start; }
+.dl-share-link { display: flex; gap: 6px; flex-wrap: wrap; }
+.dl-share-link input { flex: 1; min-width: 200px; font: inherit; font-size: .78rem; padding: 6px 8px; border: 1px solid var(--border-mid); background: var(--panel-bg); color: var(--text-primary); }
+.dl-share-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.dl-share-seen { color: var(--success); font-weight: 600; }
+.dl-share-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.dl-share-form { display: grid; gap: 8px; }
+.dl-share-form label { display: grid; gap: 4px; color: var(--text-muted); }
+.dl-share-form fieldset { border: 1px solid var(--border-color); padding: 8px 10px; margin: 0; display: grid; gap: 6px; }
+.dl-share-form legend { color: var(--text-muted); padding: 0 4px; }
+.dl-share-form input, .dl-share-form textarea { font: inherit; font-size: .8rem; padding: 6px 8px; border: 1px solid var(--border-mid); background: var(--panel-bg); color: var(--text-primary); min-width: 0; }
+.dl-share-res { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 6px; }

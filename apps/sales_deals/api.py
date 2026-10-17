@@ -159,7 +159,7 @@ def _sync_auto_checks(s, deal_id: int, user_id: Optional[int]) -> None:
 
 
 def health(deal: Dict[str, Any], stakeholders: List[Dict[str, Any]], checklist: List[Dict[str, Any]],
-           last_activity: Optional[datetime], open_tasks: int) -> Dict[str, Any]:
+           last_activity: Optional[datetime], open_tasks: int, plan_overdue: int = 0) -> Dict[str, Any]:
     """0-100 score + reasons (README §21.1). Pure data, no LLM.
 
     gaps / gap_codes are parallel lists: the text is shown as-is (cards, digest, copilot); the code
@@ -212,6 +212,8 @@ def health(deal: Dict[str, Any], stakeholders: List[Dict[str, Any]], checklist: 
     blockers = [x for x in stakeholders if x["role"] == "blocker" or x.get("sentiment") == "negative"]
     if blockers:
         score -= 10; gap("blockers", f"{len(blockers)} blocker/negative stakeholder(s)")
+    if plan_overdue:
+        score -= 5; gap("plan_overdue", f"Close plan: {plan_overdue} milestone{'s' if plan_overdue != 1 else ''} overdue")
     in_stage = (now - deal["stage_changed_at"]).days
     if in_stage > 45:
         score -= 10; gap("long_in_stage", f"{in_stage} days in {STAGE_LABEL[deal['stage']]}")
@@ -240,7 +242,10 @@ def _deal_payload(s, deal: Dict[str, Any], full: bool = False) -> Dict[str, Any]
     last_activity = max([x for x in (internal_last, customer_touch) if x is not None], default=None)
     open_tasks = s.execute(text("SELECT count(*) FROM action_items WHERE deal_id = :d AND status IN ('open','in_progress')"),
                            {"d": did}).scalar()
-    h = health(deal, stakeholders, checklist, last_activity, open_tasks)
+    plan = s.execute(text("""SELECT count(*) AS total, count(*) FILTER (WHERE status = 'done') AS done,
+                                    count(*) FILTER (WHERE status <> 'done' AND due_date < current_date) AS overdue
+                             FROM deal_close_plan WHERE deal_id = :d"""), {"d": did}).mappings().fetchone()
+    h = health(deal, stakeholders, checklist, last_activity, open_tasks, plan["overdue"] if deal["stage"] in STAGES else 0)
     if deal["stage"] in STAGES:
         now = datetime.now(timezone.utc)
         if customer_touch is None and (now - deal["created_at"]).days >= 7:
@@ -271,6 +276,7 @@ def _deal_payload(s, deal: Dict[str, Any], full: bool = False) -> Dict[str, Any]
     }
     stage_items = [c for c in checklist if c["stage"] == deal["stage"]]
     out["stage_progress"] = {"done": sum(1 for c in stage_items if c["done"]), "total": len(stage_items)}
+    out["plan_progress"] = {"done": plan["done"], "total": plan["total"], "overdue": plan["overdue"]}
     if deal.get("introduction_id"):
         intro = s.execute(text("""SELECT i.id, i.status, i.attribution_pct, c.name AS connector_name, c.kind AS connector_kind
                                     FROM introductions i JOIN connectors c ON c.id = i.connector_id WHERE i.id = :i"""),
@@ -294,6 +300,7 @@ def _deal_payload(s, deal: Dict[str, Any], full: bool = False) -> Dict[str, Any]
                    coalesce(u.full_name, u.email) AS assignee
             FROM action_items t LEFT JOIN users u ON u.id = t.assigned_to_id WHERE t.deal_id = :d
             ORDER BY (t.status IN ('done','cancelled')), t.due_date NULLS LAST, t.id"""), {"d": did}).mappings()]
+        out["close_plan"] = _plan_rows(s, did)
     return out
 
 
@@ -766,6 +773,125 @@ def add_note(deal_id: int, body: NoteIn, user: User = Depends(auth.get_current_u
     return _deal_payload(s, _get_deal_row(s, deal_id, user), full=True)
 
 
+# ── Close plan (#10): dated milestones both sides agree on ───────────────────
+
+PLAN_SIDES = ("us", "customer", "both")
+PLAN_STATUSES = ("todo", "done", "blocked")
+# The standard plan for getting a signature: (title, side, days before expected close)
+PLAN_TEMPLATE = [
+    ("Confirm the decision process and who signs", "customer", 28),
+    ("Security / IT review complete", "customer", 21),
+    ("Commercial proposal agreed", "both", 14),
+    ("Legal review of the contract (MSA / SOW)", "customer", 10),
+    ("Procurement / vendor onboarding done", "customer", 7),
+    ("Contract signed", "both", 0),
+    ("Kick-off meeting held", "us", -7),
+]
+
+
+def _plan_rows(s, deal_id: int) -> List[Dict[str, Any]]:
+    return [dict(r) for r in s.execute(text("""
+        SELECT p.id, p.title, p.side, p.owner_name, p.due_date, p.status, p.note, p.ordinal, p.done_at,
+               (p.status <> 'done' AND p.due_date < current_date) AS overdue
+        FROM deal_close_plan p WHERE p.deal_id = :d ORDER BY p.ordinal, p.due_date NULLS LAST, p.id"""),
+        {"d": deal_id}).mappings()]
+
+
+class PlanItemIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    side: str = "us"
+    owner_name: Optional[str] = Field(None, max_length=120)
+    due_date: Optional[date] = None
+    note: Optional[str] = Field(None, max_length=1000)
+
+
+class PlanItemPatch(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    side: Optional[str] = None
+    owner_name: Optional[str] = Field(None, max_length=120)
+    due_date: Optional[date] = None
+    status: Optional[str] = None
+    note: Optional[str] = Field(None, max_length=1000)
+    ordinal: Optional[int] = Field(None, ge=0, le=1000)
+
+
+def _plan_check(body) -> None:
+    if getattr(body, "side", None) is not None and body.side not in PLAN_SIDES:
+        raise HTTPException(400, "side must be us, customer or both.")
+    if getattr(body, "status", None) is not None and body.status not in PLAN_STATUSES:
+        raise HTTPException(400, "status must be todo, done or blocked.")
+
+
+@router.post("/{deal_id}/plan")
+def add_plan_item(deal_id: int, body: PlanItemIn, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    _get_deal_row(s, deal_id, user)
+    _plan_check(body)
+    s.execute(text("""INSERT INTO deal_close_plan (deal_id, title, side, owner_name, due_date, note, ordinal, created_by)
+                      VALUES (:d, :t, :sd, :o, :due, :n,
+                              (SELECT coalesce(max(ordinal), 0) + 1 FROM deal_close_plan WHERE deal_id = :d), :u)"""),
+              {"d": deal_id, "t": body.title.strip(), "sd": body.side, "o": (body.owner_name or "").strip() or None,
+               "due": body.due_date, "n": (body.note or "").strip() or None, "u": user.id})
+    _log(s, deal_id, user.id, "field", f"Close plan: added \u201c{body.title.strip()}\u201d")
+    s.commit()
+    return {"close_plan": _plan_rows(s, deal_id)}
+
+
+@router.post("/{deal_id}/plan/template")
+def add_plan_template(deal_id: int, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    """Adds the standard steps to signature, dated back from the expected close (or 30 days out)."""
+    deal = _get_deal_row(s, deal_id, user)
+    if s.execute(text("SELECT 1 FROM deal_close_plan WHERE deal_id = :d LIMIT 1"), {"d": deal_id}).scalar():
+        raise HTTPException(400, "This deal already has a close plan — add steps one by one instead.")
+    from datetime import timedelta
+    close = deal["expected_close"] or (date.today() + timedelta(days=30))
+    for i, (title, side, before) in enumerate(PLAN_TEMPLATE, start=1):
+        due = max(date.today(), close - timedelta(days=before)) if before >= 0 else close - timedelta(days=before)
+        s.execute(text("""INSERT INTO deal_close_plan (deal_id, title, side, due_date, ordinal, created_by)
+                          VALUES (:d, :t, :sd, :due, :o, :u)"""),
+                  {"d": deal_id, "t": title, "sd": side, "due": due, "o": i, "u": user.id})
+    _log(s, deal_id, user.id, "field", "Close plan: added the standard steps to signature")
+    s.commit()
+    return {"close_plan": _plan_rows(s, deal_id)}
+
+
+@router.patch("/{deal_id}/plan/{item_id}")
+def update_plan_item(deal_id: int, item_id: int, body: PlanItemPatch, user: User = Depends(auth.get_current_user),
+                     s=Depends(_session)):
+    _get_deal_row(s, deal_id, user)
+    _plan_check(body)
+    item = s.execute(text("SELECT title, status FROM deal_close_plan WHERE id = :i AND deal_id = :d"),
+                     {"i": item_id, "d": deal_id}).mappings().fetchone()
+    if not item:
+        raise HTTPException(404, "Milestone not found.")
+    changes = body.model_dump(exclude_unset=True)
+    for col in ("title", "owner_name", "note"):
+        if col in changes and changes[col] is not None:
+            changes[col] = changes[col].strip() or None
+    if changes.get("title", "") is None:
+        raise HTTPException(400, "A milestone needs a title.")
+    for col, val in changes.items():
+        s.execute(text(f"UPDATE deal_close_plan SET {col} = :v, updated_at = now() WHERE id = :i"), {"v": val, "i": item_id})
+    if "status" in changes and changes["status"] != item["status"]:
+        s.execute(text("UPDATE deal_close_plan SET done_at = CASE WHEN :st = 'done' THEN now() END WHERE id = :i"),
+                  {"st": changes["status"], "i": item_id})
+        label = {"done": "done", "blocked": "blocked", "todo": "reopened"}[changes["status"]]
+        _log(s, deal_id, user.id, "field", f"Close plan: \u201c{changes.get('title') or item['title']}\u201d {label}")
+    s.commit()
+    return {"close_plan": _plan_rows(s, deal_id)}
+
+
+@router.delete("/{deal_id}/plan/{item_id}")
+def delete_plan_item(deal_id: int, item_id: int, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    _get_deal_row(s, deal_id, user)
+    title = s.execute(text("DELETE FROM deal_close_plan WHERE id = :i AND deal_id = :d RETURNING title"),
+                      {"i": item_id, "d": deal_id}).scalar()
+    if title is None:
+        raise HTTPException(404, "Milestone not found.")
+    _log(s, deal_id, user.id, "field", f"Close plan: removed \u201c{title}\u201d")
+    s.commit()
+    return {"close_plan": _plan_rows(s, deal_id)}
+
+
 @router.post("/{deal_id}/tasks")
 def add_task(deal_id: int, body: TaskIn, user: User = Depends(auth.get_current_user), s=Depends(_session)):
     """Creates a normal action item linked to the deal — it shows on My Tasks too."""
@@ -837,4 +963,7 @@ def install(app) -> None:
         ensure_schema()
     except Exception as e:
         print(f"[deals] schema check failed: {e}")
+    from apps.sales_deals import buyer_room
+    app.include_router(buyer_room.router)        # before router: /{deal_id}/room is more specific
+    app.include_router(buyer_room.public_router)
     app.include_router(router)
