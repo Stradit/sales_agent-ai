@@ -12,6 +12,7 @@ import { mountTimeline } from '../activity-timeline.js';
 import { photoAttr } from '../persona-photo.js';
 import { initViews, refreshViews, filtersChanged } from './views.js';
 import { planPane, planTabLabel, planClick, planChange, planSubmit, resetPlanEditing } from './plan.js';
+import { initRoomShare, roomShareBox, roomShareClick, roomShareSubmit } from './room-share.js';
 
 const $ = (id) => document.getElementById(id);
 const OPEN_STAGES = ['intro', 'discovery', 'proposal', 'pilot', 'contract'];
@@ -424,7 +425,7 @@ function renderRoom() {
       </div>
 
       <div class="dl-pane${st.tab === 'plan' ? ' active' : ''}" role="tabpanel">
-        ${st.tab === 'plan' ? planPane(d, PLAN_CTX) : ''}
+        ${st.tab === 'plan' ? roomShareBox(d) + planPane(d, PLAN_CTX) : ''}
       </div>
       <div class="dl-pane${st.tab === 'tasks' ? ' active' : ''}" role="tabpanel">
         <form class="dl-task-form" id="dlTaskForm">
@@ -500,6 +501,7 @@ async function patchTask(id, body) {
 
 // Close plan module context (deals/plan.js)
 const PLAN_CTX = { api, esc, dateLabel, showToast, getDeal: () => st.deal, refresh: () => refreshDeal() };
+initRoomShare({ api, esc, dateLabel, showToast, getDeal: () => st.deal, rerender: () => { if (st.deal && st.tab === 'plan') renderRoom(); } });
 
 async function refreshDeal() {
   const fresh = await api(`/${st.deal.id}`);
@@ -621,7 +623,7 @@ function wireRoom() {
       patchDeal({ offerings: next });
       return;
     }
-    if (st.tab === 'plan' && await planClick(e)) return;
+    if (st.tab === 'plan' && (await roomShareClick(e) || await planClick(e))) return;
     const tab = t.closest('[data-tab]');
     if (tab) {
       const fromBox = !!tab.closest('.dl-stage-box');
@@ -723,7 +725,7 @@ function wireRoom() {
   room.addEventListener('focusin', (e) => { if (e.target.id === 'dlPersonSearch') suggestPeople(e.target.value.trim()); });
   room.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (await planSubmit(e)) return;
+    if (await roomShareSubmit(e) || await planSubmit(e)) return;
     if (e.target.id === 'dlNoteForm') {
       const text = $('dlNote').value.trim();
       if (!text) return;

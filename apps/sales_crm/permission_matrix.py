@@ -60,6 +60,9 @@ def main() -> int:
     app.include_router(activities.router)
     from apps.sales_crm import views as saved_views
     app.include_router(saved_views.router)
+    from apps.sales_deals import buyer_room
+    app.include_router(buyer_room.router)
+    app.include_router(buyer_room.public_router)
     c = TestClient(app)
 
     s = get_session()
@@ -359,6 +362,58 @@ def main() -> int:
         check("viewer reads the plan", c.get(f"/api/deals/{fdid}", headers=H["viewer"]), 200)
         check("plan step of another deal", c.patch(f"/api/deals/{fdid}/plan/{step['id'] + 10**9}", headers=H["rep"], json={"status": "done"}), 404)
         check("rep removes step", c.delete(f"/api/deals/{fdid}/plan/{step['id']}", headers=H["rep"]), 200)
+        # Buyer room (#11): a public, read-only page behind an unguessable token
+        results.append(("no buyer room yet", 1 if c.get(f"/api/deals/{fdid}/room", headers=H["rep"]).json()["room"] is None else 0, 1))
+        check("viewer creates buyer room", c.post(f"/api/deals/{fdid}/room", headers=H["viewer"], json={}), 403)
+        check("outsider creates buyer room", c.post(f"/api/deals/{fdid}/room", headers=H["outsider"], json={}), 404)
+        check("partner creates buyer room", c.post(f"/api/deals/{fdid}/room", headers=H["partner"], json={}), 403)
+        check("buyer room link with a quote", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={
+            "resources": [{"title": "x", "url": 'https://evil.example/" onmouseover="alert(1)'}]}), 400)
+        check("buyer room link over http", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={
+            "resources": [{"title": "x", "url": "http://example.com/a"}]}), 400)
+        check("buyer room javascript link", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={
+            "resources": [{"title": "x", "url": "javascript:alert(1)//https://a"}]}), 400)
+        room = check("rep creates buyer room", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={
+            "welcome_note": "Matrix welcome", "resources": [{"title": "Proposal", "url": "https://example.com/proposal.pdf"}]}), 200).json()["room"]
+        tok = room["link"].rsplit("/room/", 1)[1]
+        pub = c.get(f"/api/room/{tok}")                                        # no sign-in
+        results.append(("public room opens without sign-in", 1 if pub.status_code == 200 else 0, 1))
+        body = pub.json()
+        leaked = {"value_amount", "stage", "health", "probability", "stakeholders", "next_step", "notes", "deal_id", "owner_user_id"} & set(body)
+        results.append(("public room leaks no deal internals", 0 if leaked or "Matrix" not in str(body.get("welcome_note")) else 1, 1))
+        results.append(("public room shows the close plan", 1 if isinstance(body.get("plan"), list) and body["plan"] else 0, 1))
+        results.append(("public room is no-store + noindex", 1 if pub.headers.get("cache-control") == "no-store"
+                        and "noindex" in pub.headers.get("x-robots-tag", "") else 0, 1))
+        r2 = c.get(f"/api/deals/{fdid}/room", headers=H["rep"]).json()["room"]
+        results.append(("rep sees the customer opened it", 1 if r2["view_count"] == 1 and r2["first_viewed_at"] else 0, 1))
+        acts = s.execute(text("SELECT count(*) FROM deal_activity WHERE deal_id = :d AND text LIKE 'Buyer room: the customer opened%'"), {"d": fdid}).scalar()
+        results.append(("first view logged on the deal", 1 if acts == 1 else 0, 1))
+        c.get(f"/api/room/{tok}")
+        acts = s.execute(text("SELECT count(*) FROM deal_activity WHERE deal_id = :d AND text LIKE 'Buyer room: the customer opened%'"), {"d": fdid}).scalar()
+        results.append(("second view not logged again", 1 if acts == 1 else 0, 1))
+        check("unknown room token", c.get("/api/room/" + "x" * 43), 404)
+        check("too-short room token", c.get("/api/room/abc"), 404)
+        check("viewer edits buyer room", c.patch(f"/api/deals/{fdid}/room", headers=H["viewer"], json={"title": "x"}), 403)
+        check("rep edits buyer room", c.patch(f"/api/deals/{fdid}/room", headers=H["rep"], json={"title": "Matrix room"}), 200)
+        results.append(("edit keeps the same link", 1 if c.get(f"/api/room/{tok}").json().get("title") == "Matrix room" else 0, 1))
+        new = check("rep replaces the link", c.post(f"/api/deals/{fdid}/room", headers=H["rep"], json={}), 200).json()["room"]
+        tok2 = new["link"].rsplit("/room/", 1)[1]
+        check("old link after replace", c.get(f"/api/room/{tok}"), 404)
+        results.append(("new link keeps the page content", 1 if c.get(f"/api/room/{tok2}").json().get("title") == "Matrix room" else 0, 1))
+        s.execute(text("UPDATE deal_buyer_rooms SET expires_at = now() - interval '1 minute' WHERE deal_id = :d AND revoked_at IS NULL"), {"d": fdid})
+        s.commit()
+        check("expired link", c.get(f"/api/room/{tok2}"), 404)
+        check("rep turns the room off", c.delete(f"/api/deals/{fdid}/room", headers=H["rep"]), 200)
+        check("turning it off twice", c.delete(f"/api/deals/{fdid}/room", headers=H["rep"]), 404)
+        stored = s.execute(text("SELECT count(*) FROM deal_buyer_rooms WHERE token_hash IN (:a, :b)"), {"a": tok, "b": tok2}).scalar()
+        results.append(("raw tokens are never stored", 1 if stored == 0 else 0, 1))
+        old_limit = buyer_room.RATE_LIMIT
+        buyer_room.RATE_LIMIT = 3
+        buyer_room._HITS.clear()
+        codes = [c.get("/api/room/" + "y" * 43).status_code for _ in range(5)]
+        buyer_room.RATE_LIMIT = old_limit
+        buyer_room._HITS.clear()
+        results.append(("public room is rate-limited", 1 if codes[:3] == [404] * 3 and codes[3:] == [429, 429] else 0, 1))
         # Win/loss analytics (#9): scoped like the deal list
         an = check("rep reads deal analytics", c.get("/api/deals/analytics", headers=H["rep"], params={"days": 3650}), 200).json()
         results.append(("analytics: funnel covers every stage + won", 1 if [f["stage"] for f in an["funnel"]][-1] == "won" and len(an["funnel"]) == 6 else 0, 1))

@@ -7672,6 +7672,13 @@ if FASTAPI_AVAILABLE:
             Admins can preview a connector's view with ?connector_id=."""
             return templates.TemplateResponse(request, "partner.html", headers=_NO_CACHE_HEADERS)
 
+        @app.get("/room/{token}", response_class=HTMLResponse, include_in_schema=False)
+        async def buyer_room_page(request: Request, token: str):
+            """Buyer room (#11): the read-only page a rep shares with the customer. Public by design —
+            the token in the URL is the access; the page loads its data from /api/room/{token}."""
+            return templates.TemplateResponse(request, "buyer-room.html", headers={
+                **_NO_CACHE_HEADERS, "X-Robots-Tag": "noindex, nofollow", "Referrer-Policy": "no-referrer"})
+
         @app.get("/email-sync", response_class=HTMLResponse, include_in_schema=False)
         async def capture_settings_page(request: Request):
             """Connect Microsoft 365 email + calendar for automatic activity capture (apps/sales_crm/README.md §4)."""

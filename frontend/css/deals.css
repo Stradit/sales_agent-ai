@@ -512,3 +512,21 @@
 .dl-plan-form input, .dl-plan-form select, .dl-plan-edit input, .dl-plan-edit select { font: inherit; padding: 6px 8px;
   border: 1px solid var(--border-mid); background: var(--panel-bg); color: var(--text-primary); min-width: 0; }
 @media (max-width: 600px) { .dl-plan-form .dl-plan-title, .dl-plan-edit .dl-plan-title { grid-column: 1 / -1; } }
+
+/* Buyer room sharing (#11) */
+.dl-share { border: 1px solid var(--border-color); background: var(--panel-bg); padding: 12px 14px; margin-bottom: 14px; font-size: .8rem; display: grid; gap: 8px; }
+.dl-share h3 { margin: 0; font-size: .86rem; }
+.dl-share h3 i { color: var(--brand); margin-right: 4px; }
+.dl-share p { margin: 0; }
+.dl-share > .dl-btn { justify-self: start; }
+.dl-share-link { display: flex; gap: 6px; flex-wrap: wrap; }
+.dl-share-link input { flex: 1; min-width: 200px; font: inherit; font-size: .78rem; padding: 6px 8px; border: 1px solid var(--border-mid); background: var(--panel-bg); color: var(--text-primary); }
+.dl-share-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.dl-share-seen { color: var(--success); font-weight: 600; }
+.dl-share-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.dl-share-form { display: grid; gap: 8px; }
+.dl-share-form label { display: grid; gap: 4px; color: var(--text-muted); }
+.dl-share-form fieldset { border: 1px solid var(--border-color); padding: 8px 10px; margin: 0; display: grid; gap: 6px; }
+.dl-share-form legend { color: var(--text-muted); padding: 0 4px; }
+.dl-share-form input, .dl-share-form textarea { font: inherit; font-size: .8rem; padding: 6px 8px; border: 1px solid var(--border-mid); background: var(--panel-bg); color: var(--text-primary); min-width: 0; }
+.dl-share-res { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 6px; }

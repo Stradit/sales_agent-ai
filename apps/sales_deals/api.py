@@ -963,4 +963,7 @@ def install(app) -> None:
         ensure_schema()
     except Exception as e:
         print(f"[deals] schema check failed: {e}")
+    from apps.sales_deals import buyer_room
+    app.include_router(buyer_room.router)        # before router: /{deal_id}/room is more specific
+    app.include_router(buyer_room.public_router)
     app.include_router(router)
