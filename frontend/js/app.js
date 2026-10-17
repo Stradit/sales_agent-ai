@@ -87,8 +87,9 @@
   function getInitials(name) {
     return (name || '?').split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
   }
+  // Escapes for HTML text AND attribute values (quotes too: many callers build href="${esc(x)}").
   function esc(s) {
-    return $('<div>').text(s == null ? '' : s).html();
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   // 1. Render Sidebar Accounts

@@ -10,10 +10,9 @@
 import { loadRealAccounts } from './real-accounts.js';
 import { getCurrentUser } from '../auth-client.js';
 
+// Escapes for HTML text AND attribute values (quotes too: many callers build href="${esc(x)}").
 function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = (s == null ? '' : String(s));
-  return d.innerHTML;
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function initials(name) {
   return (name || '?').split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();

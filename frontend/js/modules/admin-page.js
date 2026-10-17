@@ -9,11 +9,8 @@ import { mountCrmSettings } from './admin-crm-settings.js';
 initThemeToggle();
 initTopbarAuth();
 
-const esc = (s) => {
-  const d = document.createElement('div');
-  d.textContent = s == null ? '' : String(s);
-  return d.innerHTML;
-};
+// Escapes for HTML text AND attribute values (quotes too: many callers build href="${esc(x)}").
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const main = document.getElementById('adminMain');
 let usersCache = [];

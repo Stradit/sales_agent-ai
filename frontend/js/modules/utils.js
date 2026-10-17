@@ -1,9 +1,8 @@
 import { state } from './state.js';
 
+// Escapes for HTML text AND attribute values (quotes too: many callers build href="${esc(x)}").
 export function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = (s == null ? '' : String(s));
-  return d.innerHTML;
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 export function initials(name) {
