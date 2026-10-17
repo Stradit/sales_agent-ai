@@ -227,3 +227,23 @@ certificate: each browser warns once). Search engines won't index an IP site.
 3. GitHub: variable `SITE_URL` → `https://<subdomain>`; in `ENV_FILE`, the three URLs above →
    `https://<subdomain>`. Re-run *Deploy to production*.
 4. Microsoft 365 capture (if used): add `https://<subdomain>/api/crm/capture/callback/microsoft` as a redirect URI.
+
+## Disk (root volume)
+Each app image is several GB (the embedding model is baked in). `remote_deploy.sh` keeps only the
+running image and the new one, and refuses to pull with less than 5 GB free — but the volume must be
+big enough to hold two images: **use 30–40 GB** (an 8 GB root volume fills on the second deploy).
+
+Grow it without downtime (Amazon Linux 2023, XFS):
+1. EC2 → Volumes → the instance's root volume → **Modify volume** → Size `40` → Modify. Wait until
+   the state shows *optimizing* or *completed* (a minute or two).
+2. On the server:
+   ```bash
+   lsblk                               # the disk now shows 40G, the partition still 8G
+   sudo growpart /dev/nvme0n1 1        # grow partition 1 to the whole disk
+   sudo xfs_growfs -d /                # grow the filesystem (Ubuntu / ext4: sudo resize2fs /dev/nvme0n1p1)
+   df -h /                             # should show ~40G
+   ```
+3. Optional, one-off: cap the system journal so logs can't fill the disk:
+   `sudo journalctl --vacuum-size=200M` and set `SystemMaxUse=200M` in `/etc/systemd/journald.conf`.
+
+To see what uses the space: `docker system df` and `sudo du -xh / --max-depth=2 | sort -h | tail`.

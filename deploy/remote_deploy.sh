@@ -31,11 +31,41 @@ WAIT_SECONDS=180
 echo "== ECR login ($REGISTRY)"
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
 
-echo "== Pull $IMAGE"
-docker pull "$IMAGE"
-
 PREVIOUS="$(docker inspect --format '{{.Config.Image}}' salesai-web 2>/dev/null || true)"
 echo "Previous image: ${PREVIOUS:-none}"
+
+# ── Disk: keep only what a rollback needs ────────────────────────────────────
+# Each app image is several GB (the embedding model is baked in). Before pulling, delete every
+# app image except the one running now (the rollback target), plus stopped containers, dangling
+# layers and build cache. Then make sure the pull fits, instead of dying half-way through it.
+MIN_FREE_GB="${MIN_FREE_GB:-5}"
+DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)"
+free_gb() { df -P -k "$DOCKER_ROOT" 2>/dev/null | awk 'NR==2 {printf "%d", $4 / 1048576}'; }
+prune_images() {      # args: images to keep (repo:tag); every other image of this repository goes
+  local repo="${IMAGE%:*}" keep img
+  docker container prune -f >/dev/null 2>&1 || true
+  while read -r img; do
+    [[ -z "$img" || "$img" == *"<none>"* ]] && continue
+    for keep in "$@"; do [[ "$img" == "$keep" ]] && continue 2; done
+    docker image rm "$img" >/dev/null 2>&1 && echo "   removed $img" || true
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null)
+  docker image prune -f >/dev/null 2>&1 || true          # dangling layers
+  docker builder prune -af >/dev/null 2>&1 || true       # build cache (nothing is built here)
+}
+
+echo "== Disk before pull: $(free_gb) GB free in $DOCKER_ROOT"
+prune_images "$PREVIOUS" "$IMAGE"
+FREE="$(free_gb)"
+echo "   after clean-up: ${FREE} GB free"
+if [[ -n "$FREE" ]] && (( FREE < MIN_FREE_GB )); then
+  echo "!! Only ${FREE} GB free - the new image needs about ${MIN_FREE_GB} GB. Nothing was changed; the" >&2
+  echo "   previous version is still serving. Grow the server disk (deploy/AWS_SETUP.md, 'Disk')." >&2
+  df -h "$DOCKER_ROOT" / >&2 || true
+  exit 1
+fi
+
+echo "== Pull $IMAGE"
+docker pull "$IMAGE"
 
 # .env as the app reads it (python-dotenv / compose are lenient: "KEY = value", quotes, "export ",
 # CRLF). `docker run --env-file` is strict and passes quotes through literally, so the one-off
@@ -102,8 +132,10 @@ if wait_healthy; then
   echo "Healthy: $(curl -fsS "$HEALTH_URL")"
   echo "$IMAGE" > "$APP_DIR/current_image"
   [[ -n "$PREVIOUS" && "$PREVIOUS" != "$IMAGE" ]] && echo "$PREVIOUS" > "$APP_DIR/previous_image"
-  # Keep the running and previous images; drop older ones
-  docker image prune -af --filter "until=168h" >/dev/null || true
+  # Keep the new image and the one before it (rollback target); everything older goes
+  echo "== Clean-up"
+  prune_images "$IMAGE" "$PREVIOUS"
+  echo "   $(free_gb) GB free"
   exit 0
 fi
 
