@@ -10,6 +10,7 @@ import { downloadFile } from '../download.js';
 import { renderToolkit, copilotHref } from './toolkit.js';
 import { mountTimeline } from '../activity-timeline.js';
 import { photoAttr } from '../persona-photo.js';
+import { initViews, refreshViews, filtersChanged } from './views.js';
 
 const $ = (id) => document.getElementById(id);
 const OPEN_STAGES = ['intro', 'discovery', 'proposal', 'pilot', 'contract'];
@@ -60,8 +61,11 @@ function healthBadge(h) {
 // ── Board ────────────────────────────────────────────────────────────────────
 function card(d) {
   const overdue = isOverdue(d.next_step_due);
-  const gap = (d.health && d.health.gaps && d.health.gaps[0]) || '';
-  return `<article class="dl-card${d.stage === 'won' ? ' dl-won' : ''}${d.stage === 'lost' ? ' dl-lost' : ''}" draggable="${OPEN_STAGES.includes(d.stage) && !document.body.classList.contains('role-viewer')}"
+  // Show the most urgent gap on the card: a nudge (quiet / overdue / close date passed) before the rest
+  const h = d.health || {};
+  const urgentAt = (h.gap_codes || []).findIndex(c => ATTENTION.includes(c));
+  const gap = (h.gaps || [])[urgentAt >= 0 ? urgentAt : 0] || '';
+  return `<article class="dl-card${d.stage === 'won' ? ' dl-won' : ''}${d.stage === 'lost' ? ' dl-lost' : ''}${needsAttention(d) ? ' dl-attn' : ''}" draggable="${OPEN_STAGES.includes(d.stage) && !document.body.classList.contains('role-viewer')}"
       data-deal="${d.id}" tabindex="0" aria-label="${esc(d.name)}, ${esc(d.account_name)}">
     <div class="dl-card-top">
       <div><div class="dl-card-name">${esc(d.name)}</div><div class="dl-card-acct">${esc(d.account_name)}${d.business_line_name ? ` · ${esc(d.business_line_name)}` : ''}</div></div>
@@ -77,13 +81,20 @@ function card(d) {
     </div>
     ${d.next_step ? `<div class="dl-card-next ${overdue ? 'dl-overdue' : ''}"><i class="fa-solid fa-arrow-right"></i> ${esc(d.next_step)}${d.next_step_due ? ` · ${esc(dateLabel(d.next_step_due))}` : ''}</div>` : ''}
     ${gap && OPEN_STAGES.includes(d.stage) ? `<div class="dl-card-gap"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(gap)}</div>` : ''}
+    ${d.stage === 'lost' ? `<div class="dl-card-lost"><i class="fa-solid fa-circle-xmark"></i> ${esc(lostText(d) || 'No reason recorded')}</div>` : ''}
   </article>`;
 }
 
+// Deals that need a nudge: no recent activity, next step overdue, or close date already past
+const ATTENTION = ['quiet', 'no_activity', 'next_step_overdue', 'close_date_passed'];
+const needsAttention = (d) => OPEN_STAGES.includes(d.stage) && ((d.health && d.health.gap_codes) || []).some(c => ATTENTION.includes(c));
+
 function renderBoard() {
   const cols = (st.meta ? st.meta.stages : []).filter(s => OPEN_STAGES.includes(s.key));
+  const attnOnly = !!($('dlAttention') && $('dlAttention').checked);
+  if ($('dlAttentionCount')) $('dlAttentionCount').textContent = st.deals.filter(needsAttention).length;
   $('dlBoard').innerHTML = cols.map(s => {
-    const ds = st.deals.filter(d => d.stage === s.key);
+    const ds = st.deals.filter(d => d.stage === s.key && (!attnOnly || needsAttention(d)));
     const sum = st.summary[s.key] || { count: 0, value: 0 };
     return `<section class="dl-col" data-stage="${s.key}" aria-label="${esc(s.label)}">
       <div class="dl-col-head"><div class="dl-col-title">${esc(s.label)} <span class="dl-count">${sum.count}</span></div>
@@ -94,13 +105,16 @@ function renderBoard() {
   const closed = st.deals.filter(d => ['won', 'lost'].includes(d.stage));
   const won = st.summary.won || { count: 0, value: 0 };
   const lost = st.summary.lost || { count: 0, value: 0 };
+  const reasons = (lost.by_reason || []).map(r => `<span class="dl-reason-pill${r.key === 'uncategorised' ? ' muted' : ''}">${esc(r.label)} <b>${r.count}</b></span>`).join('');
   $('dlClosed').innerHTML = closed.length ? `<details><summary>Closed — ${won.count} won (${esc(money(won.value))}) · ${lost.count} lost</summary>
+      ${reasons ? `<div class="dl-loss-reasons"><span class="dl-loss-title">Why we lose</span>${reasons}</div>` : ''}
       <div class="dl-closed-grid">${closed.map(card).join('')}</div></details>` : '';
   const open = st.deals.filter(d => OPEN_STAGES.includes(d.stage));
   const atRisk = open.filter(d => d.health && d.health.level === 'risk').length;
   $('dlSummary').textContent = open.length
     ? `${open.length} open deals · ${money(open.reduce((a, d) => a + (d.value_amount || 0), 0))} pipeline${atRisk ? ` · ${atRisk} at risk` : ''}`
     : 'No open deals yet — create one to start tracking the journey from intro to contract.';
+  refreshViews();
 }
 
 // ── Weekly digest (README §21.5) ─────────────────────────────────────────────
@@ -147,16 +161,39 @@ async function loadDeals() {
     const data = await api(`?${params}`);
     st.deals = data.deals;
     st.summary = data.summary;
+    st.lostCategories = data.lost_categories || st.lostCategories || {};
+    if (data.own_only) {   // sales reps only ever see their own deals (server-enforced)
+      $('dlMine').checked = true; $('dlMine').disabled = true;
+      $('dlMine').closest('label').title = 'Sales reps see the deals they own';
+    }
     renderBoard();
     loadDigest();
   } catch (err) { $('dlSummary').textContent = err.message; }
 }
 
+// After a stage move: one toast saying what happened (and any open exit criteria noted), with Undo
+function stageMoved(d, fromStage) {
+  const warn = (d.warnings || [])[0];
+  const note = warn ? ` (${warn.split(':')[0].replace(/^Moved on with /, '')} noted)` : '';
+  showToast(`Moved to ${d.stage_label}${note}`, { action: { label: 'Undo', onClick: () => undoMove(d.id, fromStage) } });
+}
+
+async function undoMove(id, fromStage) {
+  try {
+    // Going back a stage needs a reason on the server; record why
+    const d = await api(`/${id}`, { method: 'PATCH', body: { stage: fromStage, reason: 'Undo — moved by mistake' } });
+    if (st.deal && st.deal.id === id) { st.deal = d; renderRoom(); }
+    await loadDeals();
+    showToast(`Back in ${d.stage_label}`);
+  } catch (err) { showToast(err.message); }
+}
+
 async function moveDeal(id, stage, extra = {}) {
+  const from = (st.deals.find(x => x.id === id) || {}).stage;
   try {
     const d = await api(`/${id}`, { method: 'PATCH', body: { stage, ...extra } });
-    (d.warnings || []).forEach(w => showToast(w));
-    if (!d.warnings || !d.warnings.length) showToast(`Moved to ${d.stage_label}`);
+    if (from && d.stage !== from) stageMoved(d, from);
+    else (d.warnings || []).forEach(w => showToast(w));
     if (st.deal && st.deal.id === id) { st.deal = d; renderRoom(); }
     await loadDeals();
   } catch (err) { showToast(err.message); }
@@ -192,6 +229,98 @@ async function moveToStage(target, dealId = null) {
 // ── Deal room ────────────────────────────────────────────────────────────────
 function field(label, input, wide = false) { return `<label class="dl-field${wide ? ' dl-field-wide' : ''}">${label}${input}</label>`; }
 
+// What each stage is for, in one line (matches the exit criteria in apps/sales_deals/api.py CHECKLIST)
+const STAGE_GOAL = {
+  intro: 'Find the right person and a reason to talk now, then book the first meeting.',
+  discovery: 'Confirm their pains, who decides and how they buy.',
+  proposal: 'Map your offering to their priorities and get the proposal in front of them.',
+  pilot: 'Prove the value in a time-boxed pilot with agreed success criteria.',
+  contract: 'Get approvals and the security review through, then the signature.',
+};
+// Exit criteria the app ticks by itself (AUTO_CHECK in api.py) — show where to act instead
+const AUTO_HINT = {
+  'intro|target_identified': ['Add someone in Buying committee', 'committee'],
+  'discovery|economic_buyer': ['Set an Economic buyer in Buying committee', 'committee'],
+  'discovery|champion': ['Set a Champion in Buying committee', 'committee'],
+  'proposal|offerings_mapped': ['Pick the StradIT offerings above', null],
+};
+const stageLabel = (s) => ((st.meta.stages.find(x => x.key === s) || {}).label || s);
+
+// Deal health gaps → the one-click fix (codes from health() in apps/sales_deals/api.py)
+const GAP_ACTIONS = {
+  no_champion: { label: 'Add a champion', tab: 'committee', role: 'champion' },
+  no_economic_buyer: { label: 'Add the economic buyer', tab: 'committee', role: 'economic_buyer' },
+  blockers: { label: 'Review the committee', tab: 'committee' },
+  no_next_step: { label: 'Set a next step', field: 'next_step' },
+  next_step_overdue: { label: 'Update next step', field: 'next_step_due' },
+  close_date_passed: { label: 'Update close date', field: 'expected_close' },
+  quiet: { label: 'Log activity', tab: 'activity' },
+  no_activity: { label: 'Log activity', tab: 'activity' },
+  exit_criteria: { label: 'Review stage', box: true },
+  long_in_stage: { label: 'Move on or update', box: true },
+};
+
+function runGapAction(code) {
+  const a = GAP_ACTIONS[code];
+  if (!a) return;
+  const room = $('dlRoom');
+  const flash = (node) => { node.classList.add('dl-flash'); setTimeout(() => node.classList.remove('dl-flash'), 1600); };
+  if (a.tab) {
+    st.tab = a.tab; renderRoom();
+    const tabs = room.querySelector('.dl-tabs');
+    if (tabs) tabs.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (a.role && $('dlPersonRole')) { $('dlPersonRole').value = a.role; $('dlPersonSearch').focus(); }
+    return;
+  }
+  if (a.field) {
+    const input = room.querySelector(`[data-field="${a.field}"]`);
+    if (input) { input.scrollIntoView({ behavior: 'smooth', block: 'center' }); input.focus(); flash(input); }
+    return;
+  }
+  if (a.box) {
+    const box = room.querySelector('.dl-stage-box');
+    if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'start' }); flash(box); }
+  }
+}
+
+// The guided box at the top of the deal room: where the deal is, what this stage is for, what's
+// left, and the one obvious next action (mirrors the introductions drawer's .in-stage-box).
+function stageBox(d) {
+  const i = OPEN_STAGES.indexOf(d.stage);
+  const next = OPEN_STAGES[i + 1] || null;
+  const items = d.checklist.filter(c => c.stage === d.stage);
+  const done = items.filter(c => c.done).length;
+  const open = items.length - done;
+  const days = d.health && d.health.days_in_stage != null ? ` · ${d.health.days_in_stage} day${d.health.days_in_stage === 1 ? '' : 's'}` : '';
+  const pct = items.length ? Math.round(done / items.length * 100) : 100;
+  const list = items.map(c => {
+    const auto = AUTO_HINT[`${c.stage}|${c.item_key}`];
+    return `<li class="${c.done ? 'done' : ''}"><label><input type="checkbox" data-check="${c.stage}|${c.item_key}"${c.done ? ' checked' : ''}>
+      <span>${esc(c.label)}</span></label>
+      ${auto && !c.done ? `<button type="button" class="dl-stage-auto" ${auto[1] ? `data-tab="${auto[1]}"` : 'data-goto-offerings'} title="Ticks itself once this is done">${esc(auto[0])} →</button>` : ''}</li>`;
+  }).join('');
+  const win = canWin(d)
+    ? `<button type="button" class="dl-btn${next ? '' : ' dl-btn-primary'}" data-close-deal="won"><i class="fa-solid fa-trophy"></i> Mark won</button>`
+    : `<span class="dl-hint" title="A deal can be marked won from Proposal onwards"><i class="fa-solid fa-lock"></i> Won unlocks at Proposal</span>`;
+  return `<section class="dl-stage-box" aria-label="Stage guidance">
+    <div class="dl-stage-head">
+      <span class="dl-stage-now">${esc(stageLabel(d.stage))}${days}</span>
+      ${next ? `<span class="dl-stage-next">Next: <strong>${esc(stageLabel(next))}</strong></span>` : '<span class="dl-stage-next">Final stage</span>'}
+    </div>
+    <p class="dl-stage-goal">${esc(STAGE_GOAL[d.stage] || '')}</p>
+    ${items.length ? `<div class="dl-stage-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${items.length}" aria-valuenow="${done}" aria-label="Exit criteria done">
+        <span style="width:${pct}%"></span></div>
+      <div class="dl-stage-count">${done} of ${items.length} exit criteria done</div>
+      <ul class="dl-stage-list">${list}</ul>` : ''}
+    <div class="dl-close-btns dl-stage-actions">
+      ${next ? `<button type="button" class="dl-btn dl-btn-primary" data-advance="${next}">Move to ${esc(stageLabel(next))} <i class="fa-solid fa-arrow-right"></i></button>` : ''}
+      ${win}
+      <button type="button" class="dl-btn dl-btn-danger" data-close-deal="lost"><i class="fa-solid fa-circle-xmark"></i> Mark lost</button>
+    </div>
+    ${next && open ? `<p class="dl-stage-note"><i class="fa-solid fa-circle-info"></i> You can move on now — the ${open} open item${open === 1 ? '' : 's'} will be noted in the change log.</p>` : ''}
+  </section>`;
+}
+
 function renderRoom() {
   const d = st.deal;
   if (!d) return;
@@ -213,25 +342,22 @@ function renderRoom() {
         const allowed = canStep(d, s);
         return `<button type="button" class="dl-step${i < idx ? ' done' : ''}${s === d.stage ? ' current' : ''}" data-stage-step="${s}" aria-current="${s === d.stage ? 'step' : 'false'}"${allowed ? '' : ' disabled'}${!allowed && s !== d.stage && OPEN_STAGES.includes(d.stage) ? ' title="Move one stage at a time"' : ''}>${esc(lbl)}</button>`;
       }).join('')}</div>
-      ${OPEN_STAGES.includes(d.stage) ? `<div class="dl-close-btns">
-          ${canWin(d) ? '<button type="button" class="dl-btn" data-close-deal="won"><i class="fa-solid fa-trophy"></i> Mark won</button>'
-            : '<span class="dl-hint"><i class="fa-solid fa-lock"></i> Mark won unlocks at Proposal</span>'}
-          <button type="button" class="dl-btn dl-btn-danger" data-close-deal="lost"><i class="fa-solid fa-circle-xmark"></i> Mark lost</button></div>`
-        : `<div class="dl-warn">This deal is <strong>${esc(d.stage_label)}</strong>${d.lost_reason ? ` — ${esc(d.lost_reason)}` : ''}. <button type="button" class="dl-btn" data-stage-step="contract">Reopen</button></div>`}
+      ${OPEN_STAGES.includes(d.stage) ? stageBox(d)
+        : `<div class="dl-warn">${d.stage === 'won' ? '<i class="fa-solid fa-trophy"></i> ' : ''}This deal is <strong>${esc(d.stage_label)}</strong>${lostText(d) ? ` — ${esc(lostText(d))}` : ''}. <button type="button" class="dl-btn" data-stage-step="contract">Reopen</button></div>`}
     </div>
     <div class="dl-room-body">
       <div class="dl-grid">
         ${field('Value', `<input type="number" min="0" step="1000" data-field="value_amount" value="${d.value_amount ?? ''}">`)}
         ${field('Expected close', `<input type="date" data-field="expected_close" value="${d.expected_close ? String(d.expected_close).slice(0, 10) : ''}">`)}
-        ${field('Next step', `<input data-field="next_step" maxlength="500" value="${esc(d.next_step || '')}" placeholder="What happens next?">`, true)}
-        ${field('Next step due', `<input type="date" data-field="next_step_due" value="${d.next_step_due ? String(d.next_step_due).slice(0, 10) : ''}">`)}
-        ${field('Deal name', `<input data-field="name" maxlength="200" value="${esc(d.name)}">`)}
         ${OPEN_STAGES.includes(d.stage) ? field('Forecast category', `<select data-field="forecast_category">${[['pipeline', 'Pipeline'], ['best_case', 'Best case'], ['commit', 'Commit'], ['omitted', 'Omitted']]
           .map(([k, l]) => `<option value="${k}"${k === d.forecast_category ? ' selected' : ''}>${l}</option>`).join('')}</select>`) : ''}
+        ${field('Next step', `<input data-field="next_step" maxlength="500" value="${esc(d.next_step || '')}" placeholder="What happens next?">`, true)}
+        ${field('Next step due', `<input type="date" data-field="next_step_due" value="${d.next_step_due ? String(d.next_step_due).slice(0, 10) : ''}">`)}
         ${OPEN_STAGES.includes(d.stage) ? field('Probability %', `<input type="number" min="0" max="100" step="5" data-field="probability" value="${d.probability ?? ''}"
           placeholder="${d.stage_probability ?? ''} (stage default)">`) : ''}
         ${field('Business line', `<select data-field="business_line_id"><option value="">— Not set —</option>${(st.meta.business_lines || []).map(b =>
           `<option value="${b.id}"${b.id === d.business_line_id ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`)}
+        ${field('Deal name', `<input data-field="name" maxlength="200" value="${esc(d.name)}">`, true)}
         <div class="dl-field dl-field-wide">StradIT offerings<div class="dl-chips">${offerings}</div></div>
       </div>
 
@@ -239,7 +365,10 @@ function renderRoom() {
         <div class="dl-health-panel">
           <div class="dl-ring ${h.level}" style="--v:${h.score}"><span>${h.score}</span></div>
           <div class="dl-health-lists">
-            ${h.gaps.length ? `<strong>Needs attention</strong><ul class="gap">${h.gaps.map(g => `<li>${esc(g)}</li>`).join('')}</ul>` : ''}
+            ${h.gaps.length ? `<strong>Needs attention</strong><ul class="gap">${h.gaps.map((g, n) => {
+              const act = GAP_ACTIONS[(h.gap_codes || [])[n]];
+              return `<li><span>${esc(g)}</span>${act ? ` <button type="button" class="dl-gap-fix" data-gap-action="${h.gap_codes[n]}">${esc(act.label)} →</button>` : ''}</li>`;
+            }).join('')}</ul>` : ''}
             ${h.reasons.length ? `<strong>Going well</strong><ul class="ok">${h.reasons.map(g => `<li>${esc(g)}</li>`).join('')}</ul>` : ''}
             <span class="cp-muted" style="font-size:.72rem;color:var(--text-muted)">${h.days_in_stage} days in ${esc(d.stage_label)}</span>
           </div>
@@ -263,7 +392,8 @@ function renderRoom() {
       </div>
 
       <div class="dl-pane${st.tab === 'committee' ? ' active' : ''}" role="tabpanel">
-        ${committeeGaps ? `<div class="dl-gap-note"><i class="fa-solid fa-triangle-exclamation"></i> Missing: ${esc(committeeGaps)}</div>` : ''}
+        ${committeeGaps ? `<div class="dl-gap-note"><i class="fa-solid fa-triangle-exclamation"></i> Missing: ${esc(committeeGaps)}
+          <a class="dl-warm-link" href="/introductions?new=1&account_id=${d.account_id}"><i class="fa-solid fa-route"></i> Who can introduce me?</a></div>` : ''}
         ${d.stakeholders.map(p => `<div class="dl-person">
             <span class="dl-avatar" ${photoAttr(p, p.persona_id)}>${esc(initials(p.name))}</span>
             <div><div class="dl-person-name"><a href="/profile?account=${p.account_id}&persona_id=${p.persona_id}" target="_blank" rel="noopener">${esc(p.name)}</a></div>
@@ -426,9 +556,11 @@ function closeRoom() {
 }
 
 async function patchDeal(body) {
+  const from = st.deal.stage;
   try {
     st.deal = await api(`/${st.deal.id}`, { method: 'PATCH', body });
-    (st.deal.warnings || []).forEach(w => showToast(w));
+    if (body.stage && st.deal.stage !== from) stageMoved(st.deal, from);
+    else (st.deal.warnings || []).forEach(w => showToast(w));
     renderRoom();
     loadDeals();
   } catch (err) { showToast(err.message); }
@@ -456,11 +588,20 @@ function wireRoom() {
       if (!step.disabled) moveToStage(step.dataset.stageStep);
       return;
     }
+    const adv = t.closest('[data-advance]');
+    if (adv) { moveToStage(adv.dataset.advance); return; }
+    const fix = t.closest('[data-gap-action]');
+    if (fix) { runGapAction(fix.dataset.gapAction); return; }
+    if (t.closest('[data-goto-offerings]')) {
+      const chips = $('dlRoom').querySelector('.dl-chips');
+      if (chips) { chips.scrollIntoView({ behavior: 'smooth', block: 'center' }); const first = chips.querySelector('button'); if (first) first.focus(); }
+      return;
+    }
     const close = t.closest('[data-close-deal]');
     if (close) {
       if (close.dataset.closeDeal === 'lost') {
-        const reason = await askReason();
-        if (reason) patchDeal({ stage: 'lost', lost_reason: reason });
+        const lostBody = await askLost();
+        if (lostBody) patchDeal({ stage: 'lost', ...lostBody });
       } else { patchDeal({ stage: 'won' }); }
       return;
     }
@@ -472,7 +613,12 @@ function wireRoom() {
       return;
     }
     const tab = t.closest('[data-tab]');
-    if (tab) { st.tab = tab.dataset.tab; renderRoom(); return; }
+    if (tab) {
+      const fromBox = !!tab.closest('.dl-stage-box');
+      st.tab = tab.dataset.tab; renderRoom();
+      if (fromBox) { const tabs = $('dlRoom').querySelector('.dl-tabs'); if (tabs) tabs.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      return;
+    }
     const tkStage = t.closest('[data-tk-stage]');
     if (tkStage) { loadToolkit(tkStage.dataset.tkStage); return; }
     const tkAdd = t.closest('[data-tk-add]');
@@ -611,8 +757,55 @@ function wireRoom() {
   });
 }
 
+// "Why was it lost?" — a pick-list (so losses can be analysed) + competitor + note
+function lostText(d) {
+  if (d.stage !== 'lost') return '';
+  const cat = d.lost_category_label ? d.lost_category_label + (d.lost_competitor ? `: ${d.lost_competitor}` : '') : '';
+  return [cat, d.lost_reason].filter(Boolean).join(' — ');
+}
+
+function askLost() {
+  return new Promise((resolve) => {
+    const foot = $('dlRoom').querySelector('.dl-close-btns');
+    const cats = Object.entries(st.lostCategories || {});
+    if (!foot || !cats.length) { resolve(null); return; }
+    foot.classList.add('dl-lost-open');
+    foot.innerHTML = `<fieldset class="dl-lost-form">
+        <legend>Why was it lost?</legend>
+        <div class="dl-lost-cats" role="radiogroup" aria-label="Loss reason">${cats.map(([k, label]) =>
+          `<label class="dl-lost-cat"><input type="radio" name="dlLostCat" value="${esc(k)}"><span>${esc(label)}</span></label>`).join('')}</div>
+        <input id="dlLostCompetitor" maxlength="120" placeholder="Which competitor won? (optional)" aria-label="Competitor that won" hidden>
+        <input id="dlLostReason" maxlength="500" placeholder="Note — what happened? (optional)" aria-label="Note about the loss">
+        <div class="dl-lost-btns"><button type="button" class="dl-btn dl-btn-danger" id="dlLostGo">Mark lost</button>
+          <button type="button" class="dl-btn" id="dlLostCancel">Cancel</button></div>
+      </fieldset>`;
+    const note = $('dlLostReason');
+    const comp = $('dlLostCompetitor');
+    const picked = () => (foot.querySelector('input[name="dlLostCat"]:checked') || {}).value;
+    foot.querySelector('.dl-lost-cats input').focus();
+    foot.querySelectorAll('input[name="dlLostCat"]').forEach((r) => r.addEventListener('change', () => {
+      comp.hidden = picked() !== 'competitor';
+      note.placeholder = picked() === 'other' ? 'Note — what happened? (required for Other)' : 'Note — what happened? (optional)';
+      (picked() === 'competitor' ? comp : note).focus();
+    }));
+    const done = (v) => { foot.classList.remove('dl-lost-open'); resolve(v); };
+    $('dlLostGo').onclick = () => {
+      const cat = picked();
+      if (!cat) { showToast('Pick a reason first'); foot.querySelector('.dl-lost-cats input').focus(); return; }
+      if (cat === 'other' && !note.value.trim()) { showToast('Add a short note for Other'); note.focus(); return; }
+      done({ lost_category: cat, lost_competitor: cat === 'competitor' ? (comp.value.trim() || null) : null,
+             lost_reason: note.value.trim() || null });
+    };
+    $('dlLostCancel').onclick = () => { renderRoom(); done(null); };
+    foot.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); $('dlLostCancel').click(); }
+      if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'radio') { e.preventDefault(); $('dlLostGo').click(); }
+    });
+  });
+}
+
 // Small inline prompts instead of window.prompt/confirm (keyboard- and screen-reader friendly)
-function askReason(placeholder = 'Why was it lost? (required)', okLabel = 'Mark lost', isDanger = true) {
+function askReason(placeholder, okLabel, isDanger = true) {
   return new Promise((resolve) => {
     const foot = $('dlRoom').querySelector('.dl-close-btns');
     if (!foot) { resolve(null); return; }
@@ -803,13 +996,14 @@ async function init() {
   const params = new URLSearchParams(location.search);
   if (params.get('account_id')) $('dlAccount').value = params.get('account_id');
   let t = null;
-  $('dlSearch').addEventListener('input', () => { clearTimeout(t); t = setTimeout(loadDeals, 250); });
-  $('dlAccount').addEventListener('change', loadDeals);
+  $('dlSearch').addEventListener('input', () => { filtersChanged(); clearTimeout(t); t = setTimeout(loadDeals, 250); });
+  $('dlAccount').addEventListener('change', () => { filtersChanged(); loadDeals(); });
   $('dlBusinessLine').innerHTML = '<option value="">All business lines</option>'
     + ((st.meta && st.meta.business_lines) || []).map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
   if (params.get('business_line_id')) $('dlBusinessLine').value = params.get('business_line_id');
-  $('dlBusinessLine').addEventListener('change', loadDeals);
-  $('dlMine').addEventListener('change', loadDeals);
+  $('dlBusinessLine').addEventListener('change', () => { filtersChanged(); loadDeals(); });
+  $('dlMine').addEventListener('change', () => { filtersChanged(); loadDeals(); });
+  $('dlAttention').addEventListener('change', () => { filtersChanged(); renderBoard(); });
   $('dlDigest').addEventListener('click', (e) => {
     const b = e.target.closest('[data-deal-open]');
     if (b) openDeal(Number(b.dataset.dealOpen));
@@ -819,6 +1013,8 @@ async function init() {
   wireRoom();
   wireNewDeal();
   loadUsers().then(() => { if (st.deal && st.tab === 'tasks') renderRoom(); });
+  initViews({ st, $, api, esc, money, dateLabel, isOverdue, healthBadge, needsAttention, lostText, openDeal,
+    showToast, OPEN_STAGES, reload: loadDeals });
   await loadDeals();
   if (params.get('deal')) openDeal(Number(params.get('deal')));
   if (params.get('new') === '1') openNewDeal();

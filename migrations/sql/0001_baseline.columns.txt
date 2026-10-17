@@ -1,0 +1,744 @@
+accounts.active_tech_count integer
+accounts.aliases ARRAY
+accounts.blog_url text
+accounts.bounce_rate double precision
+accounts.c_suite_count integer
+accounts.city character varying
+accounts.company_type character varying
+accounts.contact_email character varying
+accounts.country character varying
+accounts.created_at timestamp with time zone
+accounts.crunchbase_url text
+accounts.director_count integer
+accounts.display_name character varying
+accounts.domain character varying
+accounts.employee_count_range character varying
+accounts.estimated_revenue_range character varying
+accounts.extracted_at timestamp with time zone
+accounts.facebook_url text
+accounts.founded_date date
+accounts.founded_year integer
+accounts.founders ARRAY
+accounts.full_description text
+accounts.funding_status character varying
+accounts.github_url text
+accounts.glassdoor_url text
+accounts.global_traffic_rank integer
+accounts.google_patents_url text
+accounts.google_trends_url text
+accounts.headquarters_location character varying
+accounts.headquarters_regions ARRAY
+accounts.heat_score integer
+accounts.id integer
+accounts.industries ARRAY
+accounts.industry_groups ARRAY
+accounts.ipo_date date
+accounts.ipo_status character varying
+accounts.is_manually_verified boolean
+accounts.it_spend character varying
+accounts.key character varying
+accounts.keywords ARRAY
+accounts.last_funding_date date
+accounts.last_funding_type character varying
+accounts.legal_name character varying
+accounts.linkedin_url text
+accounts.lobs_count integer
+accounts.manager_count integer
+accounts.manually_verified_at timestamp with time zone
+accounts.monthly_visits bigint
+accounts.multi_source_intelligence jsonb
+accounts.news_query text
+accounts.num_acquisitions integer
+accounts.num_contacts integer
+accounts.num_founders integer
+accounts.num_funding_rounds integer
+accounts.num_suborganizations integer
+accounts.openalex_institution_url text
+accounts.operating_status character varying
+accounts.organisational_hierarchy_tree jsonb
+accounts.osint_feed_manifest jsonb
+accounts.owner_user_id integer
+accounts.page_views_per_visit double precision
+accounts.patents_granted integer
+accounts.phone_number character varying
+accounts.postal_code character varying
+accounts.primary_business_line_id integer
+accounts.primary_domain character varying
+accounts.raw_data jsonb
+accounts.reddit_query text
+accounts.reddit_rss_url text
+accounts.rss_url text
+accounts.sanitized_phone character varying
+accounts.schema_version character varying
+accounts.sec_cik character varying
+accounts.sec_edgar_url text
+accounts.sec_filings_rss text
+accounts.sec_name character varying
+accounts.sec_submissions_url text
+accounts.short_description text
+accounts.state character varying
+accounts.stock_exchange character varying
+accounts.stock_symbol character varying
+accounts.total_apps integer
+accounts.total_contacts_captured integer
+accounts.total_downloads bigint
+accounts.total_funding_amount bigint
+accounts.total_funding_amount_usd bigint
+accounts.total_funding_currency character varying
+accounts.trademarks_registered integer
+accounts.trend_score_90d double precision
+accounts.twitter_handle character varying
+accounts.twitter_live_url text
+accounts.twitter_url text
+accounts.updated_at timestamp with time zone
+accounts.visit_duration double precision
+accounts.vp_count integer
+accounts.website_url text
+accounts.wikidata_entity_url text
+accounts.youtube_channel_id character varying
+accounts.youtube_search_url text
+action_item_reminders.action_item_id integer
+action_item_reminders.id integer
+action_item_reminders.reminder_type character varying
+action_item_reminders.sent_at timestamp with time zone
+action_item_reminders.sent_to_user_id integer
+action_items.account_id integer
+action_items.assigned_to_id integer
+action_items.completed_at timestamp with time zone
+action_items.created_at timestamp with time zone
+action_items.created_by_id integer
+action_items.deal_id bigint
+action_items.description text
+action_items.due_date timestamp with time zone
+action_items.id integer
+action_items.persona_id integer
+action_items.priority character varying
+action_items.source character varying
+action_items.source_ref_id integer
+action_items.status character varying
+action_items.title character varying
+action_items.updated_at timestamp with time zone
+activities.body text
+activities.created_at timestamp with time zone
+activities.direction text
+activities.duration_min integer
+activities.external_id text
+activities.id bigint
+activities.metadata jsonb
+activities.occurred_at timestamp with time zone
+activities.owner_user_id integer
+activities.participants jsonb
+activities.source text
+activities.subject text
+activities.summary text
+activities.thread_id text
+activities.type text
+activities.updated_at timestamp with time zone
+activities.visibility text
+activity_links.activity_id bigint
+activity_links.matched_by text
+activity_links.object_id bigint
+activity_links.object_type text
+audit_log.action character varying
+audit_log.actor_user_id integer
+audit_log.created_at timestamp with time zone
+audit_log.details jsonb
+audit_log.id integer
+audit_log.target_user_id integer
+business_lines.active boolean
+business_lines.id integer
+business_lines.key text
+business_lines.name text
+business_lines.sort integer
+capture_connections.account_email text
+capture_connections.created_at timestamp with time zone
+capture_connections.cursors jsonb
+capture_connections.error text
+capture_connections.id integer
+capture_connections.last_stats jsonb
+capture_connections.last_sync_at timestamp with time zone
+capture_connections.next_sync_at timestamp with time zone
+capture_connections.provider text
+capture_connections.scopes ARRAY
+capture_connections.settings jsonb
+capture_connections.status text
+capture_connections.token_encrypted bytea
+capture_connections.user_id integer
+command_center_snapshots.generated_at timestamp with time zone
+command_center_snapshots.id integer
+command_center_snapshots.playbook jsonb
+command_center_snapshots.signals jsonb
+command_center_snapshots.source_counts jsonb
+command_center_snapshots.user_id integer
+command_center_snapshots.velocity jsonb
+connectors.active boolean
+connectors.created_at timestamp with time zone
+connectors.created_by integer
+connectors.default_attribution_pct numeric
+connectors.email text
+connectors.id bigint
+connectors.kind text
+connectors.name text
+connectors.notes text
+connectors.organisation text
+connectors.user_id integer
+copilot_memories.account_id integer
+copilot_memories.created_at timestamp with time zone
+copilot_memories.deleted_at timestamp with time zone
+copilot_memories.embedding ARRAY
+copilot_memories.expires_at timestamp with time zone
+copilot_memories.id bigint
+copilot_memories.kind text
+copilot_memories.last_used_at timestamp with time zone
+copilot_memories.persona_id integer
+copilot_memories.pinned boolean
+copilot_memories.source_message_id bigint
+copilot_memories.text text
+copilot_memories.updated_at timestamp with time zone
+copilot_memories.use_count integer
+copilot_memories.user_id integer
+copilot_messages.citations jsonb
+copilot_messages.content text
+copilot_messages.created_at timestamp with time zone
+copilot_messages.evidence_hash bytea
+copilot_messages.extras jsonb
+copilot_messages.feedback smallint
+copilot_messages.feedback_note text
+copilot_messages.id bigint
+copilot_messages.index_version_id integer
+copilot_messages.intent text
+copilot_messages.latency_ms integer
+copilot_messages.llm_model text
+copilot_messages.mode text
+copilot_messages.role text
+copilot_messages.session_id uuid
+copilot_messages.tokens_in integer
+copilot_messages.tokens_out integer
+copilot_sessions.account_id integer
+copilot_sessions.active_entities jsonb
+copilot_sessions.archived_at timestamp with time zone
+copilot_sessions.created_at timestamp with time zone
+copilot_sessions.id uuid
+copilot_sessions.last_message_at timestamp with time zone
+copilot_sessions.persona_id integer
+copilot_sessions.pinned boolean
+copilot_sessions.summary text
+copilot_sessions.title text
+copilot_sessions.user_id integer
+copilot_user_prefs.answer_style text
+copilot_user_prefs.default_account_id integer
+copilot_user_prefs.favorite_personas ARRAY
+copilot_user_prefs.memory_enabled boolean
+copilot_user_prefs.updated_at timestamp with time zone
+copilot_user_prefs.user_id integer
+crm_demo_rows.created_at timestamp with time zone
+crm_demo_rows.row_id text
+crm_demo_rows.table_name text
+crm_notification_prefs.settings jsonb
+crm_notification_prefs.updated_at timestamp with time zone
+crm_notification_prefs.user_id integer
+crm_notifications.attempts integer
+crm_notifications.body text
+crm_notifications.created_at timestamp with time zone
+crm_notifications.dedupe_key text
+crm_notifications.error text
+crm_notifications.html text
+crm_notifications.id bigint
+crm_notifications.kind text
+crm_notifications.link text
+crm_notifications.sent_at timestamp with time zone
+crm_notifications.status text
+crm_notifications.subject text
+crm_notifications.to_email text
+crm_notifications.user_id integer
+crm_settings.key text
+crm_settings.updated_at timestamp with time zone
+crm_settings.updated_by integer
+crm_settings.value jsonb
+cxo_movements.article_body text
+cxo_movements.article_title text
+cxo_movements.article_url text
+cxo_movements.company_name text
+cxo_movements.context text
+cxo_movements.designation text
+cxo_movements.effective_date text
+cxo_movements.event_type text
+cxo_movements.extraction_status text
+cxo_movements.first_seen timestamp with time zone
+cxo_movements.id bigint
+cxo_movements.last_seen timestamp with time zone
+cxo_movements.new_company text
+cxo_movements.new_in_last_run boolean
+cxo_movements.person_name text
+cxo_movements.previous_role text
+cxo_movements.published_at text
+cxo_movements.publisher_domain text
+cxo_movements.raw jsonb
+cxo_movements.source text
+cxo_movements.target_key text
+deal_activity.created_at timestamp with time zone
+deal_activity.deal_id bigint
+deal_activity.id bigint
+deal_activity.kind text
+deal_activity.text text
+deal_activity.user_id integer
+deal_checklist.deal_id bigint
+deal_checklist.done boolean
+deal_checklist.done_at timestamp with time zone
+deal_checklist.done_by integer
+deal_checklist.item_key text
+deal_checklist.label text
+deal_checklist.note text
+deal_checklist.ordinal integer
+deal_checklist.stage text
+deal_stage_history.changed_at timestamp with time zone
+deal_stage_history.changed_by integer
+deal_stage_history.deal_id bigint
+deal_stage_history.from_stage text
+deal_stage_history.id bigint
+deal_stage_history.to_stage text
+deal_stakeholders.added_at timestamp with time zone
+deal_stakeholders.deal_id bigint
+deal_stakeholders.persona_id integer
+deal_stakeholders.role text
+deal_stakeholders.sentiment text
+deals.account_id integer
+deals.amount_usd numeric
+deals.business_line_id integer
+deals.closed_at timestamp with time zone
+deals.created_at timestamp with time zone
+deals.currency text
+deals.expected_close date
+deals.forecast_category text
+deals.id bigint
+deals.introduction_id bigint
+deals.last_activity_at timestamp with time zone
+deals.lob_id integer
+deals.lost_reason text
+deals.name text
+deals.next_step text
+deals.next_step_due date
+deals.offerings ARRAY
+deals.owner_user_id integer
+deals.probability integer
+deals.qualification jsonb
+deals.source text
+deals.stage text
+deals.stage_changed_at timestamp with time zone
+deals.updated_at timestamp with time zone
+deals.value_amount numeric
+digests.digest jsonb
+digests.generated_at timestamp with time zone
+digests.kind text
+digests.llm text
+digests.posts_considered integer
+digests.priority text
+digests.target_key text
+digests.updated_at timestamp with time zone
+forecast_snapshots.account_id integer
+forecast_snapshots.amount_usd numeric
+forecast_snapshots.business_line_id integer
+forecast_snapshots.deal_id bigint
+forecast_snapshots.expected_close date
+forecast_snapshots.forecast_category text
+forecast_snapshots.name text
+forecast_snapshots.owner_user_id integer
+forecast_snapshots.probability integer
+forecast_snapshots.snapshot_date date
+forecast_snapshots.stage text
+fx_rates.currency text
+fx_rates.source text
+fx_rates.updated_at timestamp with time zone
+fx_rates.updated_by integer
+fx_rates.usd_rate numeric
+introduction_events.at timestamp with time zone
+introduction_events.by_user integer
+introduction_events.from_status text
+introduction_events.id bigint
+introduction_events.introduction_id bigint
+introduction_events.kind text
+introduction_events.note text
+introduction_events.partner_visible boolean
+introduction_events.to_status text
+introductions.accepted_at timestamp with time zone
+introductions.account_id integer
+introductions.attribution_pct numeric
+introductions.business_line_id integer
+introductions.closed_reason text
+introductions.connector_id bigint
+introductions.context text
+introductions.converted_at timestamp with time zone
+introductions.created_at timestamp with time zone
+introductions.created_by integer
+introductions.deal_id bigint
+introductions.id bigint
+introductions.intro_made_at timestamp with time zone
+introductions.meeting_at timestamp with time zone
+introductions.next_step text
+introductions.owner_user_id integer
+introductions.persona_id integer
+introductions.requested_at timestamp with time zone
+introductions.status text
+introductions.submitted_account_name text
+introductions.submitted_contact_email text
+introductions.submitted_contact_name text
+introductions.submitted_contact_title text
+introductions.updated_at timestamp with time zone
+linkedin_jobs.applicants integer
+linkedin_jobs.company_name text
+linkedin_jobs.description text
+linkedin_jobs.employment_type text
+linkedin_jobs.first_seen timestamp with time zone
+linkedin_jobs.id bigint
+linkedin_jobs.job_key text
+linkedin_jobs.job_url text
+linkedin_jobs.last_seen timestamp with time zone
+linkedin_jobs.location text
+linkedin_jobs.new_in_last_run boolean
+linkedin_jobs.posted_date text
+linkedin_jobs.raw jsonb
+linkedin_jobs.salary jsonb
+linkedin_jobs.target_key text
+linkedin_jobs.title text
+linkedin_jobs.views integer
+linkedin_jobs.workplace_type text
+llm_usage.created_at timestamp with time zone
+llm_usage.day_utc date
+llm_usage.feature text
+llm_usage.id bigint
+llm_usage.model text
+llm_usage.ok boolean
+llm_usage.reserved_tokens integer
+llm_usage.status_code integer
+llm_usage.tokens_in integer
+llm_usage.tokens_out integer
+llm_usage.user_id integer
+lobs.account_id integer
+lobs.audited_segment_revenue character varying
+lobs.competitors jsonb
+lobs.crunchbase_url text
+lobs.domain character varying
+lobs.financial_snippets jsonb
+lobs.google_news_rss_url text
+lobs.google_patents_url text
+lobs.google_trends_url text
+lobs.id integer
+lobs.is_manually_verified boolean
+lobs.jurisdiction character varying
+lobs.key character varying
+lobs.lei_code character varying
+lobs.lob_name character varying
+lobs.logo_url text
+lobs.manually_verified_at timestamp with time zone
+lobs.operating_head character varying
+lobs.osint_feed_manifest jsonb
+lobs.overview text
+lobs.patents jsonb
+lobs.raw_data jsonb
+lobs.reddit_rss_url text
+lobs.relationship_type character varying
+lobs.segment_headcount character varying
+lobs.technologies jsonb
+lobs.website_url text
+lobs.wikipedia_url text
+lobs.youtube_search_url text
+opportunity_signals.account_id integer
+opportunity_signals.category character varying
+opportunity_signals.created_at timestamp with time zone
+opportunity_signals.details jsonb
+opportunity_signals.first_seen timestamp with time zone
+opportunity_signals.id integer
+opportunity_signals.last_seen timestamp with time zone
+opportunity_signals.signal_key character varying
+opportunity_signals.status character varying
+opportunity_signals.title text
+opportunity_signals.updated_at timestamp with time zone
+password_reset_tokens.created_at timestamp with time zone
+password_reset_tokens.expires_at timestamp with time zone
+password_reset_tokens.id integer
+password_reset_tokens.token_hash character varying
+password_reset_tokens.used_at timestamp with time zone
+password_reset_tokens.user_id integer
+personas.account_id integer
+personas.annual_report_url text
+personas.bloomberg_url text
+personas.budget_authority character varying
+personas.career_trajectory_score double precision
+personas.city character varying
+personas.communication_style text
+personas.corporate_bio_url text
+personas.country character varying
+personas.created_by_user_id integer
+personas.crunchbase_permalink character varying
+personas.crunchbase_url text
+personas.current_role_tenure_months integer
+personas.decision_authority character varying
+personas.degree character varying
+personas.departments ARRAY
+personas.direct_mobile_phone character varying
+personas.display_name character varying
+personas.education_history jsonb
+personas.email character varying
+personas.email_status character varying
+personas.employment_history jsonb
+personas.engagement_rate character varying
+personas.extended_profile jsonb
+personas.external_board_url text
+personas.external_id character varying
+personas.fec_contributions_url text
+personas.first_name character varying
+personas.full_name character varying
+personas.google_patents_url text
+personas.google_scholar_url text
+personas.google_trends_url text
+personas.headline character varying
+personas.hierarchy_level integer
+personas.id integer
+personas.institution character varying
+personas.is_manually_verified boolean
+personas.is_new_in_role boolean
+personas.key character varying
+personas.key_objections ARRAY
+personas.last_activity_at timestamp with time zone
+personas.last_name character varying
+personas.linkedin_url text
+personas.lob_id integer
+personas.manually_verified_at timestamp with time zone
+personas.media_interview_url text
+personas.news_query text
+personas.openalex_author_url text
+personas.openinsider_url text
+personas.operational_pain_points ARRAY
+personas.orcid_search_url text
+personas.osint_feed_manifest jsonb
+personas.past_companies ARRAY
+personas.patents_query text
+personas.personal_email character varying
+personas.personalized_icebreaker text
+personas.phone character varying
+personas.podcast_search_url text
+personas.podcast_url text
+personas.previous_titles ARRAY
+personas.prior_company character varying
+personas.quiver_insider_url text
+personas.raw_data jsonb
+personas.reddit_query text
+personas.reddit_rss_url text
+personas.rss_url text
+personas.sec_cik character varying
+personas.sec_insider_trades_url text
+personas.secform4_url text
+personas.seeking_alpha_url text
+personas.seniority_raw character varying
+personas.skills ARRAY
+personas.social_platform character varying
+personas.social_presence_level character varying
+personas.social_profile_url text
+personas.source character varying
+personas.state character varying
+personas.target_kpis ARRAY
+personas.theorg_url text
+personas.tier character varying
+personas.title character varying
+personas.twitter_handle character varying
+personas.twitter_live_url text
+personas.value_proposition text
+personas.wayback_url text
+personas.wikidata_person_url text
+personas.wsj_article_url text
+personas.youtube_channel_id character varying
+personas.youtube_interviews_url text
+personas.youtube_url text
+personas.zoominfo_url text
+pipeline_runs.company_name character varying
+pipeline_runs.completed_at timestamp with time zone
+pipeline_runs.created_at timestamp with time zone
+pipeline_runs.credits_breakdown jsonb
+pipeline_runs.duration_seconds numeric
+pipeline_runs.enriched_storage_dir character varying
+pipeline_runs.entities_extracted jsonb
+pipeline_runs.error_message text
+pipeline_runs.execution_logs jsonb
+pipeline_runs.id integer
+pipeline_runs.quality_grade character varying
+pipeline_runs.quality_score numeric
+pipeline_runs.raw_storage_dir character varying
+pipeline_runs.run_id character varying
+pipeline_runs.started_at timestamp with time zone
+pipeline_runs.status character varying
+pipeline_runs.target_url character varying
+pipeline_runs.total_credits_used integer
+pipeline_runs.updated_at timestamp with time zone
+posts.author text
+posts.body text
+posts.channel text
+posts.engagement jsonb
+posts.extra jsonb
+posts.first_seen timestamp with time zone
+posts.id bigint
+posts.kind text
+posts.last_seen timestamp with time zone
+posts.media jsonb
+posts.new_in_last_run boolean
+posts.post_key text
+posts.post_url text
+posts.published_at text
+posts.rank integer
+posts.raw jsonb
+posts.target_key text
+rag_chunks.chunk_hash bytea
+rag_chunks.created_at timestamp with time zone
+rag_chunks.text text
+rag_chunks.token_count integer
+rag_chunks.tsv tsvector
+rag_document_chunks.chunk_hash bytea
+rag_document_chunks.document_id bigint
+rag_document_chunks.ordinal integer
+rag_document_entities.account_id integer
+rag_document_entities.canonical_key text
+rag_document_entities.confidence real
+rag_document_entities.lob_id integer
+rag_document_entities.persona_id integer
+rag_document_entities.relation text
+rag_document_sources.canonical_key text
+rag_document_sources.first_seen timestamp with time zone
+rag_document_sources.source_pk text
+rag_document_sources.source_table text
+rag_documents.canonical_key text
+rag_documents.content_hash bytea
+rag_documents.deleted_at timestamp with time zone
+rag_documents.doc_type text
+rag_documents.id bigint
+rag_documents.is_current boolean
+rag_documents.metadata jsonb
+rag_documents.near_dup_of bigint
+rag_documents.published_at timestamp with time zone
+rag_documents.render_version text
+rag_documents.simhash bigint
+rag_documents.title text
+rag_documents.url text
+rag_documents.valid_from timestamp with time zone
+rag_documents.valid_to timestamp with time zone
+rag_documents.version integer
+rag_index_entries.account_id integer
+rag_index_entries.chunk_hash bytea
+rag_index_entries.index_version_id integer
+rag_index_entries.indexed_at timestamp with time zone
+rag_index_versions.activated_at timestamp with time zone
+rag_index_versions.attribution_version text
+rag_index_versions.chunker_version text
+rag_index_versions.collection_name text
+rag_index_versions.created_at timestamp with time zone
+rag_index_versions.dims integer
+rag_index_versions.embed_model text
+rag_index_versions.id integer
+rag_index_versions.status text
+rag_outbox.enqueued_at timestamp with time zone
+rag_outbox.id bigint
+rag_outbox.op character
+rag_outbox.processed_at timestamp with time zone
+rag_outbox.source_pk text
+rag_outbox.source_table text
+rag_pipeline_runs.finished_at timestamp with time zone
+rag_pipeline_runs.id text
+rag_pipeline_runs.logs jsonb
+rag_pipeline_runs.mode text
+rag_pipeline_runs.options jsonb
+rag_pipeline_runs.stages jsonb
+rag_pipeline_runs.started_at timestamp with time zone
+rag_pipeline_runs.status text
+rag_pipeline_runs.summary jsonb
+rag_pipeline_runs.triggered_by integer
+rag_schema_meta.applied_at timestamp with time zone
+rag_schema_meta.fingerprint text
+rag_schema_meta.id integer
+rag_sync_state.last_reconcile_at timestamp with time zone
+rag_sync_state.last_reconcile_stats jsonb
+rag_sync_state.source_table text
+refresh_tokens.created_at timestamp with time zone
+refresh_tokens.expires_at timestamp with time zone
+refresh_tokens.id integer
+refresh_tokens.ip_address character varying
+refresh_tokens.revoked_at timestamp with time zone
+refresh_tokens.token_hash character varying
+refresh_tokens.user_agent character varying
+refresh_tokens.user_id integer
+sales_targets.amount_usd numeric
+sales_targets.business_line_id integer
+sales_targets.id integer
+sales_targets.period text
+sales_targets.updated_at timestamp with time zone
+sales_targets.updated_by integer
+sales_targets.user_id integer
+search_log.account_id integer
+search_log.chosen_type text
+search_log.created_at timestamp with time zone
+search_log.id bigint
+search_log.n_results integer
+search_log.q text
+search_log.semantic boolean
+search_log.user_id integer
+sub_lobs.city character varying
+sub_lobs.country character varying
+sub_lobs.domain character varying
+sub_lobs.entity_level character varying
+sub_lobs.id integer
+sub_lobs.is_manually_verified boolean
+sub_lobs.jurisdiction character varying
+sub_lobs.legal_name character varying
+sub_lobs.lei_code character varying
+sub_lobs.lob_id integer
+sub_lobs.manually_verified_at timestamp with time zone
+sub_lobs.metadata jsonb
+sub_lobs.name character varying
+sub_lobs.parent_lob_lei character varying
+sub_lobs.parent_lob_name character varying
+sub_lobs.relationship_type character varying
+sub_lobs.status character varying
+sub_lobs.website_url text
+system_api_configs.category character varying
+system_api_configs.config_key character varying
+system_api_configs.display_name character varying
+system_api_configs.encrypted_value text
+system_api_configs.extra_metadata jsonb
+system_api_configs.id integer
+system_api_configs.is_secret boolean
+system_api_configs.updated_at timestamp with time zone
+system_api_configs.updated_by integer
+user_account_access.account_id integer
+user_account_access.granted_at timestamp with time zone
+user_account_access.granted_by_id integer
+user_account_access.id integer
+user_account_access.user_id integer
+user_business_lines.business_line_id integer
+user_business_lines.user_id integer
+users.created_at timestamp with time zone
+users.created_by_id integer
+users.email character varying
+users.failed_login_count integer
+users.full_name character varying
+users.has_command_center_access boolean
+users.has_dashboard_access boolean
+users.has_pipeline_access boolean
+users.has_tasks_access boolean
+users.hashed_password character varying
+users.id integer
+users.is_active boolean
+users.last_login_at timestamp with time zone
+users.locked_until timestamp with time zone
+users.manager_id integer
+users.role character varying
+users.updated_at timestamp with time zone
+weekly_digest_snapshots.account_id integer
+weekly_digest_snapshots.body text
+weekly_digest_snapshots.confidence character varying
+weekly_digest_snapshots.created_at timestamp with time zone
+weekly_digest_snapshots.data_gaps jsonb
+weekly_digest_snapshots.do_not_say jsonb
+weekly_digest_snapshots.generated_at timestamp with time zone
+weekly_digest_snapshots.id integer
+weekly_digest_snapshots.priority character varying
+weekly_digest_snapshots.raw_email jsonb
+weekly_digest_snapshots.subject text
+weekly_digest_snapshots.target_key character varying
+weekly_digest_snapshots.week_of date

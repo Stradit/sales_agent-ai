@@ -3,13 +3,23 @@
 #
 #   bash /opt/salesai/remote_deploy.sh <ecr-image-uri>
 #
-# Pulls the image, starts it, waits for /api/health and rolls back to the previous image if
-# the new one doesn't become healthy. The schema is created/upgraded by the app on startup
-# (db/create_tables.ensure_schema_compatibility + the CRM/deals/copilot ensure_schema calls).
+# 1. pull the image
+# 2. database migrations (docs/DB_DEPLOYMENT_PLAN.md), in a one-off container of the NEW image,
+#    while the old app keeps serving:  check -> RDS snapshot -> `python -m db.migrate upgrade`.
+#    Migrations are backward-compatible (expand/contract), so the old app runs fine on the new
+#    schema, and a failed migration stops the deploy before the app is touched.
+# 3. start the new app, wait for /api/health (which fails if the schema is behind the code), and
+#    roll back to the previous IMAGE if it isn't healthy. The schema is never rolled back - if a
+#    migration itself was wrong, restore the snapshot taken in step 2 (deploy/RESTORE.md).
+#
+# Optional settings in /opt/salesai/.env:
+#   RDS_INSTANCE_ID=salesai-db     snapshot this RDS instance before applying migrations
+#                                  (instance role needs rds:CreateDBSnapshot + rds:DescribeDBSnapshots)
+#   SKIP_PRE_MIGRATION_SNAPSHOT=1  migrate without a snapshot (not recommended)
 set -euo pipefail
 
 IMAGE="${1:?usage: remote_deploy.sh <ecr-image-uri>}"
-APP_DIR=/opt/salesai
+APP_DIR="${SALESAI_APP_DIR:-/opt/salesai}"   # override only for tests
 COMPOSE="docker compose -f $APP_DIR/docker-compose.prod.yml"
 REGION="${AWS_REGION:-us-east-1}"
 REGISTRY="${IMAGE%%/*}"
@@ -26,6 +36,35 @@ docker pull "$IMAGE"
 
 PREVIOUS="$(docker inspect --format '{{.Config.Image}}' salesai-web 2>/dev/null || true)"
 echo "Previous image: ${PREVIOUS:-none}"
+
+env_value() { grep -E "^$1=" "$APP_DIR/.env" | tail -1 | cut -d= -f2- | tr -d '\r"'"'" || true; }
+migrate() { docker run --rm --env-file "$APP_DIR/.env" -e CRM_BACKGROUND=0 -e COPILOT_AUTOSYNC=0               --entrypoint python "$IMAGE" -m db.migrate "$@"; }
+
+echo "== Database migrations"
+if migrate check; then
+  echo "Schema is up to date (or not yet under migration control) - nothing to apply."
+else
+  RDS_ID="$(env_value RDS_INSTANCE_ID)"
+  if [[ "$(env_value SKIP_PRE_MIGRATION_SNAPSHOT)" == "1" ]]; then
+    echo "!! SKIP_PRE_MIGRATION_SNAPSHOT=1 - migrating without a snapshot" >&2
+  elif [[ -z "$RDS_ID" ]]; then
+    echo "!! Migrations are pending but RDS_INSTANCE_ID is not set in $APP_DIR/.env, so no snapshot" >&2
+    echo "   can be taken first. Set it (or SKIP_PRE_MIGRATION_SNAPSHOT=1 to accept the risk) and redeploy." >&2
+    exit 1
+  else
+    SNAP="pre-migrate-$(date -u +%Y%m%d-%H%M%S)-${IMAGE##*:}"; SNAP="${SNAP:0:63}"
+    echo "== Snapshot $RDS_ID -> $SNAP (a few minutes)"
+    aws rds create-db-snapshot --region "$REGION" --db-instance-identifier "$RDS_ID"         --db-snapshot-identifier "$SNAP" --tags Key=purpose,Value=pre-migration >/dev/null
+    aws rds wait db-snapshot-available --region "$REGION" --db-snapshot-identifier "$SNAP"
+    echo "Snapshot ready: $SNAP"
+  fi
+  echo "== Apply migrations"
+  if ! migrate upgrade; then
+    echo "!! Migration failed - the app was NOT changed; the previous version is still serving." >&2
+    echo "   Each migration runs in its own transaction, so a failed one left nothing half-applied." >&2
+    exit 1
+  fi
+fi
 
 wait_healthy() {
   local deadline=$((SECONDS + WAIT_SECONDS))
@@ -53,5 +92,6 @@ if [[ -n "$PREVIOUS" && "$PREVIOUS" != "$IMAGE" ]]; then
   echo "== Rolling back to $PREVIOUS" >&2
   APP_IMAGE="$PREVIOUS" $COMPOSE up -d --remove-orphans
   if wait_healthy; then echo "Rolled back; previous version is serving." >&2; else echo "Rollback is unhealthy too — check the database and .env." >&2; fi
+  echo "   (Migrations applied above stay in place: they are backward-compatible by rule.)" >&2
 fi
 exit 1

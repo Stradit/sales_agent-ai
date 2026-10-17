@@ -1,7 +1,8 @@
 name: Deploy to production
 
-# tests → build image → push to ECR (tag = commit SHA) → SSH to EC2 → remote_deploy.sh
-# (pull, start, health check, automatic rollback) → public health check.
+# tests + migration/image checks → build image → push to ECR (tag = commit SHA) → SSH to EC2 →
+# remote_deploy.sh (pull, RDS snapshot + db.migrate upgrade if migrations are pending, start,
+# health check, automatic image rollback) → public health check. docs/DB_DEPLOYMENT_PLAN.md
 #
 # Runs from "Actions → Deploy to production → Run workflow" (pick the branch). Every run
 # waits for a reviewer if the "production" environment has required reviewers.
@@ -39,8 +40,15 @@ jobs:
       - name: Unit tests (no database, no secrets)
         run: python -m pytest tests/ -q
 
+  checks:
+    # Migrations build an empty DB + baseline matches the code + the image migrates, starts and
+    # signs in against Postgres 18 (.github/workflows/docker-build.yml)
+    uses: ./.github/workflows/docker-build.yml
+    permissions:
+      contents: read
+
   build-push:
-    needs: test
+    needs: [test, checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production

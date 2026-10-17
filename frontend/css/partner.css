@@ -91,3 +91,13 @@
 .pt-mail { display: inline-flex; align-items: center; gap: 6px; height: 38px; font-size: .8rem; color: var(--text-secondary); cursor: pointer; }
 .pt-mail input { margin: 0; accent-color: var(--brand); }
 .pt-mail[hidden] { display: none; }
+
+/* Wanted introductions (#8) */
+.pt-wanted { margin-bottom: 16px; }
+.pt-wanted h2 { font-size: 1rem; margin: 0 0 4px; }
+.pt-wanted-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 10px; }
+.pt-wanted-card { display: grid; gap: 6px; align-content: start; margin: 0; }
+.pt-wanted-role { font-weight: 600; color: var(--brand); }
+.pt-wanted-card p { margin: 0; font-size: .82rem; }
+.pt-wanted-card .pt-btn { justify-self: start; }
+.pt-form-for { margin: -4px 0 10px; }

@@ -28,6 +28,11 @@ CLOSED = ["won", "lost"]
 WON_FROM = ["proposal", "pilot", "contract"]
 STAGE_LABEL = {"intro": "Intro", "discovery": "Discovery", "proposal": "Proposal", "pilot": "Pilot",
                "contract": "Contract", "won": "Won", "lost": "Lost"}
+# Why a deal was lost (migrations/versions/0002). A pick-list so losses can be analysed; the
+# free-text lost_reason stays as the note. Keep in step with the CHECK constraint in that migration.
+LOST_CATEGORIES = {"price": "Price", "timing": "Timing", "competitor": "Lost to a competitor",
+                   "no_decision": "No decision", "no_budget": "No budget", "product_fit": "Product fit",
+                   "relationship": "Relationship / trust", "other": "Other"}
 ROLES = ["champion", "economic_buyer", "technical_evaluator", "influencer", "blocker", "user"]
 OFFERINGS = {"ai": "Applied AI", "data": "Data Analytics", "cyber": "Cybersecurity", "cloud": "Cloud & Infrastructure",
              "testing": "Automated AI Testing", "digital_assets": "Digital Assets & Blockchain"}
@@ -69,6 +74,10 @@ def ensure_schema() -> None:
     global _schema_ok
     if _schema_ok:
         return
+    from db.migrate import schema_managed
+    if schema_managed():   # schema changes come from migrations (db/migrate.py)
+        _schema_ok = True
+        return
     sql = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
     conn = engine.raw_connection()
     try:
@@ -94,6 +103,13 @@ def _session():
 
 def _acl(s, user) -> List[int]:
     return auth.account_scope(s, user)
+
+
+def own_deals_only(user) -> bool:
+    """Sales reps (role "user") see only the deals they own in every deal list, the digest and
+    Insights. Managers and admins see their whole scope. A rep can still open a colleague's deal
+    from a direct link (e.g. a task assigned to them on it); edit rights are unchanged."""
+    return auth.AUTH_ENFORCED and getattr(user, "role", None) == "user"
 
 
 def _get_deal_row(s, deal_id: int, user) -> Dict[str, Any]:
@@ -144,52 +160,64 @@ def _sync_auto_checks(s, deal_id: int, user_id: Optional[int]) -> None:
 
 def health(deal: Dict[str, Any], stakeholders: List[Dict[str, Any]], checklist: List[Dict[str, Any]],
            last_activity: Optional[datetime], open_tasks: int) -> Dict[str, Any]:
-    """0-100 score + reasons (README §21.1). Pure data, no LLM."""
+    """0-100 score + reasons (README §21.1). Pure data, no LLM.
+
+    gaps / gap_codes are parallel lists: the text is shown as-is (cards, digest, copilot); the code
+    lets the deal room offer the matching one-click fix (see GAP_ACTIONS in deals/main.js)."""
     if deal["stage"] in CLOSED:
-        return {"score": None, "level": "closed", "reasons": [], "gaps": []}
+        return {"score": None, "level": "closed", "reasons": [], "gaps": [], "gap_codes": []}
     now = datetime.now(timezone.utc)
-    score, reasons, gaps = 0, [], []
+    score, reasons, gaps, codes = 0, [], [], []
+
+    def gap(code: str, text: str) -> None:
+        gaps.append(text)
+        codes.append(code)
+
     roles = {x["role"] for x in stakeholders}
     if "champion" in roles:
         score += 20; reasons.append("Champion identified")
     else:
-        gaps.append("No champion on the buying committee")
+        gap("no_champion", "No champion on the buying committee")
     if "economic_buyer" in roles:
         score += 20; reasons.append("Economic buyer identified")
     elif STAGES.index(deal["stage"]) >= 1:
-        gaps.append("No economic buyer identified")
+        gap("no_economic_buyer", "No economic buyer identified")
     if deal.get("next_step"):
         due = deal.get("next_step_due")
         if due and due < date.today():
-            gaps.append(f"Next step overdue since {due.isoformat()}")
+            gap("next_step_overdue", f"Next step overdue since {due.isoformat()}")
             score += 5
         else:
             score += 20; reasons.append("Next step set")
     else:
-        gaps.append("No next step set")
+        gap("no_next_step", "No next step set")
     if last_activity:
         days = (now - last_activity).days
         if days <= 14:
             score += 20; reasons.append(f"Active {days}d ago")
         elif days <= 30:
-            score += 10; gaps.append(f"Quiet for {days} days")
+            score += 10; gap("quiet", f"Quiet for {days} days")
         else:
-            gaps.append(f"No activity for {days} days")
+            gap("no_activity", f"No activity for {days} days")
+    close = deal.get("expected_close")
+    if close and close < date.today():
+        # Not scored (the close date is often just stale) — but it misleads the forecast, so flag it
+        gap("close_date_passed", f"Expected close date passed ({close.isoformat()})")
     stage_items = [c for c in checklist if c["stage"] == deal["stage"]]
     if stage_items:
         pct = sum(1 for c in stage_items if c["done"]) / len(stage_items)
         score += int(20 * pct)
         if pct < 0.5:
-            gaps.append(f"Only {int(pct * 100)}% of {STAGE_LABEL[deal['stage']]} exit criteria done")
+            gap("exit_criteria", f"Only {int(pct * 100)}% of {STAGE_LABEL[deal['stage']]} exit criteria done")
     blockers = [x for x in stakeholders if x["role"] == "blocker" or x.get("sentiment") == "negative"]
     if blockers:
-        score -= 10; gaps.append(f"{len(blockers)} blocker/negative stakeholder(s)")
+        score -= 10; gap("blockers", f"{len(blockers)} blocker/negative stakeholder(s)")
     in_stage = (now - deal["stage_changed_at"]).days
     if in_stage > 45:
-        score -= 10; gaps.append(f"{in_stage} days in {STAGE_LABEL[deal['stage']]}")
+        score -= 10; gap("long_in_stage", f"{in_stage} days in {STAGE_LABEL[deal['stage']]}")
     score = max(0, min(100, score))
     level = "good" if score >= 70 else ("watch" if score >= 40 else "risk")
-    return {"score": score, "level": level, "reasons": reasons, "gaps": gaps, "days_in_stage": in_stage}
+    return {"score": score, "level": level, "reasons": reasons, "gaps": gaps, "gap_codes": codes, "days_in_stage": in_stage}
 
 
 def _deal_payload(s, deal: Dict[str, Any], full: bool = False) -> Dict[str, Any]:
@@ -233,6 +261,8 @@ def _deal_payload(s, deal: Dict[str, Any], full: bool = False) -> Dict[str, Any]
         "value_amount": float(deal["value_amount"]) if deal["value_amount"] is not None else None,
         "currency": deal["currency"], "expected_close": deal["expected_close"], "next_step": deal["next_step"],
         "next_step_due": deal["next_step_due"], "lost_reason": deal["lost_reason"],
+        "lost_category": deal.get("lost_category"), "lost_competitor": deal.get("lost_competitor"),
+        "lost_category_label": LOST_CATEGORIES.get(deal.get("lost_category") or "", None),
         "owner": {"id": deal["owner_user_id"], "name": deal.get("owner_name") or deal.get("owner_email")},
         "stage_changed_at": deal["stage_changed_at"], "created_at": deal["created_at"], "updated_at": deal["updated_at"],
         "health": h, "open_tasks": open_tasks, "last_activity": last_activity, "last_customer_touch": customer_touch,
@@ -299,6 +329,8 @@ class DealPatch(BaseModel):
     next_step_due: Optional[date] = None
     stage: Optional[str] = None
     lost_reason: Optional[str] = Field(None, max_length=500)
+    lost_category: Optional[str] = None
+    lost_competitor: Optional[str] = Field(None, max_length=120)
     reason: Optional[str] = Field(None, max_length=500)
 
 
@@ -340,6 +372,7 @@ def meta(s=Depends(_session)):
 def list_deals(account_id: Optional[int] = None, business_line_id: Optional[int] = None, mine: bool = False, q: Optional[str] = None,
                include_closed: bool = True, user: User = Depends(auth.get_current_user), s=Depends(_session)):
     acl = _acl(s, user)
+    mine = mine or own_deals_only(user)
     sql = """SELECT d.*, a.display_name AS account_name, l.lob_name, u.full_name AS owner_name, u.email AS owner_email,
                     bl.name AS business_line_name
              FROM deals d JOIN accounts a ON a.id = d.account_id LEFT JOIN lobs l ON l.id = d.lob_id
@@ -362,7 +395,109 @@ def list_deals(account_id: Optional[int] = None, business_line_id: Optional[int]
     for st in STAGES + CLOSED:
         ds = [d for d in deals if d["stage"] == st]
         summary[st] = {"count": len(ds), "value": sum(d["value_amount"] or 0 for d in ds)}
-    return {"deals": deals, "summary": summary}
+    by_reason: Dict[str, int] = {}
+    for d in deals:
+        if d["stage"] == "lost":
+            k = d.get("lost_category") or "uncategorised"
+            by_reason[k] = by_reason.get(k, 0) + 1
+    summary["lost"]["by_reason"] = [{"key": k, "label": LOST_CATEGORIES.get(k, "Not categorised"), "count": n}
+                                    for k, n in sorted(by_reason.items(), key=lambda kv: -kv[1])]
+    return {"deals": deals, "summary": summary, "lost_categories": LOST_CATEGORIES, "own_only": own_deals_only(user)}
+
+
+@router.get("/analytics")
+def analytics(days: int = 365, business_line_id: Optional[int] = None, mine: bool = False,
+              user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    """Win/loss and stage velocity (#9) over the deals this user can see, closed or created in the
+    last `days`: win rate, loss reasons, competitors, stage conversion, days per stage, and how
+    introduction-sourced deals do against the rest."""
+    days = max(7, min(days, 1825))
+    mine = mine or own_deals_only(user)
+    where = "d.account_id = ANY(:acl)"
+    params: Dict[str, Any] = {"acl": _acl(s, user), "days": days}
+    if business_line_id:
+        where += " AND d.business_line_id = :bl"; params["bl"] = business_line_id
+    if mine:
+        where += " AND d.owner_user_id = :u"; params["u"] = user.id
+    since = "now() - make_interval(days => :days)"
+    amount = "coalesce(d.amount_usd, d.value_amount, 0)"
+
+    closed = s.execute(text(f"""
+        SELECT d.id, d.stage, {amount} AS amount, d.lost_category, nullif(trim(d.lost_competitor), '') AS competitor,
+               d.introduction_id IS NOT NULL AS sourced, c.id AS connector_id, c.name AS connector_name,
+               extract(epoch FROM d.closed_at - d.created_at) / 86400 AS cycle_days
+        FROM deals d LEFT JOIN introductions i ON i.id = d.introduction_id LEFT JOIN connectors c ON c.id = i.connector_id
+        WHERE {where} AND d.stage IN ('won','lost') AND d.closed_at >= {since}"""), params).mappings().all()
+
+    def rate(rows):
+        won = sum(1 for r in rows if r["stage"] == "won")
+        return {"won": won, "lost": len(rows) - won, "win_rate": round(100 * won / len(rows)) if rows else None,
+                "won_value": round(sum(float(r["amount"]) for r in rows if r["stage"] == "won"), 2)}
+
+    won_rows = [r for r in closed if r["stage"] == "won"]
+    totals = {**rate(closed),
+              "lost_value": round(sum(float(r["amount"]) for r in closed if r["stage"] == "lost"), 2),
+              "avg_won_size": round(sum(float(r["amount"]) for r in won_rows) / len(won_rows), 2) if won_rows else None,
+              "avg_cycle_days": round(sum(float(r["cycle_days"] or 0) for r in won_rows) / len(won_rows)) if won_rows else None}
+
+    reasons: Dict[str, int] = {}
+    competitors: Dict[str, Dict[str, Any]] = {}
+    for r in closed:
+        if r["stage"] != "lost":
+            continue
+        k = r["lost_category"] or "uncategorised"
+        reasons[k] = reasons.get(k, 0) + 1
+        if r["competitor"]:
+            c = competitors.setdefault(r["competitor"].lower(), {"name": r["competitor"], "count": 0, "value": 0.0})
+            c["count"] += 1; c["value"] += float(r["amount"])
+    loss_reasons = [{"key": k, "label": LOST_CATEGORIES.get(k, "Not categorised"), "count": n}
+                    for k, n in sorted(reasons.items(), key=lambda kv: -kv[1])]
+
+    connectors: Dict[int, Dict[str, Any]] = {}
+    for r in won_rows:
+        if r["connector_id"]:
+            c = connectors.setdefault(r["connector_id"], {"id": r["connector_id"], "name": r["connector_name"], "won": 0, "value": 0.0})
+            c["won"] += 1; c["value"] += float(r["amount"])
+
+    # Stage history of deals created in the window (the cohort) -> conversion and time per stage
+    hist = s.execute(text(f"""
+        SELECT h.deal_id, h.to_stage, h.changed_at, d.stage AS current_stage
+        FROM deal_stage_history h JOIN deals d ON d.id = h.deal_id
+        WHERE {where} AND d.created_at >= {since}
+        ORDER BY h.deal_id, h.changed_at, h.id"""), params).mappings().all()
+    order = STAGES + ["won"]
+    reached = {st: 0 for st in order}
+    spans: Dict[str, List[float]] = {st: [] for st in STAGES}
+    by_deal: Dict[int, List[Any]] = {}
+    for h in hist:
+        by_deal.setdefault(h["deal_id"], []).append(h)
+    for rows in by_deal.values():
+        top = max((order.index(h["to_stage"]) for h in rows if h["to_stage"] in order), default=-1)
+        for i in range(top + 1):
+            reached[order[i]] += 1
+        for cur, nxt in zip(rows, rows[1:] + [None]):
+            if cur["to_stage"] in spans and nxt is not None:      # completed time in a stage only
+                spans[cur["to_stage"]].append((nxt["changed_at"] - cur["changed_at"]).total_seconds() / 86400)
+    in_stage_now = {st: [] for st in STAGES}
+    for r in s.execute(text(f"""SELECT d.stage, extract(epoch FROM now() - d.stage_changed_at) / 86400 AS days
+                                FROM deals d WHERE {where} AND d.stage = ANY(:open)"""),
+                       {**params, "open": STAGES}).mappings():
+        in_stage_now[r["stage"]].append(float(r["days"] or 0))
+    funnel = []
+    for i, st in enumerate(order):
+        nxt = reached[order[i + 1]] if i + 1 < len(order) else None
+        funnel.append({"stage": st, "label": STAGE_LABEL[st], "reached": reached[st],
+                       "to_next_pct": round(100 * nxt / reached[st]) if nxt is not None and reached[st] else None,
+                       "avg_days": round(sum(spans[st]) / len(spans[st]), 1) if spans.get(st) else None,
+                       "open_now": len(in_stage_now.get(st, [])),
+                       "open_avg_days": round(sum(in_stage_now[st]) / len(in_stage_now[st]), 1) if in_stage_now.get(st) else None})
+
+    return {"days": days, "totals": totals, "loss_reasons": loss_reasons,
+            "competitors": sorted(competitors.values(), key=lambda c: (-c["count"], -c["value"]))[:8],
+            "by_source": {"introduction": rate([r for r in closed if r["sourced"]]),
+                          "other": rate([r for r in closed if not r["sourced"]])},
+            "top_connectors": sorted(connectors.values(), key=lambda c: -c["value"])[:8],
+            "funnel": funnel, "cohort_size": len(by_deal)}
 
 
 @router.post("")
@@ -424,7 +559,7 @@ def digest_data(s, acl: List[int], owner_id: Optional[int] = None, days: int = 7
                if d["next_step"] and d["next_step_due"] and d["next_step_due"] < today]
     closing = [brief(d, f"expected close {d['expected_close']}") for d in open_
                if d["expected_close"] and 0 <= (d["expected_close"] - today).days <= 30]
-    closed = [brief(d, d["lost_reason"] or "") for d in deals if d["stage"] in CLOSED
+    closed = [brief(d, " — ".join(x for x in (d.get("lost_category_label"), d["lost_reason"]) if x)) for d in deals if d["stage"] in CLOSED
               and d["stage_changed_at"] and d["stage_changed_at"].timestamp() > since]
     probs = stage_probability(s)
 
@@ -442,7 +577,7 @@ def digest_data(s, acl: List[int], owner_id: Optional[int] = None, days: int = 7
 
 @router.get("/pipeline/digest")
 def digest(mine: bool = False, days: int = 7, user: User = Depends(auth.get_current_user), s=Depends(_session)):
-    return digest_data(s, _acl(s, user), user.id if mine else None, max(1, min(days, 90)))
+    return digest_data(s, _acl(s, user), user.id if (mine or own_deals_only(user)) else None, max(1, min(days, 90)))
 
 
 @router.get("/{deal_id}/toolkit")
@@ -497,6 +632,22 @@ def update_deal(deal_id: int, body: DealPatch, user: User = Depends(auth.get_cur
         _check_business_line(s, changes["business_line_id"])
     if changes.pop("clear_probability", False):
         changes["probability"] = None
+    if changes.get("lost_category") is not None and changes["lost_category"] not in LOST_CATEGORIES:
+        raise HTTPException(400, "lost_category must be one of: " + ", ".join(LOST_CATEGORIES))
+    for k in ("lost_reason", "lost_competitor"):
+        if k in changes and changes[k] is not None:
+            changes[k] = changes[k].strip() or None
+    if new_stage == "lost" and new_stage != deal["stage"]:
+        cat = changes.get("lost_category") or deal.get("lost_category")
+        note = changes.get("lost_reason") or deal.get("lost_reason")
+        if not cat and note:            # older clients send only a text reason
+            cat = changes["lost_category"] = "other"
+        if not cat:
+            raise HTTPException(400, "Please pick why the deal was lost.")
+        if cat == "other" and not note:
+            raise HTTPException(400, "Please add a short note when the reason is Other.")
+        if cat != "competitor" and "lost_competitor" not in changes:
+            changes["lost_competitor"] = None
     if "forecast_category" in changes:
         if changes["forecast_category"] not in ("pipeline", "best_case", "commit", "omitted"):
             raise HTTPException(400, "forecast_category must be pipeline, best_case, commit or omitted.")
@@ -518,8 +669,6 @@ def update_deal(deal_id: int, body: DealPatch, user: User = Depends(auth.get_cur
             raise HTTPException(400, "Unknown stage.")
         if new_stage == "won" and deal["stage"] not in WON_FROM:
             raise HTTPException(400, "Move the deal to Proposal or later before marking it won.")
-        if new_stage == "lost" and not (changes.get("lost_reason") or deal.get("lost_reason")):
-            raise HTTPException(400, "Please give a reason when marking a deal as lost.")
         if new_stage in STAGES and deal["stage"] in STAGES:
             step = STAGES.index(new_stage) - STAGES.index(deal["stage"])
             if abs(step) > 1:
@@ -533,9 +682,18 @@ def update_deal(deal_id: int, body: DealPatch, user: User = Depends(auth.get_cur
                     warnings.append(f"Moved on with {len(open_items)} open {STAGE_LABEL[deal['stage']]} item(s): " + "; ".join(open_items))
         s.execute(text("UPDATE deals SET stage = :st, stage_changed_at = now(), updated_at = now() WHERE id = :d"),
                   {"st": new_stage, "d": deal_id})
+        if deal["stage"] == "lost":   # reopened: the old loss reason stays in the activity log only
+            s.execute(text("UPDATE deals SET lost_category = NULL, lost_competitor = NULL, lost_reason = NULL WHERE id = :d"),
+                      {"d": deal_id})
         s.execute(text("INSERT INTO deal_stage_history (deal_id, from_stage, to_stage, changed_by) VALUES (:d, :f, :t, :u)"),
                   {"d": deal_id, "f": deal["stage"], "t": new_stage, "u": user.id})
-        stage_reason = (changes.get("lost_reason") or deal.get("lost_reason")) if new_stage == "lost" else reason
+        if new_stage == "lost":
+            cat = changes.get("lost_category") or deal.get("lost_category")
+            comp = changes.get("lost_competitor") if "lost_competitor" in changes else deal.get("lost_competitor")
+            note = changes.get("lost_reason") or deal.get("lost_reason")
+            stage_reason = " — ".join(x for x in (LOST_CATEGORIES.get(cat, cat) + (f": {comp}" if comp else ""), note) if x)
+        else:
+            stage_reason = reason
         _log(s, deal_id, user.id, "stage", f"{STAGE_LABEL[deal['stage']]} → {STAGE_LABEL[new_stage]}"
              + (f" (reason: {stage_reason})" if stage_reason else ""))
     _sync_auto_checks(s, deal_id, user.id)

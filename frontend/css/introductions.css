@@ -69,7 +69,7 @@
 @media (max-width: 640px) { .in-view-head { flex-direction: column; } .in-tab { padding: 8px 10px; } }
 
 /* Drawer: wider than the deal room (it carries history + activity side by side). */
-#inRoom.dl-room { width: min(800px, 90vw); }
+/* #inRoom inherits the shared .dl-room width (deals.css) */
 
 /* Stage guidance + outcomes */
 .dl-step:disabled { cursor: not-allowed; }
@@ -102,3 +102,41 @@
 /* Partner visibility */
 .in-share-note { font-size: .74rem; color: var(--text-secondary); max-width: 220px; text-align: right; }
 .in-vis { margin-left: 6px; font-size: .72rem; }
+
+/* The ask to the connector (Proposed stage) */
+.in-ask-toggle { margin-top: 2px; font-weight: 600; }
+.in-ask-box { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-color); display: grid; gap: 8px; }
+.in-ask-box .in-muted { margin: 0; font-size: .74rem; }
+.in-ask-subject { display: flex; flex-direction: column; gap: 4px; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); }
+.in-ask-box input, .in-ask-box textarea { font: inherit; font-size: .82rem; color: var(--text-primary); background: var(--panel-bg);
+  border: 1px solid var(--border-mid); padding: 8px 10px; width: 100%; box-sizing: border-box; }
+.in-ask-box textarea { resize: vertical; min-height: 220px; line-height: 1.5; font-family: inherit; }
+.in-ask-box a.dl-btn { text-decoration: none; }
+.in-ask-note i { color: var(--brand); }
+
+/* Who can introduce me? (#7) */
+.in-paths { border: 1px solid var(--border-color); background: var(--panel-bg); padding: 10px 12px; margin: 2px 0 6px; font-size: .78rem; }
+.in-paths-head { font-weight: 700; margin-bottom: 6px; }
+.in-paths-head i { color: var(--brand); margin-right: 4px; }
+.in-paths > p { margin: 0; }
+.in-paths-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.in-path { display: grid; grid-template-columns: 58px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border-color); }
+.in-path:first-child { border-top: 0; }
+.in-path-strength { font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; text-align: center; padding: 2px 4px; border: 1px solid currentColor; }
+.in-path.strong .in-path-strength { color: var(--success); }
+.in-path.good .in-path-strength { color: var(--brand); }
+.in-path.weak .in-path-strength { color: var(--text-muted); }
+.in-path-why { color: var(--text-muted); font-size: .72rem; margin-top: 2px; }
+.in-path-ask { font-size: .7rem; }
+.in-path .dl-btn { padding: 3px 10px; font-size: .74rem; }
+
+/* Wanted introductions (#8) */
+.in-wanted-intro { margin: 0 0 10px; font-size: .78rem; }
+.in-wanted-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 12px; align-items: end;
+  border: 1px solid var(--border-color); background: var(--panel-bg); padding: 12px; margin-bottom: 12px; font-size: .78rem; }
+.in-wanted-form label { display: grid; gap: 4px; color: var(--text-muted); }
+.in-wanted-form input, .in-wanted-form select { font: inherit; padding: 6px 8px; border: 1px solid var(--border-mid); background: var(--panel-bg); color: var(--text-primary); }
+.in-wanted-note { grid-column: 1 / -1; }
+.in-wanted-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; font-size: .78rem; }
+.in-wanted-table tbody tr { cursor: default; }
+.in-wanted-closed td { opacity: .6; }

@@ -2,27 +2,85 @@ name: Docker image build & smoke test
 
 # Builds the production image on a Linux runner and starts it against a throwaway
 # Postgres 18 with production-like settings (AUTH_ENFORCED=true, background loops off,
-# no outbound email). Proves the image starts, creates its schema on an empty DB,
+# no outbound email). Proves the image migrates an empty DB (db.migrate upgrade), starts,
 # answers /api/health, serves the public pages and lets the seeded admin sign in.
 # Nothing is pushed anywhere. See DEPLOYMENT_REVIEW.md, Phase 1.
 
 on:
   workflow_dispatch:
+  workflow_call:        # deploy.yml runs these checks before every production deploy
   pull_request:
     paths: ["Dockerfile", ".dockerignore", "requirements.txt", "api.py", "auth.py", "config.py",
-            "db/**", "apps/sales_*/**", "services/**", ".github/workflows/docker-build.yml"]
+            "db/**", "apps/sales_*/**", "services/**", "migrations/**", "alembic.ini",
+            "scripts/build_schema_baseline.py", ".github/workflows/docker-build.yml"]
   push:
     branches: [feature/crm-core-phase1, feature/sales-intelligence-pipeline]
     paths: ["Dockerfile", ".dockerignore", "requirements.txt", ".github/workflows/docker-build.yml"]
 
 concurrency:
-  group: docker-build-${{ github.ref }}
+  # github.workflow is the CALLER's name when deploy.yml calls this, so a push-triggered run on the
+  # same branch can't cancel the checks of a deploy in progress
+  group: docker-build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  migrations:
+    # Schema changes go through versioned migrations (docs/DB_DEPLOYMENT_PLAN.md). This job proves:
+    #  1. the migrations build an EMPTY database from nothing, and apply cleanly a second time (no-op);
+    #  2. the baseline (0001) still equals what the legacy startup schema code builds - i.e. nobody
+    #     changed schema.sql / create_tables.py instead of adding a migration;
+    #  3. every migration after the baseline can be downgraded and re-applied.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: salesai
+          POSTGRES_PASSWORD: migrations-ci-only
+          POSTGRES_DB: sales_ai
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U salesai -d sales_ai"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://salesai:migrations-ci-only@127.0.0.1:5432/sales_ai
+      PG_BIN: /usr/lib/postgresql/18/bin
+      COPILOT_AUTOSYNC: "0"
+      CRM_BACKGROUND: "0"
+      CRM_NOTIFY_SUPPRESS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Postgres 18 client (pg_dump must match the server)
+        run: |
+          sudo apt-get install -y -qq postgresql-common >/dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-18 >/dev/null
+          "$PG_BIN/pg_dump" --version
+      - run: pip install -r requirements.txt
+      - name: Build an empty database from the migrations
+        run: |
+          python -m db.migrate status
+          python -m db.migrate upgrade
+          python -m db.migrate upgrade          # second run must be a no-op
+          python -m db.migrate check
+      - name: Baseline still matches the startup schema code
+        run: python scripts/build_schema_baseline.py --check
+      - name: Downgrade / re-upgrade every migration after the baseline
+        run: |
+          if [ "$(python -c 'from db.migrate import head_revision as h; print(h())')" != "0001" ]; then
+            python -m alembic downgrade 0001 && python -m alembic upgrade head && python -m db.migrate check
+          else
+            echo "Only the baseline so far - nothing to downgrade."
+          fi
+
   build-and-smoke:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -45,6 +103,11 @@ jobs:
 
       - name: Image size
         run: docker image ls salesai:smoke --format '{{.Repository}}:{{.Tag}}  {{.Size}}'
+
+      - name: Migrate the empty database with the image (as remote_deploy.sh does)
+        run: |
+          docker run --rm --network host             -e DATABASE_URL=postgresql://salesai:smoke-test-only@127.0.0.1:5432/sales_ai             --entrypoint python salesai:smoke -m db.migrate upgrade
+          docker run --rm --network host             -e DATABASE_URL=postgresql://salesai:smoke-test-only@127.0.0.1:5432/sales_ai             --entrypoint python salesai:smoke -m db.migrate check
 
       - name: Start container
         run: |

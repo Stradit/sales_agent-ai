@@ -267,6 +267,9 @@ def _ensure_schema() -> None:
     s = get_session()
     try:
         s.execute(text("SET lock_timeout = '5s'"))
+        from db.migrate import schema_managed
+        if schema_managed():   # table comes from migrations; retention runs in CRM housekeeping
+            return
         s.execute(text(SCHEMA))
         s.execute(text("DELETE FROM search_log WHERE created_at < now() - make_interval(days => :d)"),
                   {"d": LOG_RETENTION_DAYS})
@@ -283,9 +286,15 @@ def install(app) -> None:
     global _TRGM
     s = get_session()
     try:
-        s.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-        s.commit()
-        _TRGM = True
+        from db.migrate import schema_managed
+        if schema_managed():   # the extension comes from migrations; just see whether it's there
+            _TRGM = bool(s.execute(text("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'")).scalar())
+            if not _TRGM:
+                print("[search] pg_trgm not installed, typo matching off")
+        else:
+            s.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+            s.commit()
+            _TRGM = True
     except Exception as e:
         s.rollback()
         print(f"[search] pg_trgm unavailable, typo matching off: {str(e).splitlines()[0]}")

@@ -163,4 +163,14 @@ else
   echo "   $(wc -l < "$WORK/target.counts" | tr -d ' ') tables, $(awk -F'|' '{s+=$2} END{print s}' "$WORK/target.counts") rows"
 fi
 q "analyze" >/dev/null
-echo "== Restore complete. Next: run the Deploy workflow, then Admin → Copilot pipeline → Full re-embed."
+REV="$(q "select version_num from alembic_version" 2>/dev/null || true)"
+echo "== Restore complete."
+if [[ -n "$REV" ]]; then
+  echo "   Schema version $REV (under migration control). The next deploy applies any newer migrations."
+else
+  echo "   This database is not under migration control yet (the dump came from an unstamped database)."
+  echo "   After the next deploy is healthy, stamp it once (verifies first, changes nothing else):"
+  echo "     docker exec salesai-web python -m db.migrate stamp-baseline        # check"
+  echo "     docker exec salesai-web python -m db.migrate stamp-baseline --yes  # stamp"
+fi
+echo "   Then: Admin → Copilot pipeline → Full re-embed."

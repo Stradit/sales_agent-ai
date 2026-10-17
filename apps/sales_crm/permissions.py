@@ -29,7 +29,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 # Paths any logged-in role may call (login/refresh/logout/me, password reset)
 ALWAYS_ALLOWED = ("/api/auth/",)
 # Viewers may still use their personal copilot workspace (chat, notes, exports are theirs only)
-VIEWER_WRITE_ALLOWED = ALWAYS_ALLOWED + ("/api/copilot/",)
+VIEWER_WRITE_ALLOWED = ALWAYS_ALLOWED + ("/api/copilot/", "/api/crm/views")   # + their own saved list views
 # ...and the derived-history syncs the account page fires on view (not user edits)
 VIEWER_SYNC_ALLOWED = re.compile(r"^/api/accounts/\d+/(opportunities|weekly-updates)/sync$")
 # Partners: introductions portal only (built in M1/M5)

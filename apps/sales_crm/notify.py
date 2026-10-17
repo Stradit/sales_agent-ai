@@ -33,6 +33,7 @@ KINDS: Dict[str, Dict[str, str]] = {
     "partner_note": {"label": "A partner added an update to my introduction", "who": "internal"},
     "triage_needed": {"label": "A partner submission needs linking to an account", "who": "internal"},
     "intro_stale": {"label": "One of my introductions went stale", "who": "internal"},
+    "intro_followup": {"label": "An introduction I requested needs a follow-up", "who": "internal"},
     "account_assigned": {"label": "An account is assigned to me", "who": "internal"},
     "capture_reauth": {"label": "My Microsoft 365 connection needs reconnecting", "who": "internal"},
     "weekly_pipeline": {"label": "Weekly pipeline email (Mondays)", "who": "internal"},

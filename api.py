@@ -161,6 +161,8 @@ if FASTAPI_AVAILABLE:
             return Response(status_code=204)
         return FileResponse(icon, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
 
+    SCHEMA_STATE = {}   # filled at startup: ok | behind | legacy
+
     @app.get("/api/health", include_in_schema=False)
     def health():
         """Liveness + DB check for the container HEALTHCHECK, the deploy script and the load
@@ -173,14 +175,26 @@ if FASTAPI_AVAILABLE:
             db_ok = False
         finally:
             session.close()
-        return JSONResponse({"status": "ok" if db_ok else "degraded", "db": "ok" if db_ok else "down"},
-                            status_code=200 if db_ok else 503, headers={"Cache-Control": "no-store"})
+        # A database behind the code (migrations not applied) fails the check, so a deploy that
+        # skipped `db.migrate upgrade` is rolled back instead of serving on a stale schema.
+        schema = SCHEMA_STATE.get("schema", "unknown")
+        ok = db_ok and schema != "behind"
+        return JSONResponse({"status": "ok" if ok else "degraded", "db": "ok" if db_ok else "down", "schema": schema},
+                            status_code=200 if ok else 503, headers={"Cache-Control": "no-store"})
 
     @app.on_event("startup")
     def on_startup():
         try:
+            from db.migrate import state
+            st = state()
+            SCHEMA_STATE["schema"] = "behind" if st["behind"] else ("ok" if st["mode"] == "managed" else "legacy")
+            if st["behind"]:
+                print(f"[DB] schema is BEHIND the code ({st['current']} < {st['head']}): run `python -m db.migrate upgrade`")
+        except Exception as e:
+            print(f"[WARN] Could not read the migration state: {e}")
+        try:
             from db.create_tables import ensure_schema_compatibility
-            ensure_schema_compatibility()
+            ensure_schema_compatibility()   # legacy databases only; managed ones just seed the first admin
         except Exception as e:
             print(f"[WARN] Schema compatibility check failed on startup: {e}")
 

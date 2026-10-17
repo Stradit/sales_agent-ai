@@ -47,41 +47,44 @@
           </div>
           <i class="fa-solid fa-chevron-right nav-digest-arrow"></i>
         </a>
-        <a href="/introductions" class="nav-digest-btn">
-          <span class="nav-digest-icon"><i class="fa-solid fa-handshake"></i></span>
-          <div class="nav-digest-info">
-            <div class="nav-digest-title">Introductions</div>
-            <div class="nav-digest-sub">Warm intros from partners &amp; advisors</div>
+        <!-- CRM group: open by default; the open/closed choice is remembered per browser -->
+        <details class="nav-group" id="navCrmGroup" open>
+          <summary class="nav-digest-btn nav-group-summary" title="CRM">
+            <span class="nav-digest-icon"><i class="fa-solid fa-briefcase"></i></span>
+            <div class="nav-digest-info">
+              <div class="nav-digest-title">CRM</div>
+              <div class="nav-digest-sub">Introductions, deals &amp; email sync</div>
+            </div>
+            <i class="fa-solid fa-chevron-down nav-digest-arrow nav-group-caret"></i>
+          </summary>
+          <div class="nav-group-items">
+            <a href="/introductions" class="nav-group-link" title="Warm intros from partners &amp; advisors">
+              <i class="fa-solid fa-handshake"></i><span>Introductions</span>
+            </a>
+            <a href="/deals" class="nav-group-link" title="Intro → Discovery → Proposal → Pilot → Contract">
+              <i class="fa-solid fa-diagram-next"></i><span>Deals Pipeline</span>
+            </a>
+            {# Temporarily hidden — set FORECAST_ENABLED=1 in .env to show it again (api.py). #}
+            {% if forecast_enabled %}
+            <a href="/forecast" class="nav-group-link" title="Quarter roll-up, targets &amp; what moved">
+              <i class="fa-solid fa-chart-line"></i><span>Forecast</span>
+            </a>
+            {% endif %}
+            <a href="/email-sync" class="nav-group-link" title="Auto-log Microsoft 365 meetings &amp; emails">
+              <i class="fa-solid fa-envelope-circle-check"></i><span>Email &amp; Calendar Sync</span>
+            </a>
           </div>
-          <i class="fa-solid fa-chevron-right nav-digest-arrow"></i>
-        </a>
-        <a href="/deals" class="nav-digest-btn">
-          <span class="nav-digest-icon"><i class="fa-solid fa-diagram-next"></i></span>
-          <div class="nav-digest-info">
-            <div class="nav-digest-title">Deals Pipeline</div>
-            <div class="nav-digest-sub">Intro → Discovery → Proposal → Pilot → Contract</div>
-          </div>
-          <i class="fa-solid fa-chevron-right nav-digest-arrow"></i>
-        </a>
-        {# Temporarily hidden — set FORECAST_ENABLED=1 in .env to show it again (api.py). #}
-        {% if forecast_enabled %}
-        <a href="/forecast" class="nav-digest-btn">
-          <span class="nav-digest-icon"><i class="fa-solid fa-chart-line"></i></span>
-          <div class="nav-digest-info">
-            <div class="nav-digest-title">Forecast</div>
-            <div class="nav-digest-sub">Quarter roll-up, targets &amp; what moved</div>
-          </div>
-          <i class="fa-solid fa-chevron-right nav-digest-arrow"></i>
-        </a>
-        {% endif %}
-        <a href="/email-sync" class="nav-digest-btn">
-          <span class="nav-digest-icon"><i class="fa-solid fa-envelope-circle-check"></i></span>
-          <div class="nav-digest-info">
-            <div class="nav-digest-title">Email &amp; Calendar Sync</div>
-            <div class="nav-digest-sub">Auto-log Microsoft 365 meetings &amp; emails</div>
-          </div>
-          <i class="fa-solid fa-chevron-right nav-digest-arrow"></i>
-        </a>
+        </details>
+        <script>
+          (function () {
+            var g = document.getElementById('navCrmGroup');
+            if (!g) return;
+            try { if (localStorage.getItem('nav.crm.open') === '0') g.open = false; } catch (e) { /* storage blocked */ }
+            g.addEventListener('toggle', function () {
+              try { localStorage.setItem('nav.crm.open', g.open ? '1' : '0'); } catch (e) { /* storage blocked */ }
+            });
+          })();
+        </script>
         <a href="/copilot" class="nav-digest-btn">
           <span class="nav-digest-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
           <div class="nav-digest-info">

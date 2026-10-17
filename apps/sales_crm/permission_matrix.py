@@ -58,9 +58,15 @@ def main() -> int:
     app.include_router(introductions.partner_router)
     app.include_router(forecast.router)
     app.include_router(activities.router)
+    from apps.sales_crm import views as saved_views
+    app.include_router(saved_views.router)
     c = TestClient(app)
 
     s = get_session()
+    # Autocommit: the checks below read through `s` between API calls; an open read transaction
+    # would hold locks that a concurrent startup ALTER queues behind — and then the app's own
+    # requests queue behind that ALTER (seen 2026-10-17: the whole local DB froze).
+    s.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
     T0 = s.execute(text("SELECT now()")).scalar()
     created_users: List[int] = []
     created_deals: List[int] = []
@@ -288,8 +294,75 @@ def main() -> int:
         f = c.get("/api/forecast", headers=H["rep"], params={"period": per, "owner_id": rep}).json()["totals"]
         results.append(("won counted as closed", 1 if f["closed"] == round(100000 * eur_rate, 2) and f["commit"] == 0 else 0, 1))
         check("rep reopens deal", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"stage": "contract"}), 200)
+        # Undo from the deals UI: back one stage with the undo reason, then forward again (ends at contract)
+        check("undo a move (back one stage, with reason)", c.patch(f"/api/deals/{fdid}", headers=H["rep"],
+              json={"stage": "pilot", "reason": "Undo — moved by mistake"}), 200)
+        check("back a stage without a reason is refused", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"stage": "proposal"}), 400)
+        check("undo the undo (forward again)", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"stage": "contract"}), 200)
         w = s.execute(text("SELECT forecast_category, closed_at FROM deals WHERE id = :d"), {"d": fdid}).fetchone()
         results.append(("reopen → pipeline, closed_at cleared", 1 if tuple(w) == ("pipeline", None) else 0, 1))
+        # Structured lost reasons (#4): a category is required; Other needs a note; reopen clears it
+        check("mark lost without a reason", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"stage": "lost"}), 400)
+        check("mark lost with an unknown category", c.patch(f"/api/deals/{fdid}", headers=H["rep"],
+              json={"stage": "lost", "lost_category": "aliens"}), 400)
+        check("mark lost as Other without a note", c.patch(f"/api/deals/{fdid}", headers=H["rep"],
+              json={"stage": "lost", "lost_category": "other"}), 400)
+        r = check("mark lost to a competitor", c.patch(f"/api/deals/{fdid}", headers=H["rep"],
+                  json={"stage": "lost", "lost_category": "competitor", "lost_competitor": "Acme Corp", "lost_reason": "Cheaper"}), 200).json()
+        results.append(("lost payload: category label + competitor", 1 if (r.get("lost_category_label"), r.get("lost_competitor")) == ("Lost to a competitor", "Acme Corp") else 0, 1))
+        lst = c.get("/api/deals", headers=H["rep"], params={"include_closed": True}).json()
+        br = {x["key"]: x["count"] for x in lst["summary"]["lost"].get("by_reason", [])}
+        results.append(("summary counts losses by reason", 1 if br.get("competitor", 0) >= 1 else 0, 1))
+        check("reopen the lost deal", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"stage": "contract"}), 200)
+        w = s.execute(text("SELECT lost_category, lost_competitor, lost_reason FROM deals WHERE id = :d"), {"d": fdid}).fetchone()
+        results.append(("reopen clears the loss reason", 1 if tuple(w) == (None, None, None) else 0, 1))
+        r = check("older client: text reason only", c.patch(f"/api/deals/{fdid}", headers=H["rep"],
+                  json={"stage": "lost", "lost_reason": "Went quiet"}), 200).json()
+        results.append(("text-only reason → category Other", 1 if r.get("lost_category") == "other" else 0, 1))
+        check("reopen again", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"stage": "contract"}), 200)
+        # Sales reps see only their own deals (lists, digest, insights); managers see the team's
+        r = check("manager creates a deal on rep's account", c.post("/api/deals", headers=H["manager"],
+                  json={"account_id": a_in, "name": "Matrix manager-owned deal"}), 200)
+        mdid = r.json()["id"]; created_deals.append(mdid)
+        rep_ids = {d["id"] for d in c.get("/api/deals", headers=H["rep"]).json()["deals"]}
+        results.append(("rep's deal list hides a colleague's deal", 0 if mdid in rep_ids else 1, 1))
+        results.append(("rep's deal list still has own deals", 1 if fdid in rep_ids else 0, 1))
+        rep_acct = {d["id"] for d in c.get("/api/deals", headers=H["rep"], params={"account_id": a_in}).json()["deals"]}
+        results.append(("rep's account page hides it too", 0 if mdid in rep_acct else 1, 1))
+        results.append(("deal list tells the page it's own-only", 1 if c.get("/api/deals", headers=H["rep"]).json().get("own_only") else 0, 1))
+        mgr_ids = {d["id"] for d in c.get("/api/deals", headers=H["manager"]).json()["deals"]}
+        results.append(("manager's list has own + rep's deals", 1 if {mdid, fdid} <= mgr_ids else 0, 1))
+        dg = c.get("/api/deals/pipeline/digest", headers=H["rep"], params={"days": 90}).json()
+        dg_ids = {x["id"] for k in ("at_risk", "stuck", "overdue", "closing_soon", "closed") for x in dg[k]} | {m["deal_id"] for m in dg["moves"]}
+        results.append(("rep's digest has no colleague's deals", 0 if mdid in dg_ids else 1, 1))
+        # Win/loss analytics (#9): scoped like the deal list
+        an = check("rep reads deal analytics", c.get("/api/deals/analytics", headers=H["rep"], params={"days": 3650}), 200).json()
+        results.append(("analytics: funnel covers every stage + won", 1 if [f["stage"] for f in an["funnel"]][-1] == "won" and len(an["funnel"]) == 6 else 0, 1))
+        check("partner reads deal analytics", c.get("/api/deals/analytics", headers=H["partner"]), 403)
+        ao = check("outsider reads deal analytics", c.get("/api/deals/analytics", headers=H["outsider"], params={"days": 3650, "mine": True}), 200).json()
+        results.append(("analytics: outsider's own scope has none of rep's deals", 1 if ao["cohort_size"] == 0 else 0, 1))
+        # Saved views (#6): personal; viewers may save their own
+        sv = check("rep saves a view", c.post("/api/crm/views", headers=H["rep"], json={"page": "deals", "name": "Matrix view", "state": {"view": "list", "mine": True}}), 200).json()
+        check("rep overwrites it by name", c.post("/api/crm/views", headers=H["rep"], json={"page": "deals", "name": "Matrix view", "state": {"view": "insights"}}), 200)
+        lv = check("rep lists views", c.get("/api/crm/views", headers=H["rep"], params={"page": "deals"}), 200).json()["views"]
+        mine_v = [x for x in lv if x["name"] == "Matrix view"]
+        results.append(("saved view overwritten, not duplicated", 1 if len(mine_v) == 1 and mine_v[0]["state"] == {"view": "insights"} else 0, 1))
+        check("viewer saves own view", c.post("/api/crm/views", headers=H["viewer"], json={"page": "deals", "name": "Matrix viewer view"}), 200)
+        results.append(("viewer can't see rep's views", 0 if any(x["name"] == "Matrix view" for x in
+                        c.get("/api/crm/views", headers=H["viewer"], params={"page": "deals"}).json()["views"]) else 1, 1))
+        check("viewer deletes rep's view", c.delete(f"/api/crm/views/{sv['id']}", headers=H["viewer"]), 404)
+        check("unknown page", c.get("/api/crm/views", headers=H["rep"], params={"page": "nope"}), 422)
+        check("rep deletes own view", c.delete(f"/api/crm/views/{sv['id']}", headers=H["rep"]), 200)
+        # Who can introduce me? (#7): account-scoped, internal roles only
+        wp = check("rep reads warm paths", c.get("/api/crm/warm-paths", headers=H["rep"], params={"account_id": a_in}), 200).json()
+        results.append(("warm paths: connector who introduced there is listed", 1 if any(x["type"] == "connector" for x in wp["paths"]) else 0, 1))
+        check("rep reads warm paths, other account", c.get("/api/crm/warm-paths", headers=H["rep"], params={"account_id": a_out}), 404)
+        check("partner reads warm paths", c.get("/api/crm/warm-paths", headers=H["partner"], params={"account_id": a_in}), 403)
+        check("viewer reads warm paths", c.get("/api/crm/warm-paths", headers=H["viewer"], params={"account_id": a_in}), 200)
+        other_p = s.execute(text("SELECT id FROM personas WHERE account_id <> :a LIMIT 1"), {"a": a_in}).scalar()
+        if other_p:
+            check("warm paths with a contact from another account", c.get("/api/crm/warm-paths", headers=H["rep"],
+                  params={"account_id": a_in, "persona_id": other_p}), 400)
         check("forecast export", c.get("/api/forecast/export", headers=H["rep"], params={"period": per}), 200)
 
         # ── M3 activities ──

@@ -52,6 +52,9 @@ def _now() -> str:
 
 
 def ensure_table() -> None:
+    from db.migrate import schema_managed
+    if schema_managed():   # table comes from migrations (db/migrate.py)
+        return
     with engine.begin() as c:
         c.execute(text("""CREATE TABLE IF NOT EXISTS rag_pipeline_runs (
             id           text PRIMARY KEY,

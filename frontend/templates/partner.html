@@ -8,7 +8,7 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="css/tokens.css?v=3.0">
   <link rel="stylesheet" href="css/base.css?v=3.0">
-  <link rel="stylesheet" href="css/partner.css?v=1.2">
+  <link rel="stylesheet" href="css/partner.css?v=1.3">
 </head>
 <body class="pt-body">
 <div class="global-loading-bar" id="globalLoadingBar"></div>
@@ -33,8 +33,11 @@
 
   <section class="pt-kpis" id="ptKpis" aria-label="Summary"></section>
 
+  <section class="pt-wanted" id="ptWanted" aria-labelledby="ptWantedTitle" hidden></section>
+
   <form class="pt-card pt-form" id="ptForm" hidden autocomplete="off">
-    <h2>Submit an introduction</h2>
+    <h2 id="ptFormTitle">Submit an introduction</h2>
+    <p class="pt-muted pt-form-for" id="ptFormFor" hidden></p>
     <div class="pt-grid">
       <label><span>Company<span class="in-req" aria-hidden="true">*</span></span><input id="ptCompany" required minlength="2" maxlength="200" placeholder="e.g. BNY"></label>
       <label><span>Contact name<span class="in-req" aria-hidden="true">*</span></span><input id="ptContact" required minlength="2" maxlength="200" placeholder="Full name"></label>
@@ -52,6 +55,6 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script type="module" src="js/modules/partner/main.js?v=1.2"></script>
+<script type="module" src="js/modules/partner/main.js?v=1.3"></script>
 </body>
 </html>

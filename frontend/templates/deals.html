@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="css/shell.css?v=3.0">
   <link rel="stylesheet" href="css/people-drawer.css?v=3.0">
   <link rel="stylesheet" href="css/action-items.css?v=3.0">
-  <link rel="stylesheet" href="css/deals.css?v=1.6">
+  <link rel="stylesheet" href="css/deals.css?v=2.2">
   <link rel="stylesheet" href="css/activity-timeline.css?v=1.0">
   <link rel="stylesheet" href="css/elitehost.css?v=1.0">
 </head>
@@ -34,15 +34,29 @@
           <select id="dlAccount" class="dl-select" aria-label="Filter by account"><option value="">All accounts</option></select>
           <select id="dlBusinessLine" class="dl-select" aria-label="Filter by business line"><option value="">All business lines</option></select>
           <label class="dl-toggle"><input type="checkbox" id="dlMine"> My deals</label>
+          <label class="dl-toggle dl-attn-toggle" title="Quiet deals, overdue next steps and close dates in the past"><input type="checkbox" id="dlAttention"> Needs attention <span class="dl-count" id="dlAttentionCount">0</span></label>
           <button type="button" class="dl-btn dl-btn-primary" id="dlNew"><i class="fa-solid fa-plus"></i> New deal</button>
         </div>
       </header>
+
+      <div class="dl-viewbar">
+        <div class="dl-views" role="tablist" aria-label="View">
+          <button type="button" role="tab" class="dl-view-tab" data-view="board" aria-selected="true"><i class="fa-solid fa-table-columns"></i> Board</button>
+          <button type="button" role="tab" class="dl-view-tab" data-view="list" aria-selected="false"><i class="fa-solid fa-list"></i> List</button>
+          <button type="button" role="tab" class="dl-view-tab" data-view="insights" aria-selected="false"><i class="fa-solid fa-chart-column"></i> Insights</button>
+        </div>
+        <div class="dl-saved" id="dlSaved" aria-label="Saved views"></div>
+      </div>
 
       <section class="dl-digest" id="dlDigest" aria-label="Pipeline digest"></section>
 
       <div class="dl-board" id="dlBoard" aria-label="Pipeline stages"></div>
 
       <section class="dl-closed" id="dlClosed" aria-label="Closed deals"></section>
+
+      <section class="dl-list" id="dlList" aria-label="Deals list" hidden></section>
+
+      <section class="dl-insights" id="dlInsights" aria-label="Win/loss and stage velocity" hidden></section>
     </main>
   </div>
 </div>
@@ -89,6 +103,6 @@
 {% include "partials/drawer.html" %}
 
 {% include "partials/copilot-dock.html" %}
-<script type="module" src="js/modules/deals/main.js?v=2.0"></script>
+<script type="module" src="js/modules/deals/main.js?v=2.6"></script>
 </body>
 </html>
