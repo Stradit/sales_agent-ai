@@ -191,7 +191,11 @@ function stageBody(s) {
         <p class="pl-step-sub">Chroma ids are <code>chunk_hash:account_id</code>, so re-running never creates duplicate vectors.</p>`;
     case 'verify':
       return `<div class="pl-metrics">${metric('Chroma vectors', num(m.chroma_vectors))}${metric('ledger entries', num(m.ledger_entries))}${metric('distinct chunks', num(m.distinct_chunks))}${metric('sampled ids found', `${num(m.sample_found)} / ${num(m.sampled)}`)}${metric('wrong dims', num(m.wrong_dims))}</div>
-        ${m.matches_ledger === false ? `<div class="pl-err">Chroma holds ${num(m.chroma_vectors - m.ledger_entries)} more/fewer vectors than the ledger. A full re-embed rebuilds Chroma exactly from the ledger.</div>` : ''}
+        ${m.matches_ledger === false ? `<div class="pl-err">${m.chroma_vectors < m.ledger_entries
+          ? `Chroma is missing ${num(m.ledger_entries - m.chroma_vectors)} of the ${num(m.ledger_entries)} vectors the ledger lists, so the Copilot can't find that content.
+             This happens after a database is copied or restored: the ledger travels with the database, the vectors (on the server's disk) don't, and normal runs skip content the ledger says is already embedded.`
+          : `Chroma holds ${num(m.chroma_vectors - m.ledger_entries)} vectors the ledger doesn't list (left over from older runs).`}
+          Run a <strong>Full re-embed</strong> to rebuild Chroma exactly from the ledger.</div>` : ''}
         ${m.staging_left ? '<div class="pl-err">A staging collection from an interrupted re-embed is still present; the next re-embed replaces it.</div>' : ''}`;
     case 'guardrails': return guardrailBody(m, d);
     case 'eval': return evalBody(m, d);
