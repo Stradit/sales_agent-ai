@@ -362,6 +362,41 @@ def main() -> int:
         check("viewer reads the plan", c.get(f"/api/deals/{fdid}", headers=H["viewer"]), 200)
         check("plan step of another deal", c.patch(f"/api/deals/{fdid}/plan/{step['id'] + 10**9}", headers=H["rep"], json={"status": "done"}), 404)
         check("rep removes step", c.delete(f"/api/deals/{fdid}/plan/{step['id']}", headers=H["rep"]), 200)
+        # Next best action (#12): one suggestion on the deal; the AI draft is stubbed - tests never spend quota
+        from apps.sales_copilot import llm as _llm
+        sent = []
+        real_chat = _llm.chat
+
+        def fake_chat(session, *, feature, user_id, system, user, max_tokens=0):
+            sent.append(system + user)
+            return '{"subject": "Matrix subject", "body": "Matrix body"}', {"model": "stub"}
+        _llm.chat = fake_chat
+        try:
+            if persona:   # a champion + a close date in the past -> "agree a new close date", draftable
+                c.post(f"/api/deals/{fdid}/stakeholders", headers=H["rep"], json={"persona_id": persona, "role": "champion"})
+                c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"expected_close": str(date.today() - timedelta(days=2))})
+            na = c.get(f"/api/deals/{fdid}", headers=H["rep"]).json().get("next_action")
+            if persona:
+                results.append(("past close date -> new close date action", 1 if na and na["code"] == "new_close_date" and na["can_draft"] else 0, 1))
+            results.append(("deal room carries one next action", 1 if na and na.get("code") and na.get("why") else 0, 1))
+            check("viewer drafts the email", c.post(f"/api/deals/{fdid}/next-action/draft", headers=H["viewer"]), 403)
+            check("outsider drafts the email", c.post(f"/api/deals/{fdid}/next-action/draft", headers=H["outsider"]), 404)
+            if na and na.get("can_draft"):
+                dr = check("rep drafts the email", c.post(f"/api/deals/{fdid}/next-action/draft", headers=H["rep"]), 200).json()
+                results.append(("draft parsed from the AI reply", 1 if (dr["subject"], dr["body"]) == ("Matrix subject", "Matrix body") else 0, 1))
+                value = s.execute(text("SELECT value_amount FROM deals WHERE id = :d"), {"d": fdid}).scalar()
+                results.append(("prompt carries no deal value", 1 if sent and (value is None or str(int(value)) not in sent[-1]) else 0, 1))
+            else:
+                check("draft refused without a recipient", c.post(f"/api/deals/{fdid}/next-action/draft", headers=H["rep"]), 400)
+
+            def quota_hit(*a, **k):
+                raise _llm.QuotaExceeded("user_requests", "You've used your AI requests for today.")
+            _llm.chat = quota_hit
+            if na and na.get("can_draft"):
+                check("draft when the AI quota is used up", c.post(f"/api/deals/{fdid}/next-action/draft", headers=H["rep"]), 429)
+        finally:
+            _llm.chat = real_chat
+            c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"expected_close": str(date.today() + timedelta(days=30))})
         # Buyer room (#11): a public, read-only page behind an unguessable token
         results.append(("no buyer room yet", 1 if c.get(f"/api/deals/{fdid}/room", headers=H["rep"]).json()["room"] is None else 0, 1))
         check("viewer creates buyer room", c.post(f"/api/deals/{fdid}/room", headers=H["viewer"], json={}), 403)

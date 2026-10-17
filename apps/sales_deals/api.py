@@ -301,6 +301,8 @@ def _deal_payload(s, deal: Dict[str, Any], full: bool = False) -> Dict[str, Any]
             FROM action_items t LEFT JOIN users u ON u.id = t.assigned_to_id WHERE t.deal_id = :d
             ORDER BY (t.status IN ('done','cancelled')), t.due_date NULLS LAST, t.id"""), {"d": did}).mappings()]
         out["close_plan"] = _plan_rows(s, did)
+        from apps.sales_deals import next_action
+        out["next_action"] = next_action.pick(out)
     return out
 
 
@@ -771,6 +773,44 @@ def add_note(deal_id: int, body: NoteIn, user: User = Depends(auth.get_current_u
     _log(s, deal_id, user.id, "note", body.text.strip())
     s.commit()
     return _deal_payload(s, _get_deal_row(s, deal_id, user), full=True)
+
+
+# ── Next best action (#12): AI draft for the one suggested action ───────────
+
+@router.post("/{deal_id}/next-action/draft")
+def draft_next_action(deal_id: int, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    """Drafts the email for the deal's current next best action (one LLM request, shared team budget)."""
+    import json as _json
+    import re
+    from apps.sales_copilot import llm
+    from apps.sales_deals import next_action
+    d = _deal_payload(s, _get_deal_row(s, deal_id, user), full=True)
+    action = d.get("next_action")
+    if not action or not action.get("can_draft"):
+        raise HTTPException(400, "There's no email to draft for this deal's next action.")
+    prompt = next_action.draft_prompt(d, action, user.full_name or user.email)
+    try:
+        raw, info = llm.chat(s, feature="deals", user_id=user.id, system=prompt["system"], user=prompt["user"], max_tokens=500)
+    except llm.QuotaExceeded as e:
+        raise HTTPException(429, str(e))
+    except llm.LLMError:
+        raise HTTPException(502, "The AI service didn't answer — try again in a minute.")
+    m = re.search(r"\{.*\}", raw, re.S)
+    subject, body = action["title"], raw.strip()
+    if m:
+        try:
+            j = _json.loads(m.group(0))
+            subject = str(j.get("subject") or subject).strip()[:200]
+            body = str(j.get("body") or body).strip()
+        except ValueError:
+            pass
+    email = None
+    pid = (action.get("target") or {}).get("persona_id")
+    if pid:
+        email = next((p.get("email") for p in d["stakeholders"] if p["persona_id"] == pid), None)
+    _log(s, deal_id, user.id, "field", f"Next best action: drafted an email ({action['title']})")
+    s.commit()
+    return {"action": action["code"], "subject": subject, "body": body, "to": email, "model": info.get("model")}
 
 
 # ── Close plan (#10): dated milestones both sides agree on ───────────────────

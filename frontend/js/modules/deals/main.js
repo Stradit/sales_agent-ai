@@ -13,6 +13,7 @@ import { photoAttr } from '../persona-photo.js';
 import { initViews, refreshViews, filtersChanged } from './views.js';
 import { planPane, planTabLabel, planClick, planChange, planSubmit, resetPlanEditing } from './plan.js';
 import { initRoomShare, roomShareBox, roomShareClick, roomShareSubmit } from './room-share.js';
+import { initNba, nbaCard, nbaClick, nbaInput } from './nba.js';
 
 const $ = (id) => document.getElementById(id);
 const OPEN_STAGES = ['intro', 'discovery', 'proposal', 'pilot', 'contract'];
@@ -345,7 +346,7 @@ function renderRoom() {
         const allowed = canStep(d, s);
         return `<button type="button" class="dl-step${i < idx ? ' done' : ''}${s === d.stage ? ' current' : ''}" data-stage-step="${s}" aria-current="${s === d.stage ? 'step' : 'false'}"${allowed ? '' : ' disabled'}${!allowed && s !== d.stage && OPEN_STAGES.includes(d.stage) ? ' title="Move one stage at a time"' : ''}>${esc(lbl)}</button>`;
       }).join('')}</div>
-      ${OPEN_STAGES.includes(d.stage) ? stageBox(d)
+      ${OPEN_STAGES.includes(d.stage) ? nbaCard(d) + stageBox(d)
         : `<div class="dl-warn">${d.stage === 'won' ? '<i class="fa-solid fa-trophy"></i> ' : ''}This deal is <strong>${esc(d.stage_label)}</strong>${lostText(d) ? ` — ${esc(lostText(d))}` : ''}. <button type="button" class="dl-btn" data-stage-step="contract">Reopen</button></div>`}
     </div>
     <div class="dl-room-body">
@@ -502,6 +503,8 @@ async function patchTask(id, body) {
 // Close plan module context (deals/plan.js)
 const PLAN_CTX = { api, esc, dateLabel, showToast, getDeal: () => st.deal, refresh: () => refreshDeal() };
 initRoomShare({ api, esc, dateLabel, showToast, getDeal: () => st.deal, rerender: () => { if (st.deal && st.tab === 'plan') renderRoom(); } });
+initNba({ api, esc, showToast, getDeal: () => st.deal, runGapAction: (code) => runGapAction(code),
+  openTab: (tab) => { st.tab = tab; renderRoom(); }, rerender: () => { if (st.deal) renderRoom(); } });
 
 async function refreshDeal() {
   const fresh = await api(`/${st.deal.id}`);
@@ -623,6 +626,7 @@ function wireRoom() {
       patchDeal({ offerings: next });
       return;
     }
+    if (await nbaClick(e)) return;
     if (st.tab === 'plan' && (await roomShareClick(e) || await planClick(e))) return;
     const tab = t.closest('[data-tab]');
     if (tab) {
@@ -717,6 +721,7 @@ function wireRoom() {
     }
   });
   room.addEventListener('input', (e) => {
+    nbaInput(e);
     if (e.target.id !== 'dlPersonSearch') return;
     clearTimeout(suggestTimer);
     const q = e.target.value.trim();
