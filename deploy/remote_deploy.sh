@@ -37,12 +37,33 @@ docker pull "$IMAGE"
 PREVIOUS="$(docker inspect --format '{{.Config.Image}}' salesai-web 2>/dev/null || true)"
 echo "Previous image: ${PREVIOUS:-none}"
 
-env_value() { grep -E "^$1=" "$APP_DIR/.env" | tail -1 | cut -d= -f2- | tr -d '\r"'"'" || true; }
-migrate() { docker run --rm --env-file "$APP_DIR/.env" -e CRM_BACKGROUND=0 -e COPILOT_AUTOSYNC=0               --entrypoint python "$IMAGE" -m db.migrate "$@"; }
+# .env as the app reads it (python-dotenv / compose are lenient: "KEY = value", quotes, "export ",
+# CRLF). `docker run --env-file` is strict and passes quotes through literally, so the one-off
+# migration container gets a cleaned copy: KEY=value per line, comments and blanks dropped.
+ENV_CLEAN="$APP_DIR/.env.migrate"
+clean_env() {
+  ( umask 077
+    sed -e 's/\r$//' -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$/d' -e 's/^[[:space:]]*export[[:space:]]\+//' \
+        -e 's/^[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=[[:space:]]*/\1=/' \
+        -e 's/^\([A-Za-z_][A-Za-z0-9_]*\)="\(.*\)"[[:space:]]*$/\1=\2/' \
+        -e "s/^\([A-Za-z_][A-Za-z0-9_]*\)='\(.*\)'[[:space:]]*\$/\1=\2/" \
+        "$APP_DIR/.env" | grep -E '^[A-Za-z_][A-Za-z0-9_]*=' > "$ENV_CLEAN" )
+}
+trap 'rm -f "$ENV_CLEAN"' EXIT
+env_value() { grep -E "^$1=" "$ENV_CLEAN" | tail -1 | cut -d= -f2- || true; }
+migrate() { docker run --rm --env-file "$ENV_CLEAN" -e CRM_BACKGROUND=0 -e COPILOT_AUTOSYNC=0 \
+              --entrypoint python "$IMAGE" -m db.migrate "$@"; }
 
 echo "== Database migrations"
-if migrate check; then
+clean_env
+set +e; migrate check; CHECK_RC=$?; set -e
+if (( CHECK_RC == 0 )); then
   echo "Schema is up to date (or not yet under migration control) - nothing to apply."
+elif (( CHECK_RC != 1 )); then
+  # 1 means "migrations pending"; anything else means the check itself couldn't run
+  echo "!! The migration check couldn't run (exit $CHECK_RC) - nothing was changed; the previous version is still serving." >&2
+  echo "   Look at the lines above: usually DATABASE_URL in $APP_DIR/.env (wrong password / host) or the image." >&2
+  exit 1
 else
   RDS_ID="$(env_value RDS_INSTANCE_ID)"
   if [[ "$(env_value SKIP_PRE_MIGRATION_SNAPSHOT)" == "1" ]]; then
