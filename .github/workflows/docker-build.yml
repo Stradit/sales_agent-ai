@@ -58,6 +58,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Throwaway secrets (the app refuses to import without them; nothing here is real)
+        run: |
+          echo "JWT_SECRET_KEY=ci-$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "CONFIG_ENCRYPTION_KEY=ci-$(openssl rand -hex 32)" >> "$GITHUB_ENV"
       - name: Postgres 18 client (pg_dump must match the server)
         run: |
           sudo apt-get install -y -qq postgresql-common >/dev/null

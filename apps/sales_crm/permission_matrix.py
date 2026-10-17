@@ -70,6 +70,7 @@ def main() -> int:
     T0 = s.execute(text("SELECT now()")).scalar()
     created_users: List[int] = []
     created_deals: List[int] = []
+    created_wanted: List[int] = []
     created_connectors: List[int] = []
     results: List[Tuple[str, int, int]] = []
     try:
@@ -363,6 +364,41 @@ def main() -> int:
         if other_p:
             check("warm paths with a contact from another account", c.get("/api/crm/warm-paths", headers=H["rep"],
                   params={"account_id": a_in, "persona_id": other_p}), 400)
+        # Wanted introductions (#8): the team's wishlist, answered from the partner portal
+        check("viewer adds to wishlist", c.post("/api/crm/wanted", headers=H["viewer"],
+              json={"account_id": a_in, "role_wanted": "Matrix CIO"}), 403)
+        check("rep adds wishlist item, other account", c.post("/api/crm/wanted", headers=H["rep"],
+              json={"account_id": a_out, "role_wanted": "Matrix CIO"}), 404)
+        check("wishlist role too short", c.post("/api/crm/wanted", headers=H["rep"],
+              json={"account_id": a_in, "role_wanted": "x"}), 422)
+        w = check("rep adds to wishlist", c.post("/api/crm/wanted", headers=H["rep"],
+                  json={"account_id": a_in, "role_wanted": "Matrix CIO", "note": "Matrix partner-visible note"}), 200).json()
+        created_wanted.append(w["id"])
+        wl = check("viewer reads wishlist", c.get("/api/crm/wanted", headers=H["viewer"]), 200).json()["wanted"]
+        results.append(("viewer sees the open item", 1 if any(x["id"] == w["id"] for x in wl) else 0, 1))
+        check("partner reads internal wishlist", c.get("/api/crm/wanted", headers=H["partner"]), 403)
+        check("outsider closes rep's item", c.patch(f"/api/crm/wanted/{w['id']}", headers=H["outsider"], json={"status": "closed"}), 404)
+        pw = check("partner reads portal wishlist", c.get("/api/partner/wanted", headers=H["partner"]), 200).json()["wanted"]
+        mine_w = [x for x in pw if x["id"] == w["id"]]
+        results.append(("partner sees company, role and note only",
+                        1 if mine_w and set(mine_w[0]) == {"id", "account_name", "role_wanted", "note", "business_line_name",
+                                                           "created_at", "submitted"} and not mine_w[0]["submitted"] else 0, 1))
+        check("rep reads portal wishlist", c.get("/api/partner/wanted", headers=H["rep"]), 403)
+        r = check("partner answers the wishlist", c.post("/api/partner/introductions", headers=H["partner"], json={
+            "account_name": "Typed by partner", "contact_name": "Matrix Wanted Contact",
+            "context": "Answering the wishlist from the matrix", "wanted_id": w["id"]}), 200).json()
+        row = s.execute(text("SELECT wanted_id, account_id FROM introductions WHERE id = :i"), {"i": r["id"]}).fetchone()
+        results.append(("answer linked to item and its account", 1 if tuple(row) == (w["id"], a_in) else 0, 1))
+        pw = c.get("/api/partner/wanted", headers=H["partner"]).json()["wanted"]
+        results.append(("portal marks it answered", 1 if any(x["id"] == w["id"] and x["submitted"] for x in pw) else 0, 1))
+        wl = c.get("/api/crm/wanted", headers=H["rep"]).json()["wanted"]
+        results.append(("team sees one answer", 1 if any(x["id"] == w["id"] and x["claims"] == 1 for x in wl) else 0, 1))
+        check("manager closes rep's item", c.patch(f"/api/crm/wanted/{w['id']}", headers=H["manager"], json={"status": "closed"}), 200)
+        pw = c.get("/api/partner/wanted", headers=H["partner"]).json()["wanted"]
+        results.append(("closed item leaves the portal", 0 if any(x["id"] == w["id"] for x in pw) else 1, 1))
+        check("partner answers a closed item", c.post("/api/partner/introductions", headers=H["partner"], json={
+            "account_name": "x co", "contact_name": "Matrix Late", "context": "Too late for this one", "wanted_id": w["id"]}), 400)
+        check("bad status value", c.patch(f"/api/crm/wanted/{w['id']}", headers=H["rep"], json={"status": "maybe"}), 422)
         check("forecast export", c.get("/api/forecast/export", headers=H["rep"], params={"period": per}), 200)
 
         # ── M3 activities ──
@@ -479,6 +515,8 @@ def main() -> int:
         results.append(("partner grant ignored", int(auth.get_accessible_account_ids(s, partner) == []), 1))
     finally:
         s.rollback()
+        for wid in created_wanted:
+            s.execute(text("DELETE FROM crm_wanted_intros WHERE id = :w"), {"w": wid})
         for cid in created_connectors:
             s.execute(text("DELETE FROM introductions WHERE connector_id = :c"), {"c": cid})
         for d in created_deals:
