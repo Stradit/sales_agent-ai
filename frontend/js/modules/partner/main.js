@@ -16,6 +16,8 @@ const q = preview ? `?connector_id=${encodeURIComponent(preview)}` : '';
 let intros = [];
 let openId = null;
 let editId = null;
+let wanted = [];
+let answering = null;      // the wanted item the open form answers
 
 async function api(path, opts = {}) {
   const sep = path.includes('?') ? '&' : '?';
@@ -91,6 +93,38 @@ function editForm(i) {
   </form>`;
 }
 
+// "Wanted introductions" (#8): the StradIT team's wishlist
+async function loadWanted() {
+  try { wanted = (await api('/wanted')).wanted; } catch { wanted = []; }
+  const box = $('ptWanted');
+  box.hidden = !wanted.length;
+  if (!wanted.length) return;
+  box.innerHTML = `<h2 id="ptWantedTitle"><i class="fa-solid fa-bullseye"></i> Introductions StradIT is looking for</h2>
+    <p class="pt-muted">Know someone here? Answer with one click — it goes straight to the right StradIT team.</p>
+    <div class="pt-wanted-grid">${wanted.map(w => `<article class="pt-card pt-wanted-card">
+      <strong>${esc(w.account_name)}</strong>
+      <span class="pt-wanted-role">${esc(w.role_wanted)}</span>
+      ${w.business_line_name ? `<small>${esc(w.business_line_name)}</small>` : ''}
+      ${w.note ? `<p>${esc(w.note)}</p>` : ''}
+      ${w.submitted ? '<span class="pt-status converted"><i class="fa-solid fa-check"></i> You answered this</span>' : ''}
+      ${preview ? '' : `<button type="button" class="pt-btn${w.submitted ? '' : ' pt-primary'}" data-answer="${w.id}">${w.submitted ? 'Introduce someone else' : 'I can introduce'}</button>`}
+    </article>`).join('')}</div>`;
+}
+
+function openForm(w = null) {
+  answering = w;
+  $('ptForm').reset();
+  $('ptForm').hidden = false;
+  $('ptFormTitle').textContent = w ? `Introduce someone at ${w.account_name}` : 'Submit an introduction';
+  $('ptFormFor').hidden = !w;
+  $('ptFormFor').textContent = w ? `StradIT is looking for: ${w.role_wanted}` : '';
+  $('ptCompany').value = w ? w.account_name : '';
+  $('ptCompany').readOnly = !!w;
+  if (w) $('ptTitle').placeholder = w.role_wanted;
+  $('ptForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  (w ? $('ptContact') : $('ptCompany')).focus();
+}
+
 let detailCache = {};
 function renderList() {
   if (!intros.length) {
@@ -138,16 +172,22 @@ async function saveEdit(form) {
 }
 
 function wire() {
-  $('ptNewBtn').addEventListener('click', () => { $('ptForm').hidden = false; $('ptCompany').focus(); });
-  $('ptCancel').addEventListener('click', () => { $('ptForm').hidden = true; });
+  $('ptNewBtn').addEventListener('click', () => openForm());
+  $('ptCancel').addEventListener('click', () => { $('ptForm').hidden = true; answering = null; });
+  $('ptWanted').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-answer]');
+    if (b) openForm(wanted.find(w => String(w.id) === b.dataset.answer));
+  });
   $('ptForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
       const out = await api('/introductions', { method: 'POST', body: {
         account_name: $('ptCompany').value.trim(), contact_name: $('ptContact').value.trim(),
         contact_title: $('ptTitle').value.trim() || null, contact_email: $('ptEmail').value.trim() || null, context: $('ptContext').value.trim(),
+        wanted_id: answering ? answering.id : null,
       } });
       $('ptForm').reset(); $('ptForm').hidden = true;
+      if (answering) { answering = null; loadWanted(); }
       showToast('Thank you — the StradIT team has been notified');
       openId = out.id; detailCache[out.id] = out;
       load();
@@ -199,6 +239,7 @@ async function init() {
   try { const me = await api('/me'); $('ptOrg').textContent = me.connector.organisation || me.connector.name; } catch (err) { $('ptList').innerHTML = `<div class="pt-card pt-empty"><p>${esc(err.message)}</p></div>`; return; }
   wire();
   load();
+  loadWanted();
   if (!preview) {
     try { const n = await api('/notifications'); $('ptMail').checked = n.email_updates; $('ptMailWrap').hidden = false; } catch { /* optional */ }
   }

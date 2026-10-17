@@ -39,6 +39,10 @@ def ensure_schema() -> None:
     global _schema_ok
     if _schema_ok:
         return
+    from db.migrate import schema_managed
+    if schema_managed():   # schema changes come from migrations (db/migrate.py)
+        _schema_ok = True
+        return
     conn = engine.raw_connection()
     try:
         cur = conn.cursor()
@@ -249,9 +253,10 @@ def install(app) -> None:
     app.include_router(activities.router)
     from apps.sales_crm.capture import api as capture_api, engine as capture_engine
     app.include_router(capture_api.router)
-    from apps.sales_crm import notify, records
+    from apps.sales_crm import notify, records, views
     app.include_router(notify.router)
     app.include_router(records.router)
+    app.include_router(views.router)
     if _background():
         notify.start_background()
     if _background():

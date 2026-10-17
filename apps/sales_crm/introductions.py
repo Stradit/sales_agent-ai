@@ -106,7 +106,7 @@ def default_attribution(s) -> float:
 # ── Loading & views ───────────────────────────────────────────────────────────
 
 BASE_SQL = """
-    SELECT i.*, c.name AS connector_name, c.kind AS connector_kind, c.organisation AS connector_org,
+    SELECT i.*, c.name AS connector_name, c.kind AS connector_kind, c.organisation AS connector_org, c.email AS connector_email,
            c.user_id AS connector_user_id, c.default_attribution_pct AS connector_default_pct,
            a.display_name AS account_name, coalesce(p.full_name, p.display_name) AS persona_name, p.title AS persona_title,
            bl.name AS business_line_name, coalesce(u.full_name, u.email) AS owner_name,
@@ -124,7 +124,7 @@ def internal_view(r: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": r["id"], "status": r["status"], "status_label": STATUS_LABEL[r["status"]],
         "connector": {"id": r["connector_id"], "name": r["connector_name"], "kind": r["connector_kind"],
-                      "organisation": r["connector_org"], "has_login": r["connector_user_id"] is not None,
+                      "organisation": r["connector_org"], "email": r["connector_email"], "has_login": r["connector_user_id"] is not None,
                       "default_attribution_pct": _num(r["connector_default_pct"])},
         "account_id": r["account_id"], "account_name": r["account_name"], "persona_id": r["persona_id"],
         "persona_name": r["persona_name"], "persona_title": r["persona_title"],
@@ -403,6 +403,137 @@ def people_picker(account_id: int, q: str = "", user: User = Depends(permissions
                     ORDER BY p.hierarchy_level NULLS LAST, 2 LIMIT 20""", a=account_id, q=f"%{q.strip()}%")
 
 
+# How much a past introduction says about a connector's reach (#7 warm-path finder)
+_PATH_WEIGHT = {"converted": 40, "meeting_held": 35, "intro_made": 30, "accepted": 25, "requested": 12,
+                "proposed": 8, "stale": 4, "declined": 2}
+
+
+@router.get("/warm-paths")
+def warm_paths(account_id: int, persona_id: Optional[int] = None,
+               user: User = Depends(permissions.require_roles("sales_manager", "user", "viewer")), s=Depends(_session)):
+    """Who can introduce me (#7)? Ranked people with a link to this account (or one contact there):
+    connectors who introduced people there before, connectors who work there, and teammates who
+    have been talking to people there. Uses only data already in the CRM."""
+    _check_refs(s, user, account_id, persona_id, None, None)
+    acct = s.execute(text("SELECT display_name, legal_name, coalesce(aliases, '{}') AS aliases FROM accounts WHERE id = :a"),
+                     {"a": account_id}).mappings().fetchone()
+    paths: Dict[str, Dict[str, Any]] = {}
+
+    def path(key, **kw):
+        return paths.setdefault(key, {"score": 0, "reasons": [], **kw})
+
+    # 1. Connectors with introductions at this account
+    for r in _q(s, """SELECT c.id, c.name, c.kind, c.organisation, i.status, i.persona_id,
+                             coalesce(p.full_name, p.display_name) AS persona_name,
+                             greatest(i.updated_at, i.created_at) AS at
+                      FROM introductions i JOIN connectors c ON c.id = i.connector_id
+                      LEFT JOIN personas p ON p.id = i.persona_id
+                      WHERE i.account_id = :a AND c.active ORDER BY at DESC""", a=account_id):
+        pth = path(f"c{r['id']}", type="connector", id=r["id"], name=r["name"], kind=r["kind"],
+                   organisation=r["organisation"], intros=0, last_at=None)
+        pth["intros"] += 1
+        pth["last_at"] = pth["last_at"] or r["at"]
+        same = persona_id is not None and r["persona_id"] == persona_id
+        pth["score"] += _PATH_WEIGHT.get(r["status"], 5) + (30 if same else 0)
+        what = ("Introduced this contact before" if same
+                else f"Introduced {r['persona_name']}" if r["persona_name"] else "Made an introduction here")
+        pth["reasons"].append(f"{what} ({r['status'].replace('_', ' ')})")
+    # 2. Connectors whose organisation is this account
+    names = [n for n in [acct["display_name"], acct["legal_name"], *(acct["aliases"] or [])] if n and len(n) >= 3]
+    if names:
+        for r in _q(s, """SELECT id, name, kind, organisation FROM connectors
+                          WHERE active AND organisation IS NOT NULL AND lower(organisation) = ANY(:n)""",
+                    n=[n.lower() for n in names]):
+            pth = path(f"c{r['id']}", type="connector", id=r["id"], name=r["name"], kind=r["kind"],
+                       organisation=r["organisation"], intros=0, last_at=None)
+            pth["score"] += 25
+            pth["reasons"].insert(0, f"Works at {r['organisation']}")
+    # 3. Teammates who have been in touch with people there (last 12 months, team-visible activity)
+    for r in _q(s, """SELECT u.id, coalesce(u.full_name, u.email) AS name, count(DISTINCT a.id) AS n, max(a.occurred_at) AS last_at,
+                             bool_or(l2.object_id IS NOT NULL) AS with_contact
+                      FROM activities a
+                      JOIN activity_links l ON l.activity_id = a.id AND l.object_type = 'account' AND l.object_id = :a
+                      LEFT JOIN activity_links l2 ON l2.activity_id = a.id AND l2.object_type = 'persona' AND l2.object_id = :p
+                      JOIN users u ON u.id = a.owner_user_id AND u.is_active
+                      WHERE a.type IN ('email', 'meeting', 'call') AND a.visibility = 'team'
+                        AND a.occurred_at > now() - interval '365 days' AND u.id <> :me
+                      GROUP BY u.id, 2""", a=account_id, p=persona_id, me=user.id):
+        pth = path(f"u{r['id']}", type="teammate", id=r["id"], name=r["name"], intros=0, last_at=r["last_at"])
+        pth["score"] += min(30, 5 * r["n"]) + (30 if r["with_contact"] else 0)
+        pth["reasons"].append(f"{r['n']} email/meeting/call{'s' if r['n'] != 1 else ''} with people there"
+                              + (" — including this contact" if r["with_contact"] else ""))
+    ranked = sorted(paths.values(), key=lambda x: (-x["score"], str(x["name"])))[:8]
+    for x in ranked:
+        x["strength"] = "strong" if x["score"] >= 40 else "good" if x["score"] >= 20 else "weak"
+        x["reasons"] = x["reasons"][:3]
+    return {"account": acct["display_name"], "paths": ranked}
+
+
+# ── Wanted introductions (#8): the team's wishlist; every partner sees the open items ──────────
+
+class WantedIn(BaseModel):
+    account_id: int
+    role_wanted: str = Field(..., min_length=2, max_length=200)
+    note: Optional[str] = Field(None, max_length=1000)
+    business_line_id: Optional[int] = None
+
+
+class WantedPatch(BaseModel):
+    role_wanted: Optional[str] = Field(None, min_length=2, max_length=200)
+    note: Optional[str] = Field(None, max_length=1000)
+    status: Optional[str] = Field(None, pattern="^(open|closed)$")
+
+
+WANTED_SQL = """SELECT w.id, w.account_id, a.display_name AS account_name, w.role_wanted, w.note, w.status,
+                       w.business_line_id, bl.name AS business_line_name, w.created_at, w.closed_at, w.created_by,
+                       coalesce(u.full_name, u.email) AS created_by_name,
+                       (SELECT count(*) FROM introductions i WHERE i.wanted_id = w.id) AS claims,
+                       (SELECT string_agg(DISTINCT c.name, ', ') FROM introductions i JOIN connectors c ON c.id = i.connector_id
+                         WHERE i.wanted_id = w.id) AS claimed_by
+                FROM crm_wanted_intros w JOIN accounts a ON a.id = w.account_id
+                LEFT JOIN business_lines bl ON bl.id = w.business_line_id LEFT JOIN users u ON u.id = w.created_by"""
+
+
+@router.get("/wanted")
+def wanted_list(status: str = "open", user: User = Depends(permissions.require_roles("sales_manager", "user", "viewer")),
+                s=Depends(_session)):
+    sql = WANTED_SQL + " WHERE w.account_id = ANY(:acl)" + ("" if status == "all" else " AND w.status = :st")
+    return {"wanted": _q(s, sql + " ORDER BY w.status DESC, w.created_at DESC", acl=auth.account_scope(s, user), st=status)}
+
+
+@router.post("/wanted")
+def wanted_create(body: WantedIn, user: User = Depends(permissions.require_roles("sales_manager", "user")), s=Depends(_session)):
+    _check_refs(s, user, body.account_id, None, body.business_line_id, None)
+    wid = s.execute(text("""INSERT INTO crm_wanted_intros (account_id, role_wanted, note, business_line_id, created_by)
+                            VALUES (:a, :r, :n, :b, :u) RETURNING id"""),
+                    {"a": body.account_id, "r": body.role_wanted.strip(), "n": (body.note or "").strip() or None,
+                     "b": body.business_line_id, "u": user.id}).scalar()
+    s.commit()
+    return _q(s, WANTED_SQL + " WHERE w.id = :i", i=wid)[0]
+
+
+@router.patch("/wanted/{wanted_id}")
+def wanted_update(wanted_id: int, body: WantedPatch, user: User = Depends(permissions.require_roles("sales_manager", "user")),
+                  s=Depends(_session)):
+    rows = _q(s, WANTED_SQL + " WHERE w.id = :i AND w.account_id = ANY(:acl)", i=wanted_id, acl=auth.account_scope(s, user))
+    if not rows:
+        raise HTTPException(404, "Wanted introduction not found.")
+    if not (permissions.is_admin(user) or user.role == "sales_manager" or rows[0]["created_by"] == user.id):
+        raise HTTPException(403, "Only the person who added it, a manager or an admin can change it.")
+    changes = body.model_dump(exclude_unset=True)
+    if "role_wanted" in changes:
+        s.execute(text("UPDATE crm_wanted_intros SET role_wanted = :v WHERE id = :i"),
+                  {"v": changes["role_wanted"].strip(), "i": wanted_id})
+    if "note" in changes:
+        s.execute(text("UPDATE crm_wanted_intros SET note = :v WHERE id = :i"),
+                  {"v": (changes["note"] or "").strip() or None, "i": wanted_id})
+    if "status" in changes:
+        s.execute(text("""UPDATE crm_wanted_intros SET status = :v, closed_at = CASE WHEN :v = 'closed' THEN now() END
+                          WHERE id = :i"""), {"v": changes["status"], "i": wanted_id})
+    s.commit()
+    return _q(s, WANTED_SQL + " WHERE w.id = :i", i=wanted_id)[0]
+
+
 @router.get("/introductions")
 def list_intros(status: Optional[str] = None, connector_id: Optional[int] = None, account_id: Optional[int] = None,
                 business_line_id: Optional[int] = None, mine: bool = False, q: Optional[str] = None,
@@ -543,7 +674,7 @@ def export_attribution(user: User = Depends(permissions.require_roles("sales_man
 
 @router.post("/introductions/maintenance")
 def run_maintenance(user: User = Depends(auth.require_role("super_admin")), s=Depends(_session)):
-    return {"marked_stale": mark_stale(s)}
+    return {"marked_stale": mark_stale(s), "follow_ups": nudge_requested(s), "housekeeping": housekeeping(s)}
 
 
 @router.get("/introductions/{intro_id}")
@@ -730,6 +861,7 @@ class PartnerIntroIn(BaseModel):
     contact_email: Optional[str] = Field(None, max_length=255)
     contact_title: Optional[str] = Field(None, max_length=200)
     context: str = Field(..., min_length=10, max_length=4000)
+    wanted_id: Optional[int] = None      # answering an item on the "Wanted introductions" list
 
 
 class PartnerIntroPatch(BaseModel):
@@ -748,6 +880,19 @@ class PartnerNoteIn(BaseModel):
 def partner_me(connector_id: Optional[int] = None, user: User = Depends(auth.get_current_user), s=Depends(_session)):
     c = _connector_for(s, user, connector_id)
     return {"connector": c, "user": {"name": user.full_name or user.email}}
+
+
+@partner_router.get("/wanted")
+def partner_wanted(connector_id: Optional[int] = None, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    """The open wishlist, as partners see it: company, the role wanted and the team's note — nothing else."""
+    c = _connector_for(s, user, connector_id)
+    rows = _q(s, """SELECT w.id, a.display_name AS account_name, w.role_wanted, w.note, bl.name AS business_line_name,
+                           w.created_at,
+                           EXISTS (SELECT 1 FROM introductions i WHERE i.wanted_id = w.id AND i.connector_id = :c) AS submitted
+                    FROM crm_wanted_intros w JOIN accounts a ON a.id = w.account_id
+                    LEFT JOIN business_lines bl ON bl.id = w.business_line_id
+                    WHERE w.status = 'open' ORDER BY w.created_at DESC LIMIT 100""", c=c["id"])
+    return {"wanted": rows}
 
 
 @partner_router.get("/introductions")
@@ -776,7 +921,13 @@ def partner_submit(body: PartnerIntroIn, connector_id: Optional[int] = None, use
     learns what is in StradIT's database — they only see what they submitted."""
     c = _connector_for(s, user, connector_id)
     name = body.account_name.strip()
-    acct = s.execute(text("""SELECT id FROM accounts WHERE lower(display_name) = lower(:n) OR lower(legal_name) = lower(:n)
+    wanted = None
+    if body.wanted_id is not None:
+        wanted = s.execute(text("SELECT id, account_id, role_wanted FROM crm_wanted_intros WHERE id = :w AND status = 'open'"),
+                           {"w": body.wanted_id}).mappings().fetchone()
+        if not wanted:
+            raise HTTPException(400, "That wanted introduction is no longer open.")
+    acct = wanted["account_id"] if wanted else s.execute(text("""SELECT id FROM accounts WHERE lower(display_name) = lower(:n) OR lower(legal_name) = lower(:n)
                              OR lower(:n) = ANY(SELECT lower(x) FROM unnest(coalesce(aliases, '{}')) x) LIMIT 1"""),
                      {"n": name}).scalar()
     persona = None
@@ -789,15 +940,17 @@ def partner_submit(body: PartnerIntroIn, connector_id: Optional[int] = None, use
         raise HTTPException(409, "You already have an open introduction for this contact.")
     iid = s.execute(text("""
         INSERT INTO introductions (connector_id, account_id, persona_id, submitted_account_name, submitted_contact_name,
-                                   submitted_contact_email, submitted_contact_title, status, context, created_by)
-        VALUES (:c, :a, :p, :an, :cn, :ce, :ct, 'proposed', :ctx, :u) RETURNING id"""),
+                                   submitted_contact_email, submitted_contact_title, status, context, created_by, wanted_id)
+        VALUES (:c, :a, :p, :an, :cn, :ce, :ct, 'proposed', :ctx, :u, :w) RETURNING id"""),
         {"c": c["id"], "a": acct, "p": persona, "an": name, "cn": body.contact_name.strip(),
          "ce": (body.contact_email or "").strip() or None, "ct": body.contact_title, "ctx": body.context.strip(),
-         "u": user.id}).scalar()
-    _event(s, iid, user.id, "created", to_status="proposed", note="Submitted by partner")
+         "u": user.id, "w": wanted["id"] if wanted else None}).scalar()
+    _event(s, iid, user.id, "created", to_status="proposed",
+           note="Submitted by partner" + (f" for the wanted introduction: {wanted['role_wanted']}" if wanted else ""))
     from apps.sales_crm import notify
     _notify_internal(s, iid, notify.internal_triagers(s, acct), "triage_needed",
-                     f"New partner introduction: {body.contact_name.strip()} at {name}" + ("" if acct else " (needs triage)"),
+                     f"New partner introduction: {body.contact_name.strip()} at {name}" + ("" if acct else " (needs triage)")
+                     + (" — answers your wishlist" if wanted else ""),
                      [f"{c['name']} submitted an introduction to {body.contact_name.strip()} at {name}.",
                       "It isn't linked to an account yet — open it and pick the account." if not acct else
                       "It was matched to the account automatically; assign an owner and move it along.",
@@ -890,6 +1043,38 @@ def partner_note(intro_id: int, body: PartnerNoteIn, connector_id: Optional[int]
 # ── Stale job ─────────────────────────────────────────────────────────────────
 
 
+# Reminders while an intro waits on the connector: well before it goes stale (STALE_DAYS)
+FOLLOWUP_DAYS = (5, 10)
+
+
+def nudge_requested(s) -> int:
+    """Email the owner when an introduction has been 'requested' for 5 and again for 10 days.
+    Each reminder is sent once (dedupe key includes the request date, so a new request starts over)."""
+    rows = s.execute(text("""
+        SELECT i.id, i.owner_user_id, floor(extract(epoch FROM now() - i.requested_at) / 86400)::int AS age,
+               i.requested_at::date AS asked
+        FROM introductions i
+        WHERE i.status = 'requested' AND i.owner_user_id IS NOT NULL AND i.requested_at IS NOT NULL
+          AND i.requested_at <= now() - make_interval(days => :first)"""), {"first": FOLLOWUP_DAYS[0]}).fetchall()
+    sent = 0
+    for iid, owner, age, asked in rows:
+        step = max(d for d in FOLLOWUP_DAYS if age >= d)          # 5 or 10: only the latest reminder due
+        b = _intro_brief(s, iid)
+        if not b:
+            continue
+        who = b["contact"] or "the contact"
+        _notify_internal(s, iid, [owner], "intro_followup",
+                         f"Follow up with {b['connector_name']}: introduction to {who}",
+                         [f"{b['connector_name']} was asked {age} days ago to introduce you to {who} at {b['account']}, "
+                          "and it's still waiting.",
+                          f"Send {b['connector_name']} a short nudge, or mark the introduction declined or stale "
+                          f"if it isn't happening. It goes stale automatically after {STALE_DAYS} days without movement."],
+                         key=f"followup:{iid}:{asked.isoformat()}:{step}")
+        sent += 1
+    s.commit()
+    return sent
+
+
 def mark_stale(s) -> int:
     rows = s.execute(text(f"""
         WITH old AS (SELECT id, status FROM introductions
@@ -910,6 +1095,20 @@ def mark_stale(s) -> int:
     return len(rows)
 
 
+def housekeeping(s) -> dict:
+    """Data clean-up that used to run as a side effect of every app start (schema.sql, search
+    install). Now it runs here, on the 6-hourly job, and logs what it removed."""
+    from apps.sales_search.api import LOG_RETENTION_DAYS
+    # Activities whose every linked record was deleted (the links cascade; the activity doesn't).
+    # The 1-hour margin keeps it clear of an activity being created right now.
+    orphans = s.execute(text("""DELETE FROM activities a WHERE a.created_at < now() - interval '1 hour'
+                                  AND NOT EXISTS (SELECT 1 FROM activity_links l WHERE l.activity_id = a.id)""")).rowcount
+    old_searches = s.execute(text("DELETE FROM search_log WHERE created_at < now() - make_interval(days => :d)"),
+                             {"d": LOG_RETENTION_DAYS}).rowcount
+    s.commit()
+    return {"orphan_activities": orphans, "old_search_log": old_searches}
+
+
 def _stale_loop() -> None:
     while True:
         try:
@@ -921,6 +1120,12 @@ def _stale_loop() -> None:
                         n = mark_stale(s)
                         if n:
                             print(f"[crm] marked {n} introduction(s) stale")
+                        f = nudge_requested(s)
+                        if f:
+                            print(f"[crm] queued {f} introduction follow-up reminder(s)")
+                        h = housekeeping(s)
+                        if any(h.values()):
+                            print(f"[crm] housekeeping removed {h}")
                     finally:
                         s.close()
                     conn.execute(text("SELECT pg_advisory_unlock(84211)"))

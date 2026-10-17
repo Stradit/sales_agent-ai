@@ -619,6 +619,10 @@ def ensure_schema(force: bool = False) -> None:
     global _schema_checked
     if _schema_checked and not force:
         return
+    from db.migrate import schema_managed
+    if schema_managed():   # schema changes come from migrations (db/migrate.py)
+        _schema_checked = True
+        return
     from pathlib import Path
     sql = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
     fingerprint = hashlib.sha256(sql.encode("utf-8")).hexdigest()

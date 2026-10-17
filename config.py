@@ -4,7 +4,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env", override=True)
+# Real environment variables win; .env only fills in what is not set. (It used to override them, which
+# meant a migration run with DATABASE_URL=<staging/prod> could silently hit the database in .env.)
+load_dotenv(BASE_DIR / ".env", override=False)
 
 
 # PostgreSQL Database Configuration

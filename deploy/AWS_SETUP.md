@@ -41,7 +41,7 @@ RDS → **Create database** → Standard create:
 - Additional configuration: Initial database name **`sales_ai`** · Backup retention **7 days** · Encryption **on** · **Deletion protection on**
 - Create. When it's *Available*, copy the **Endpoint** → `RDS_ENDPOINT`.
 
-`pg_trgm` (the only extension the app needs) is allowed on RDS; the app creates it on first start.
+`pg_trgm` (the only extension the app needs) is allowed on RDS; the first migration (`python -m db.migrate upgrade`) creates it.
 
 ## Step 3 — ECR repository
 ECR → Private registry → **Create repository**: name **`sales-ai`**, tag immutability **Immutable**, scan on push **on**.
@@ -54,6 +54,19 @@ IAM → Roles → **Create role** → Trusted entity **AWS service: EC2** → at
 - `AmazonSSMManagedInstanceCore` (gives you a browser shell via Session Manager as a backup to SSH)
 
 Name it **`salesai-ec2-role`**.
+
+Then add an **inline policy** `salesai-pre-migration-snapshot`, so `remote_deploy.sh` can snapshot RDS
+before it applies database migrations (docs/DB_DEPLOYMENT_PLAN.md). Snapshot-only: it can't
+delete or modify the database.
+```json
+{ "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow",
+      "Action": ["rds:CreateDBSnapshot", "rds:AddTagsToResource"],
+      "Resource": ["arn:aws:rds:us-east-1:<AWS_ACCOUNT_ID>:db:salesai-db",
+                   "arn:aws:rds:us-east-1:<AWS_ACCOUNT_ID>:snapshot:pre-migrate-*"] },
+    { "Effect": "Allow", "Action": "rds:DescribeDBSnapshots", "Resource": "*" } ] }
+```
 
 ## Step 5 — EC2 server
 EC2 → **Launch instance**:

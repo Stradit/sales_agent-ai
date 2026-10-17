@@ -48,7 +48,8 @@ ROLES = [
             "Work warm introductions from partners through to a meeting",
             "Complete the tasks assigned to them",
         ],
-        "limits": ["Can delete only deals they own", "Can't set targets"],
+        "limits": ["Sees only the deals they own (pipeline, account pages, digest, insights)",
+                   "Can delete only deals they own", "Can't set targets"],
     },
     {
         "key": "viewer", "icon": "fa-eye",
@@ -85,6 +86,10 @@ CAPABILITIES = [
          "access": {"super_admin": "yes", "sales_manager": "no", "user": "no", "viewer": "no", "partner": "no"}},
     ]},
     {"group": "Sales work", "items": [
+        {"key": "see_deals", "label": "See deals in the pipeline, account pages, digest and insights",
+         "access": {"super_admin": "yes", "sales_manager": "team", "user": "own", "viewer": "read", "partner": "no"},
+         "notes": {"sales_manager": "Every deal on their team's accounts", "user": "Only deals they own",
+                   "viewer": "Every deal on the accounts they can see, read-only"}},
         {"key": "edit_records", "label": "Create and edit deals, contacts, activities and tasks",
          "access": {"super_admin": "yes", "sales_manager": "team", "user": "scoped", "viewer": "no", "partner": "no"}},
         {"key": "delete_deals", "label": "Delete deals",

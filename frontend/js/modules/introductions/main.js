@@ -189,10 +189,66 @@ function stageBox(i) {
     <ul class="in-checklist">${missing.length
       ? missing.map(m => `<li><i class="fa-solid fa-circle-exclamation"></i> ${esc(m.charAt(0).toUpperCase() + m.slice(1))}</li>`).join('')
       : `<li><i class="fa-solid fa-circle-check"></i> Ready for ${esc(label(next))}</li>`}</ul>
+    ${i.status === 'proposed' ? askBox(i) : ''}
     <div class="in-stage-actions" id="inActions">
       <button type="button" class="dl-btn dl-btn-primary" data-advance${missing.length ? ' disabled' : ''}>Move to ${esc(label(next))} <i class="fa-solid fa-arrow-right"></i></button>
       <button type="button" class="dl-btn dl-btn-danger" data-decline><i class="fa-solid fa-circle-xmark"></i> Decline</button>
       <button type="button" class="dl-btn" data-stale><i class="fa-solid fa-hourglass-end"></i> Mark stale</button></div></div>`;
+}
+
+// ── The ask (Proposed → Requested): a double opt-in message for the connector ──
+// The connector checks with the contact before introducing, so nobody gets an unwanted intro.
+const firstName = (s) => String(s || '').trim().split(/\s+/)[0] || '';
+
+function askText(i) {
+  const me = (st.user && (st.user.full_name || st.user.email)) || 'me';
+  const contact = i.persona_name || (i.submitted && i.submitted.contact_name) || 'the right person';
+  const title = i.persona_title || (i.submitted && i.submitted.contact_title) || '';
+  const account = accountOf(i);
+  const about = i.business_line_name ? ` about ${i.business_line_name}` : '';
+  const why = (i.context || '').trim();
+  return {
+    subject: `Introduction to ${contact} at ${account}?`,
+    body: [
+      `Hi ${firstName(i.connector.name)},`,
+      '',
+      `Would you be open to introducing me to ${contact}${title ? ` (${title})` : ''} at ${account}?`,
+      ...(why ? ['', `Why: ${why.length > 400 ? `${why.slice(0, 400)}…` : why}`] : []),
+      '',
+      `If it helps, here's a short note you could forward to ${firstName(contact) || 'them'} — and only connect us if they're happy to:`,
+      '',
+      '---',
+      `Hi ${firstName(contact) || 'there'},`,
+      `${me} at StradIT would like a short conversation with you${about}. Would you be open to an introduction? If so, I'll connect you both.`,
+      '---',
+      '',
+      'Thanks,',
+      me,
+    ].join('\n'),
+  };
+}
+
+function askBox(i) {
+  if (readOnly()) return '';
+  if (!st.askOpen) {
+    return `<button type="button" class="in-link in-ask-toggle" data-ask-toggle><i class="fa-regular fa-envelope"></i> Write the ask to ${esc(i.connector.name)}</button>`;
+  }
+  const a = askText(i);
+  const mail = i.connector.email
+    ? `mailto:${encodeURIComponent(i.connector.email)}?subject=${encodeURIComponent(a.subject)}&body=${encodeURIComponent(a.body)}` : '';
+  return `<div class="in-ask-box">
+    <p class="in-muted">A double opt-in ask: ${esc(i.connector.name)} checks with the contact first, so nobody gets an unwanted introduction. Edit freely.</p>
+    <label class="in-ask-subject">Subject<input id="inAskSubject" value="${esc(a.subject)}"></label>
+    <textarea id="inAskText" rows="12" aria-label="Message to ${esc(i.connector.name)}">${esc(a.body)}</textarea>
+    <div class="in-stage-actions">
+      <button type="button" class="dl-btn" data-ask-copy><i class="fa-regular fa-copy"></i> Copy</button>
+      ${mail ? `<a class="dl-btn" data-ask-mail href="${esc(mail)}"><i class="fa-regular fa-envelope"></i> Open in email</a>`
+        : `<span class="in-muted">No email saved for ${esc(i.connector.name)} — copy it into your own email or chat.</span>`}
+      <button type="button" class="dl-btn dl-btn-primary" data-ask-sent>I've sent it — mark Requested <i class="fa-solid fa-arrow-right"></i></button>
+      <button type="button" class="in-link" data-ask-toggle>Close</button>
+    </div>
+    <p class="in-muted in-ask-note"><i class="fa-regular fa-bell"></i> You'll get a reminder if it's still waiting after 5 and 10 days.</p>
+  </div>`;
 }
 
 function eventLine(i, e, ro) {
@@ -293,6 +349,7 @@ function renderRoom() {
 async function openIntro(id) {
   try {
     st.intro = await api(`/api/crm/introductions/${id}`);
+    st.askOpen = false;
     $('inOverlay').hidden = false;
     $('inRoom').hidden = false;
     renderRoom();
@@ -422,6 +479,24 @@ function wireRoom() {
     const step = t.closest('[data-status-step]');
     if (step && !step.disabled) { moveTo(step.dataset.statusStep); return; }
     if (t.closest('[data-advance]')) { moveTo(st.intro.next_status); return; }
+    // The ask to the connector (Proposed stage)
+    if (t.closest('[data-ask-toggle]')) {
+      st.askOpen = !st.askOpen; renderRoom();
+      if (st.askOpen && $('inAskText')) $('inAskText').focus();
+      return;
+    }
+    if (t.closest('[data-ask-copy]')) {
+      const txt = `${$('inAskSubject').value}\n\n${$('inAskText').value}`;
+      try { await navigator.clipboard.writeText(txt); showToast('Copied — paste it into your email or chat'); }
+      catch { $('inAskText').select(); showToast('Press Ctrl+C to copy'); }
+      return;
+    }
+    const mail = t.closest('[data-ask-mail]');
+    if (mail) {   // use what's in the box now, edits included
+      mail.href = `mailto:${encodeURIComponent(st.intro.connector.email)}?subject=${encodeURIComponent($('inAskSubject').value)}&body=${encodeURIComponent($('inAskText').value)}`;
+      return;     // let the link open the email app
+    }
+    if (t.closest('[data-ask-sent]')) { st.askOpen = false; moveTo('requested'); return; }
     if (t.closest('[data-show-convert]')) { moveTo('converted'); return; }
     if (t.closest('[data-cancel-convert]')) { $('inConvert').hidden = true; return; }
     if (t.closest('[data-do-convert]')) { doConvert(); return; }
@@ -519,7 +594,36 @@ function validateNew() {
   return !first;
 }
 
-async function openNew() {
+// ── "Who can introduce me?" (#7) — shown in the New introduction form once an account is chosen
+let pathsSeq = 0;
+async function loadPaths() {
+  const box = $('inNewPaths');
+  const acc = $('inNewAccount').value;
+  if (!acc) { box.hidden = true; box.innerHTML = ''; return; }
+  const seq = ++pathsSeq;
+  const persona = $('inNewContact').value || st.newPersonaHint || '';
+  box.hidden = false;
+  box.innerHTML = '<p class="in-muted">Looking for warm paths…</p>';
+  try {
+    const q = new URLSearchParams({ account_id: acc });
+    if (persona) q.set('persona_id', persona);
+    const data = await api(`/api/crm/warm-paths?${q}`);
+    if (seq !== pathsSeq) return;      // a newer account/contact was picked meanwhile
+    const known = new Set(st.connectors.filter(c => c.active).map(c => String(c.id)));
+    box.innerHTML = `<div class="in-paths-head"><i class="fa-solid fa-route"></i> Who can introduce you at ${esc(data.account)}?</div>
+      ${data.paths.length ? `<ul class="in-paths-list">${data.paths.map(x => `<li class="in-path ${x.strength}">
+        <span class="in-path-strength" title="${esc(x.strength)} path">${x.strength === 'strong' ? 'Strong' : x.strength === 'good' ? 'Good' : 'Weak'}</span>
+        <div class="in-path-main"><strong>${esc(x.name)}</strong> <span class="in-muted">${x.type === 'teammate' ? '· teammate' : `· ${esc(x.kind || 'connector')}${x.organisation ? `, ${esc(x.organisation)}` : ''}`}</span>
+          <div class="in-path-why">${x.reasons.map(esc).join(' · ')}</div></div>
+        ${x.type === 'connector' && known.has(String(x.id))
+          ? `<button type="button" class="dl-btn" data-use-connector="${x.id}">Use</button>`
+          : x.type === 'teammate' ? '<span class="in-muted in-path-ask">Ask them first</span>' : ''}
+      </li>`).join('')}</ul>`
+      : '<p class="in-muted">No warm paths yet — nobody in the CRM has introduced or met people there. Pick the connector you know.</p>'}`;
+  } catch { if (seq === pathsSeq) box.hidden = true; }
+}
+
+async function openNew(preset = {}) {
   try { await ensureAccounts(); } catch (err) { showToast(err.message); return; }
   $('inNewForm').reset();
   Object.keys(NEW_ERR).forEach(id => setNewError(id, ''));
@@ -536,6 +640,12 @@ async function openNew() {
   $('inNewContact').value = '';
   $('inNewContactSearch').disabled = true;
   $('inNewContactSearch').placeholder = 'Choose an account first';
+  st.newPersonaHint = preset.persona_id || '';
+  $('inNewPaths').hidden = true;
+  if (preset.account_id && st.accounts.some(a => String(a.id) === String(preset.account_id))) {
+    $('inNewAccount').value = String(preset.account_id);
+    $('inNewAccount').dispatchEvent(new Event('change'));
+  }
   syncContactRequired();
   st.newDirty = false;
   $('inModal').hidden = false;
@@ -545,7 +655,7 @@ async function openNew() {
 function closeNew() { $('inModal').hidden = true; st.newDirty = false; }
 
 function wireNew() {
-  $('inNew').addEventListener('click', openNew);
+  $('inNew').addEventListener('click', () => openNew());
   // Only the Close / Cancel buttons dismiss the form — a stray click outside must not lose the input.
   $('inModal').addEventListener('click', (e) => { if (e.target.closest('[data-close-modal]')) closeNew(); });
   $('inNewForm').addEventListener('input', (e) => {
@@ -561,7 +671,7 @@ function wireNew() {
   $('inNewConnectorToggle').addEventListener('click', () => { $('inNewConnectorBox').hidden = !$('inNewConnectorBox').hidden; if (!$('inNewConnectorBox').hidden) $('inNcName').focus(); });
   attachSuggest($('inNewContactSearch'), $('inNewContactList'), {
     search: (q) => ($('inNewAccount').value ? peopleAt($('inNewAccount').value)(q) : Promise.resolve([])),
-    onPick: (p) => { $('inNewContact').value = p.id; $('inNewContactSearch').value = p.title ? `${p.name} — ${p.title}` : p.name; setNewError('inNewContactSearch', ''); },
+    onPick: (p) => { $('inNewContact').value = p.id; $('inNewContactSearch').value = p.title ? `${p.name} — ${p.title}` : p.name; setNewError('inNewContactSearch', ''); loadPaths(); },
   });
   $('inNewContactSearch').addEventListener('input', () => { $('inNewContact').value = ''; });
   $('inNewAccount').addEventListener('change', () => {
@@ -569,6 +679,17 @@ function wireNew() {
     $('inNewContactSearch').value = '';
     $('inNewContactSearch').disabled = !$('inNewAccount').value;
     $('inNewContactSearch').placeholder = $('inNewAccount').value ? 'Type to search people at this account…' : 'Choose an account first';
+    loadPaths();
+  });
+  $('inNewPaths').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-use-connector]');
+    if (!b) return;
+    $('inNewConnector').value = b.dataset.useConnector;
+    $('inNewConnectorBox').hidden = true;
+    setNewError('inNewConnector', '');
+    st.newDirty = true;
+    showToast(`Connector set to ${b.closest('li').querySelector('strong').textContent}`);
+    $('inNewConnector').focus();
   });
   $('inNewForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -626,6 +747,75 @@ async function renderAttribution() {
   } catch (err) { box.innerHTML = `<p class="in-muted">${esc(err.message)}</p>`; }
 }
 
+// ── Wanted introductions (#8): the team's wishlist, shown to every partner in their portal ──
+async function loadWanted() {
+  const box = $('inViewWanted');
+  try {
+    await ensureAccounts();
+    st.wanted = (await api(`/api/crm/wanted?status=${st.wantedAll ? 'all' : 'open'}`)).wanted;
+    renderWanted();
+  } catch (err) { box.innerHTML = `<p class="dl-warn">${esc(err.message)}</p>`; }
+}
+
+function renderWanted() {
+  const ro = readOnly();
+  const items = st.wanted || [];
+  const bls = (st.meta.business_lines || []).filter(b => b.active);
+  $('inViewWanted').innerHTML = `
+    <p class="in-muted in-wanted-intro"><i class="fa-solid fa-circle-info"></i> Tell partners which introductions you want. Every
+      partner sees the open items in their portal — the company, the role and your note, nothing else — and can answer with one click.</p>
+    ${ro ? '' : `<form class="in-wanted-form" id="inWantedForm" autocomplete="off">
+      <label>Account<select id="inWAccount" required><option value="">Choose an account…</option>${st.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label>
+      <label>Who you want to meet<input id="inWRole" required minlength="2" maxlength="200" placeholder="e.g. CIO or Head of Data"></label>
+      <label>Business line<select id="inWBl"><option value="">— Any —</option>${bls.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></label>
+      <label class="in-wanted-note">Note for partners <span class="in-muted">(partners see this)</span><input id="inWNote" maxlength="1000" placeholder="Why now — e.g. they're modernising their data platform"></label>
+      <button type="submit" class="dl-btn dl-btn-primary"><i class="fa-solid fa-plus"></i> Add to wishlist</button>
+    </form>`}
+    <div class="in-wanted-bar"><label class="dl-toggle"><input type="checkbox" id="inWAll"${st.wantedAll ? ' checked' : ''}> Show closed too</label>
+      <span class="in-muted">${items.filter(w => w.status === 'open').length} open</span></div>
+    ${items.length ? `<div class="dl-table-wrap"><table class="dl-table in-wanted-table">
+      <thead><tr><th scope="col">Account</th><th scope="col">Wanted</th><th scope="col">Note for partners</th>
+        <th scope="col">Answers</th><th scope="col">Added</th><th scope="col" aria-label="Actions"></th></tr></thead>
+      <tbody>${items.map(w => `<tr class="${w.status === 'closed' ? 'in-wanted-closed' : ''}">
+        <td><strong>${esc(w.account_name)}</strong>${w.business_line_name ? `<div class="dl-list-sub">${esc(w.business_line_name)}</div>` : ''}</td>
+        <td>${esc(w.role_wanted)}</td>
+        <td>${w.note ? esc(w.note) : '<span class="in-muted">—</span>'}</td>
+        <td>${w.claims ? `<strong>${w.claims}</strong> <span class="dl-list-sub">${esc(w.claimed_by || '')}</span>` : '<span class="in-muted">None yet</span>'}</td>
+        <td>${esc(w.created_by_name || '')}<div class="dl-list-sub">${esc(new Date(w.created_at).toLocaleDateString())}</div></td>
+        <td>${ro ? '' : `<button type="button" class="dl-btn" data-wanted-status="${w.id}" data-to="${w.status === 'open' ? 'closed' : 'open'}">${w.status === 'open' ? 'Close' : 'Reopen'}</button>`}</td>
+      </tr>`).join('')}</tbody></table></div>`
+      : '<p class="in-muted">Nothing on the wishlist yet.</p>'}`;
+}
+
+function wireWanted() {
+  const box = $('inViewWanted');
+  box.addEventListener('submit', async (e) => {
+    if (e.target.id !== 'inWantedForm') return;
+    e.preventDefault();
+    try {
+      await api('/api/crm/wanted', { method: 'POST', body: {
+        account_id: Number($('inWAccount').value), role_wanted: $('inWRole').value.trim(),
+        note: $('inWNote').value.trim() || null, business_line_id: Number($('inWBl').value) || null,
+      } });
+      showToast('Added — partners can see it now');
+      await loadWanted();
+      $('inWAccount').focus();
+    } catch (err) { showToast(err.message); }
+  });
+  box.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-wanted-status]');
+    if (!b) return;
+    try {
+      await api(`/api/crm/wanted/${b.dataset.wantedStatus}`, { method: 'PATCH', body: { status: b.dataset.to } });
+      showToast(b.dataset.to === 'closed' ? 'Closed — partners no longer see it' : 'Reopened');
+      loadWanted();
+    } catch (err) { showToast(err.message); }
+  });
+  box.addEventListener('change', (e) => {
+    if (e.target.id === 'inWAll') { st.wantedAll = e.target.checked; loadWanted(); }
+  });
+}
+
 function renderConnectors() {
   const box = $('inViewConnectors');
   const ro = readOnly();
@@ -665,9 +855,12 @@ function wireViews() {
     $('inViewBoard').hidden = st.view !== 'board';
     $('inViewAttribution').hidden = st.view !== 'attribution';
     $('inViewConnectors').hidden = st.view !== 'connectors';
+    $('inViewWanted').hidden = st.view !== 'wanted';
     if (st.view === 'attribution') renderAttribution();
     if (st.view === 'connectors') renderConnectors();
+    if (st.view === 'wanted') loadWanted();
   }));
+  wireWanted();
   $('inViewAttribution').addEventListener('click', (e) => {
     if (e.target.closest('[data-export-attribution]')) {
       downloadFile('/api/crm/introductions/attribution/export', 'introduction-attribution.xlsx').catch(err => showToast(err.message));
@@ -819,11 +1012,12 @@ async function init() {
   wireViews();
   await loadIntros();
   if (p.get('intro')) openIntro(Number(p.get('intro')));
-  if (p.get('new') === '1') openNew();
+  if (p.get('new') === '1') openNew({ account_id: p.get('account_id'), persona_id: p.get('persona_id') });
 }
 
 initThemeToggle();
 initTopbarAuth().then((user) => {
   if (!user) { document.body.style.display = 'none'; location.replace(`/login?next=${encodeURIComponent(location.pathname + location.search)}`); return; }
+  st.user = user;      // signs the ask to the connector
   init();
 });

@@ -140,6 +140,9 @@
   font-weight: 500;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.show.has-action { pointer-events: auto; display: flex; align-items: center; gap: 12px; }
+.toast-action { border: 1px solid rgba(255,255,255,.4); background: transparent; color: #fff; font: inherit; font-weight: 700; padding: 3px 10px; cursor: pointer; }
+.toast-action:hover, .toast-action:focus-visible { background: rgba(255,255,255,.12); outline: none; }
 
 /* ── Contact Drawer ──────────────────────────────────────────── */
 .drawer-backdrop {

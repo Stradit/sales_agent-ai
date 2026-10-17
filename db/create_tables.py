@@ -54,7 +54,12 @@ def seed_default_admin_if_missing():
 
 
 def ensure_schema_compatibility():
-    """Ensures all tables, JSONB, array, and expanded columns exist in PostgreSQL."""
+    """Ensures all tables, JSONB, array, and expanded columns exist in PostgreSQL.
+    Legacy path: once the database is under migration control this only seeds the first admin."""
+    from db.migrate import schema_managed
+    if schema_managed():   # schema changes come from migrations (db/migrate.py)
+        seed_default_admin_if_missing()
+        return
     try:
         Base.metadata.create_all(bind=engine)
     except Exception as e:
