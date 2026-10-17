@@ -336,6 +336,29 @@ def main() -> int:
         dg = c.get("/api/deals/pipeline/digest", headers=H["rep"], params={"days": 90}).json()
         dg_ids = {x["id"] for k in ("at_risk", "stuck", "overdue", "closing_soon", "closed") for x in dg[k]} | {m["deal_id"] for m in dg["moves"]}
         results.append(("rep's digest has no colleague's deals", 0 if mdid in dg_ids else 1, 1))
+        # Close plan (#10): dated milestones on a deal
+        pl = check("rep adds standard close plan", c.post(f"/api/deals/{fdid}/plan/template", headers=H["rep"]), 200).json()["close_plan"]
+        results.append(("standard plan has 7 dated steps", 1 if len(pl) == 7 and all(x["due_date"] for x in pl) else 0, 1))
+        check("standard plan twice", c.post(f"/api/deals/{fdid}/plan/template", headers=H["rep"]), 400)
+        check("viewer adds plan step", c.post(f"/api/deals/{fdid}/plan", headers=H["viewer"], json={"title": "x"}), 403)
+        check("outsider adds plan step", c.post(f"/api/deals/{fdid}/plan", headers=H["outsider"], json={"title": "x"}), 404)
+        check("plan step with bad side", c.post(f"/api/deals/{fdid}/plan", headers=H["rep"], json={"title": "x", "side": "them"}), 400)
+        pl = check("rep adds overdue step", c.post(f"/api/deals/{fdid}/plan", headers=H["rep"], json={
+            "title": "Matrix overdue step", "side": "customer", "owner_name": "Their CISO",
+            "due_date": str(date.today() - timedelta(days=3))}), 200).json()["close_plan"]
+        step = [x for x in pl if x["title"] == "Matrix overdue step"][0]
+        results.append(("new step is flagged overdue", 1 if step["overdue"] else 0, 1))
+        dd = c.get(f"/api/deals/{fdid}", headers=H["rep"]).json()
+        results.append(("health shows the overdue plan", 1 if "plan_overdue" in dd["health"]["gap_codes"] else 0, 1))
+        results.append(("plan progress on the deal", 1 if dd["plan_progress"] == {"done": 0, "total": 8, "overdue": 1} else 0, 1))
+        check("plan step with bad status", c.patch(f"/api/deals/{fdid}/plan/{step['id']}", headers=H["rep"], json={"status": "maybe"}), 400)
+        pl = check("rep marks step done", c.patch(f"/api/deals/{fdid}/plan/{step['id']}", headers=H["rep"], json={"status": "done"}), 200).json()["close_plan"]
+        results.append(("done step no longer overdue", 1 if not [x for x in pl if x["id"] == step["id"]][0]["overdue"] else 0, 1))
+        dd = c.get(f"/api/deals/{fdid}", headers=H["rep"]).json()
+        results.append(("health gap clears when done", 0 if "plan_overdue" in dd["health"]["gap_codes"] else 1, 1))
+        check("viewer reads the plan", c.get(f"/api/deals/{fdid}", headers=H["viewer"]), 200)
+        check("plan step of another deal", c.patch(f"/api/deals/{fdid}/plan/{step['id'] + 10**9}", headers=H["rep"], json={"status": "done"}), 404)
+        check("rep removes step", c.delete(f"/api/deals/{fdid}/plan/{step['id']}", headers=H["rep"]), 200)
         # Win/loss analytics (#9): scoped like the deal list
         an = check("rep reads deal analytics", c.get("/api/deals/analytics", headers=H["rep"], params={"days": 3650}), 200).json()
         results.append(("analytics: funnel covers every stage + won", 1 if [f["stage"] for f in an["funnel"]][-1] == "won" and len(an["funnel"]) == 6 else 0, 1))

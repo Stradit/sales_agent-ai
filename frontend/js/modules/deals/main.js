@@ -11,6 +11,7 @@ import { renderToolkit, copilotHref } from './toolkit.js';
 import { mountTimeline } from '../activity-timeline.js';
 import { photoAttr } from '../persona-photo.js';
 import { initViews, refreshViews, filtersChanged } from './views.js';
+import { planPane, planTabLabel, planClick, planChange, planSubmit, resetPlanEditing } from './plan.js';
 
 const $ = (id) => document.getElementById(id);
 const OPEN_STAGES = ['intro', 'discovery', 'proposal', 'pilot', 'contract'];
@@ -258,6 +259,7 @@ const GAP_ACTIONS = {
   no_activity: { label: 'Log activity', tab: 'activity' },
   exit_criteria: { label: 'Review stage', box: true },
   long_in_stage: { label: 'Move on or update', box: true },
+  plan_overdue: { label: 'Review the close plan', tab: 'plan' },
 };
 
 function runGapAction(code) {
@@ -374,7 +376,7 @@ function renderRoom() {
           </div>
         </div></div>` : ''}
 
-      <div class="dl-tabs" role="tablist">${[['toolkit', 'Stage toolkit'], ['checklist', 'Exit criteria'], ['committee', `Buying committee (${d.stakeholders.length})`], ['activity', 'Activity'], ['tasks', `Tasks (${d.tasks.filter(t => !['done', 'cancelled'].includes(t.status)).length})`]]
+      <div class="dl-tabs" role="tablist">${[['toolkit', 'Stage toolkit'], ['checklist', 'Exit criteria'], ['committee', `Buying committee (${d.stakeholders.length})`], ['plan', planTabLabel(d)], ['activity', 'Activity'], ['tasks', `Tasks (${d.tasks.filter(t => !['done', 'cancelled'].includes(t.status)).length})`]]
         .map(([k, l]) => `<button type="button" class="dl-tab${st.tab === k ? ' active' : ''}" data-tab="${k}" role="tab" aria-selected="${st.tab === k}">${esc(l)}</button>`).join('')}</div>
 
       <div class="dl-pane${st.tab === 'toolkit' ? ' active' : ''}" role="tabpanel" id="dlToolkit">${st.tab === 'toolkit' ? renderToolkit(st.tk, d, openStages()) : ''}</div>
@@ -421,6 +423,9 @@ function renderRoom() {
         </details>
       </div>
 
+      <div class="dl-pane${st.tab === 'plan' ? ' active' : ''}" role="tabpanel">
+        ${st.tab === 'plan' ? planPane(d, PLAN_CTX) : ''}
+      </div>
       <div class="dl-pane${st.tab === 'tasks' ? ' active' : ''}" role="tabpanel">
         <form class="dl-task-form" id="dlTaskForm">
           <label class="dl-task-title">New task<input id="dlTaskTitle" maxlength="500" placeholder="e.g. Send the governance one-pager" required></label>
@@ -493,6 +498,9 @@ async function patchTask(id, body) {
   return data;
 }
 
+// Close plan module context (deals/plan.js)
+const PLAN_CTX = { api, esc, dateLabel, showToast, getDeal: () => st.deal, refresh: () => refreshDeal() };
+
 async function refreshDeal() {
   const fresh = await api(`/${st.deal.id}`);
   if (st.deal && st.deal.id === fresh.id) { st.deal = fresh; renderRoom(); }
@@ -538,6 +546,7 @@ async function saveQualification(key, value) {
 }
 
 async function openDeal(id) {
+  resetPlanEditing();
   try {
     st.deal = await api(`/${id}`);
     $('dlOverlay').hidden = false;
@@ -612,6 +621,7 @@ function wireRoom() {
       patchDeal({ offerings: next });
       return;
     }
+    if (st.tab === 'plan' && await planClick(e)) return;
     const tab = t.closest('[data-tab]');
     if (tab) {
       const fromBox = !!tab.closest('.dl-stage-box');
@@ -675,6 +685,7 @@ function wireRoom() {
   });
   room.addEventListener('change', async (e) => {
     const t = e.target;
+    if (await planChange(e)) return;
     if (t.dataset.taskDone) {
       t.disabled = true;
       try {
@@ -712,6 +723,7 @@ function wireRoom() {
   room.addEventListener('focusin', (e) => { if (e.target.id === 'dlPersonSearch') suggestPeople(e.target.value.trim()); });
   room.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (await planSubmit(e)) return;
     if (e.target.id === 'dlNoteForm') {
       const text = $('dlNote').value.trim();
       if (!text) return;
