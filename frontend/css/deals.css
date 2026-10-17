@@ -530,3 +530,16 @@
 .dl-share-form legend { color: var(--text-muted); padding: 0 4px; }
 .dl-share-form input, .dl-share-form textarea { font: inherit; font-size: .8rem; padding: 6px 8px; border: 1px solid var(--border-mid); background: var(--panel-bg); color: var(--text-primary); min-width: 0; }
 .dl-share-res { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 6px; }
+
+/* Next best action (#12) */
+.dl-nba { border: 1px solid var(--brand); border-left-width: 4px; background: var(--panel-bg); padding: 12px 14px; margin: 10px 0; display: grid; gap: 6px; }
+.dl-nba-label { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--brand); }
+.dl-nba h3 { margin: 0; font-size: .95rem; }
+.dl-nba-why { margin: 0; font-size: .8rem; color: var(--text-muted); max-width: 80ch; }
+.dl-nba-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.dl-nba-note { font-size: .72rem; }
+.dl-nba-draft { display: grid; gap: 8px; margin-top: 4px; border-top: 1px dashed var(--border-color); padding-top: 8px; font-size: .78rem; }
+.dl-nba-draft label { display: grid; gap: 4px; color: var(--text-muted); }
+.dl-nba-draft input, .dl-nba-draft textarea { font: inherit; font-size: .82rem; padding: 7px 9px; border: 1px solid var(--border-mid);
+  background: var(--panel-bg); color: var(--text-primary); width: 100%; box-sizing: border-box; }
+.dl-nba-draft textarea { resize: vertical; line-height: 1.5; }
