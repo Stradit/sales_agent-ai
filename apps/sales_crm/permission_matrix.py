@@ -254,6 +254,24 @@ def main() -> int:
         created_deals.append(fdid)
         results.append(("amount_usd from fx rate", 1 if r.json().get("amount_usd") == round(100000 * eur_rate, 2) else 0, 1))
         check("rep sets category commit", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"forecast_category": "commit"}), 200)
+        # FC-01: reps see only their own deals in the forecast, even on an account they share
+        r = check("manager creates a deal on rep's account this quarter", c.post("/api/deals", headers=H["manager"], json={
+            "account_id": a_in, "name": "Matrix manager forecast deal", "value_amount": 50000, "currency": "USD",
+            "expected_close": today}), 200)
+        fmid = r.json()["id"]
+        created_deals.append(fmid)
+        c.patch(f"/api/deals/{fmid}", headers=H["manager"], json={"forecast_category": "commit"})
+        rf = c.get("/api/forecast", headers=H["rep"], params={"period": per}).json()
+        results.append(("FC-01 rep's forecast hides a colleague's deal", 0 if any(d["id"] == fmid for d in rf["deals"]) else 1, 1))
+        results.append(("FC-01 rep's forecast keeps own deal", 1 if any(d["id"] == fdid for d in rf["deals"]) else 0, 1))
+        rf2 = c.get("/api/forecast", headers=H["rep"], params={"period": per, "owner_id": manager}).json()
+        results.append(("FC-01 rep can't pick a colleague as owner", 0 if any(d["id"] == fmid for d in rf2["deals"]) else 1, 1))
+        rc = c.get("/api/forecast/changes", headers=H["rep"], params={"period": per}).json()
+        results.append(("FC-01 rep's 'what moved' hides it", 0 if any(x["deal_id"] == fmid for x in rc["changes"]) else 1, 1))
+        mf = c.get("/api/forecast", headers=H["manager"], params={"period": per}).json()
+        results.append(("FC-01 manager's forecast has both deals", 1 if {fdid, fmid} <= {d["id"] for d in mf["deals"]} else 0, 1))
+        check("FC-01 rep exports own forecast", c.get("/api/forecast/export", headers=H["rep"], params={"period": per}), 200)
+        c.delete(f"/api/deals/{fmid}", headers=H["manager"])
         check("rep sets category closed on open deal", c.patch(f"/api/deals/{fdid}", headers=H["rep"], json={"forecast_category": "closed"}), 400)
         check("viewer sets category", c.patch(f"/api/deals/{fdid}", headers=H["viewer"], json={"forecast_category": "best_case"}), 403)
         f = check("rep reads forecast", c.get("/api/forecast", headers=H["rep"], params={"period": per, "owner_id": rep}), 200).json()

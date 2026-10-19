@@ -62,7 +62,7 @@ currency without a rate counts as 0 and the page warns which deals are affected.
 |---|---|---|---|
 | Super admin | Everything | Set any | Edit |
 | Sales manager | Their team | Set for their reports (not business lines) | — |
-| Sales rep | Own deals (see ticket FC-01) | — | — |
+| Sales rep | Only the deals they own, even on accounts they share (FC-01) | — | — |
 | Viewer | Read-only (owns no deals, so empty) | — | — |
 | Partner | No access | — | — |
 
@@ -143,13 +143,15 @@ Excel workbook with summary, roll-up, deals and changes for the current filters.
 
 ### Backlog
 
-**FC-01 — Reps see only their own deals in the forecast** · Bug · High
+**FC-01 — Reps see only their own deals in the forecast** · Bug · High · **Done 2026-10-19**
 *Description:* The forecast filters deals by account access only, so a rep who shares an account
 with a colleague sees and totals the colleague's deals. The role guide (and the Deals pages since
 2026-10-17) say reps see only their own deals.
 *Acceptance:* for role `user`, roll-up, deals table, "What moved" and export include only deals they
 own (same rule as `apps/sales_deals/api.py: own_deals_only`); managers and admins unchanged; matrix
 checks added.
+*Resolution:* `forecast.scoped_owner()` forces a rep's owner filter to themself in `rollup()` and
+`changes()` (the export uses both). Six matrix checks; three of them fail on the old code.
 
 **FC-02 — Launch checklist: turn the forecast on in production** · Task · High
 *Description:* The feature is hidden (`FORECAST_ENABLED=0`). Before enabling: set real exchange rates
