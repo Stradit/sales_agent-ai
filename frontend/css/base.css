@@ -20,3 +20,10 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 /* Required field asterisk */
 .in-req { color: var(--danger, #FF0003) !important; font-weight: 700; margin-left: 3px; display: inline; }
+
+/* "Beta" label next to the product name (topbar, admin, sign-in, partner portal).
+   To retire it: remove the <span class="beta-badge"> from those templates. */
+.beta-badge { display: inline-block; vertical-align: middle; margin-left: 6px; padding: 1px 7px;
+  font-size: .62rem; font-weight: 700; line-height: 1.5; letter-spacing: .06em; text-transform: uppercase;
+  color: #92400e; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 999px; cursor: help; }
+:root[data-theme="dark"] .beta-badge { color: #fde68a; background: rgba(245, 158, 11, .18); border-color: #f59e0b; }

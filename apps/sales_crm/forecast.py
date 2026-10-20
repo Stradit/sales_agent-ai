@@ -127,6 +127,13 @@ def visible_owners(s, user) -> List[Dict[str, Any]]:
     return _q(s, "SELECT id, coalesce(full_name, email) AS name, role FROM users WHERE id = ANY(:ids) ORDER BY 2", ids=ids)
 
 
+def scoped_owner(user, owner_id: Optional[int]) -> Optional[int]:
+    """Sales reps (role "user") only ever see their own deals in the forecast — the same rule as the
+    Deals pages (apps/sales_deals/api.py: own_deals_only). A rep's owner filter is ignored."""
+    from apps.sales_deals.api import own_deals_only      # lazy: that module imports this one
+    return user.id if own_deals_only(user) else owner_id
+
+
 def can_edit_target(s, user, user_id: Optional[int], business_line_id: Optional[int]) -> bool:
     if permissions.is_admin(user):
         return True
@@ -183,6 +190,7 @@ def rollup(s, user, period: str, business_line_id: Optional[int] = None, owner_i
            group_by: str = "owner") -> Dict[str, Any]:
     if group_by not in ("owner", "business_line", "stage", "category"):
         raise HTTPException(400, "group_by must be owner, business_line, stage or category")
+    owner_id = scoped_owner(user, owner_id)
     sm = int(_setting(s, "fiscal_year_start_month", 1))
     start, end = period_bounds(period, sm)
     probs = stage_probability(s)
@@ -282,6 +290,7 @@ def take_snapshot(s, snap_date: Optional[date] = None) -> int:
 
 def changes(s, user, period: str, since: Optional[str] = None, business_line_id: Optional[int] = None,
             owner_id: Optional[int] = None) -> Dict[str, Any]:
+    owner_id = scoped_owner(user, owner_id)
     sm = int(_setting(s, "fiscal_year_start_month", 1))
     start, end = period_bounds(period, sm)
     today = datetime.now(IST).date()
