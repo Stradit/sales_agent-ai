@@ -63,7 +63,7 @@ currency without a rate counts as 0 and the page warns which deals are affected.
 | Super admin | Everything | Set any | Edit |
 | Sales manager | Their team | Set for their reports (not business lines) | — |
 | Sales rep | Only the deals they own, even on accounts they share (FC-01) | — | — |
-| Viewer | Read-only (owns no deals, so empty) | — | — |
+| Viewer | Every deal on the accounts they can see, read-only (same as Deals) | — | — |
 | Partner | No access | — | — |
 
 ---

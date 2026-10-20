@@ -114,8 +114,9 @@ CAPABILITIES = [
     ]},
     {"group": "Forecast", "items": [
         {"key": "forecast_view", "label": "View the forecast",
-         "access": {"super_admin": "yes", "sales_manager": "team", "user": "own", "viewer": "own", "partner": "no"},
-         "notes": {"viewer": "Opens, but shows only deals they own — viewers own none"}},
+         "access": {"super_admin": "yes", "sales_manager": "team", "user": "own", "viewer": "read", "partner": "no"},
+         "notes": {"user": "Only deals they own, even on accounts they share",
+                   "viewer": "Every deal on the accounts they can see, read-only — same as Deals"}},
         {"key": "targets", "label": "Set sales targets",
          "access": {"super_admin": "yes", "sales_manager": "team", "user": "no", "viewer": "no", "partner": "no"},
          "notes": {"sales_manager": "For their reports; not business-line targets"}},
