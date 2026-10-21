@@ -21,6 +21,22 @@ function esc(str) {
     .replace(/'/g, '&#39;');
 }
 
+function toDatetimeLocal(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  const YYYY = d.getFullYear();
+  const MM = pad(d.getMonth() + 1);
+  const DD = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mm = pad(d.getMinutes());
+  return `${YYYY}-${MM}-${DD}T${hh}:${mm}`;
+}
+
+let openEditModalFn = null;
+let deepLinkOpened = false;
+
 const tp = {
   items: [],
   activeStatus: 'open',
@@ -146,6 +162,8 @@ function renderTaskCard(item) {
   const priorityClass = item.priority === 'high' ? 'tp-tag-priority-high' : item.priority === 'low' ? 'tp-tag-priority-low' : 'tp-tag-priority-med';
   const priorityLabel = item.priority === 'high' ? 'High' : item.priority === 'low' ? 'Low' : 'Medium';
 
+  const hasLongDesc = Boolean(item.description && item.description.length > 130);
+
   return `
     <div class="tp-task-item ${isDone ? 'is-done' : ''} ${isOverdue ? 'is-overdue' : ''} ${isHigh ? 'is-high' : ''} ${isPending ? 'is-pending' : ''}" data-task-id="${item.id}">
       <div class="tp-task-top">
@@ -153,7 +171,18 @@ function renderTaskCard(item) {
           <span class="tp-task-id-badge" title="Task ID #${item.id}">#${item.id}</span>
           <div class="tp-task-text-wrap">
             <h3 class="tp-task-title ${isDone ? 'line-through text-muted' : ''}">${esc(item.title)}</h3>
-            ${item.description ? `<div class="tp-task-desc ${isDone ? 'text-muted' : ''}">${formatDescriptionHtml(item.description)}</div>` : ''}
+            ${item.description ? `
+              <div class="tp-task-desc-wrap">
+                <div class="tp-task-desc ${isDone ? 'text-muted' : ''} ${hasLongDesc ? 'is-clamped' : ''}">
+                  ${formatDescriptionHtml(item.description)}
+                </div>
+                ${hasLongDesc ? `
+                  <button type="button" class="tp-desc-toggle-btn" data-action="toggle-desc" title="Expand or collapse full description">
+                    <span>Show more</span> <i class="fa-solid fa-chevron-down"></i>
+                  </button>
+                ` : ''}
+              </div>
+            ` : ''}
           </div>
         </div>
         <div class="tp-task-actions">
@@ -171,6 +200,9 @@ function renderTaskCard(item) {
               <option value="done" ${item.status === 'done' ? 'selected' : ''}>Closed / Done</option>
               <option value="cancelled" ${item.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
             </select>
+            <button type="button" class="tp-btn-edit" data-action="edit" data-item-id="${item.id}" title="Edit task details & due date">
+              <i class="fa-solid fa-pen-to-square"></i> Edit
+            </button>
             ${!isDone ? `
               <button type="button" class="tp-btn-close-ticket" data-action="complete" data-item-id="${item.id}" title="Close this task / ticket">
                 <i class="fa-solid fa-circle-check"></i> Close Ticket
@@ -181,7 +213,7 @@ function renderTaskCard(item) {
               </button>
             `}
           `}
-          <button type="button" class="tp-btn-secondary" data-action="delete" data-item-id="${item.id}" title="Delete task" style="padding:4px 8px; font-size:.75rem; color:var(--text-muted);">
+          <button type="button" class="tp-btn-delete" data-action="delete" data-item-id="${item.id}" title="Delete task">
             <i class="fa-regular fa-trash-can"></i>
           </button>
         </div>
@@ -271,6 +303,16 @@ async function refetch() {
 async function refetchAndRender() {
   await refetch();
   render();
+  if (!deepLinkOpened && openEditModalFn) {
+    const editId = new URLSearchParams(window.location.search).get('edit');
+    if (editId) {
+      const item = tp.items.find(i => i.id === Number(editId));
+      if (item) {
+        deepLinkOpened = true;
+        openEditModalFn(item);
+      }
+    }
+  }
 }
 
 function initFilterControls() {
@@ -308,6 +350,27 @@ function initListDelegation() {
   });
 
   list?.addEventListener('click', async (e) => {
+    const toggleBtn = e.target.closest('[data-action="toggle-desc"]');
+    if (toggleBtn) {
+      const wrap = toggleBtn.closest('.tp-task-desc-wrap');
+      const descEl = wrap ? wrap.querySelector('.tp-task-desc') : null;
+      if (descEl) {
+        const isExp = descEl.classList.toggle('is-expanded');
+        descEl.classList.toggle('is-clamped', !isExp);
+        toggleBtn.innerHTML = isExp
+          ? '<span>Show less</span> <i class="fa-solid fa-chevron-up"></i>'
+          : '<span>Show more</span> <i class="fa-solid fa-chevron-down"></i>';
+      }
+      return;
+    }
+
+    const editBtn = e.target.closest('[data-action="edit"]');
+    if (editBtn) {
+      const itemId = Number(editBtn.dataset.itemId);
+      const item = tp.items.find(i => i.id === itemId);
+      if (item && openEditModalFn) openEditModalFn(item);
+      return;
+    }
     const btn = e.target.closest('[data-action="take"], [data-action="complete"], [data-action="reopen"], [data-action="delete"], [data-action="approve"], [data-action="reject"]');
     if (!btn) return;
     const itemId = btn.dataset.itemId;
@@ -385,7 +448,12 @@ function initCreateTaskModal() {
 
   function openModal() {
     form.reset();
+    delete form.dataset.mode;
+    delete form.dataset.itemId;
     if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+    if (el('tpModalTitle')) el('tpModalTitle').textContent = 'Create Task';
+    if (el('tpModalSubtitle')) el('tpModalSubtitle').textContent = 'Add a structured follow-up or action item for your sales pipeline';
+    if (submitBtn) submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Create Task';
     modal.style.display = 'flex';
     populateModalAccounts();
     populateModalUsers();
@@ -395,6 +463,30 @@ function initCreateTaskModal() {
   function closeModal() {
     modal.style.display = 'none';
   }
+
+  openEditModalFn = async function(item) {
+    if (!item) return;
+    form.reset();
+    form.dataset.mode = 'edit';
+    form.dataset.itemId = String(item.id);
+    if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+    if (el('tpModalTitle')) el('tpModalTitle').textContent = `Edit Task #${item.id}`;
+    if (el('tpModalSubtitle')) el('tpModalSubtitle').textContent = 'Update task details, due date, priority, or assignee';
+    if (submitBtn) submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Save Changes';
+
+    modal.style.display = 'flex';
+    await Promise.all([populateModalAccounts(), populateModalUsers()]);
+
+    if (el('tpFormTitle')) el('tpFormTitle').value = item.title || '';
+    if (accountSelect) accountSelect.value = item.account_id ? String(item.account_id) : '';
+    await loadPersonasForAccount(item.account_id, item.persona_id);
+    if (el('tpFormPriority')) el('tpFormPriority').value = item.priority || 'medium';
+    if (el('tpFormStatus')) el('tpFormStatus').value = item.status || 'open';
+    if (el('tpFormDueDate')) el('tpFormDueDate').value = toDatetimeLocal(item.due_date);
+    if (assigneeSelect) assigneeSelect.value = item.assigned_to_id ? String(item.assigned_to_id) : '';
+    if (el('tpFormDesc')) el('tpFormDesc').value = item.description || '';
+    el('tpFormDueDate')?.focus();
+  };
 
   createBtn.addEventListener('click', openModal);
   closeBtn?.addEventListener('click', closeModal);
@@ -437,9 +529,7 @@ function initCreateTaskModal() {
     assigneeSelect.innerHTML = options;
   }
 
-  // When account changes, dynamically fetch personas for that account
-  accountSelect?.addEventListener('change', async (e) => {
-    const accountId = e.target.value;
+  async function loadPersonasForAccount(accountId, selectedPersonaId = null) {
     if (!personaSelect) return;
     if (!accountId) {
       personaSelect.innerHTML = '<option value="">Select account first...</option>';
@@ -453,7 +543,7 @@ function initCreateTaskModal() {
         const personas = data.personas || data || [];
         if (personas.length) {
           personaSelect.innerHTML = '<option value="">Select contact / persona (optional)...</option>' +
-            personas.map(p => `<option value="${p.id}">${esc(p.name || p.full_name || 'Contact')} (${esc(p.title || p.job_title || 'Lead')})</option>`).join('');
+            personas.map(p => `<option value="${p.id}" ${selectedPersonaId && String(p.id) === String(selectedPersonaId) ? 'selected' : ''}>${esc(p.name || p.full_name || 'Contact')} (${esc(p.title || p.job_title || 'Lead')})</option>`).join('');
         } else {
           personaSelect.innerHTML = '<option value="">No contacts found for this account</option>';
         }
@@ -463,12 +553,20 @@ function initCreateTaskModal() {
     } catch (err) {
       personaSelect.innerHTML = '<option value="">Optional (none)</option>';
     }
+  }
+
+  // When account changes, dynamically fetch personas for that account
+  accountSelect?.addEventListener('change', async (e) => {
+    loadPersonasForAccount(e.target.value);
   });
 
   // Handle form submission
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+
+    const isEdit = form.dataset.mode === 'edit';
+    const editItemId = form.dataset.itemId;
 
     const title = (el('tpFormTitle')?.value || '').trim();
     const accountId = el('tpFormAccount')?.value;
@@ -492,44 +590,68 @@ function initCreateTaskModal() {
 
     const me = getCurrentUser();
     const isAdmin = me && (me.role === 'super_admin' || me.role === 'admin');
-    const payload = {
-      account_id: Number(accountId),
-      title,
-      description: description || null,
-      priority,
-      status,
-      persona_id: personaId ? Number(personaId) : null,
-      due_date: dueDateRaw ? new Date(dueDateRaw).toISOString() : null,
-      assigned_to_id: assigneeId ? Number(assigneeId) : (isAdmin ? null : (me ? me.id : null)),
-    };
 
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.innerHTML = '<div class="spinner-sm"></div> Creating…';
+      submitBtn.innerHTML = `<div class="spinner-sm"></div> ${isEdit ? 'Saving…' : 'Creating…'}`;
     }
 
     try {
-      const res = await fetch('/api/action-items', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Server error (${res.status})`);
+      if (isEdit) {
+        const payload = {
+          title,
+          description: description || null,
+          priority,
+          status,
+          persona_id: personaId ? Number(personaId) : null,
+          due_date: dueDateRaw ? new Date(dueDateRaw).toISOString() : null,
+          assigned_to_id: assigneeId ? Number(assigneeId) : null,
+        };
+        const res = await fetch(`/api/action-items/${editItemId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server error (${res.status})`);
+        }
+        closeModal();
+        showToast('Task updated successfully!');
+        await refetchAndRender();
+      } else {
+        const payload = {
+          account_id: Number(accountId),
+          title,
+          description: description || null,
+          priority,
+          status,
+          persona_id: personaId ? Number(personaId) : null,
+          due_date: dueDateRaw ? new Date(dueDateRaw).toISOString() : null,
+          assigned_to_id: assigneeId ? Number(assigneeId) : (isAdmin ? null : (me ? me.id : null)),
+        };
+        const res = await fetch('/api/action-items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server error (${res.status})`);
+        }
+        closeModal();
+        showToast('Task created successfully!');
+        await refetchAndRender();
       }
-      closeModal();
-      showToast('Task created successfully!');
-      await refetchAndRender();
     } catch (err) {
       if (errorEl) {
-        errorEl.textContent = err.message || 'Could not create task. Please try again.';
+        errorEl.textContent = err.message || `Could not ${isEdit ? 'update' : 'create'} task. Please try again.`;
         errorEl.style.display = 'block';
       }
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Create Task';
+        submitBtn.innerHTML = `<i class="fa-solid fa-check"></i> ${isEdit ? 'Save Changes' : 'Create Task'}`;
       }
     }
   });

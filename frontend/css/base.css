@@ -27,3 +27,23 @@ body {
   font-size: .62rem; font-weight: 700; line-height: 1.5; letter-spacing: .06em; text-transform: uppercase;
   color: #92400e; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 999px; cursor: help; }
 :root[data-theme="dark"] .beta-badge { color: #fde68a; background: rgba(245, 158, 11, .18); border-color: #f59e0b; }
+
+/* Toast Action Button */
+.toast-action {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+  border-radius: 0;
+  margin-left: 8px;
+  transition: all 0.15s ease;
+}
+.toast-action:hover, .toast-action:focus-visible {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: #fff;
+  outline: none;
+}

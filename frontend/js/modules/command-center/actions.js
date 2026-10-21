@@ -14,7 +14,7 @@ function priorityFromScore(score) {
  * not a simulated/local-only toast. Returns true on success; on any failure
  * (account not in the DB, not granted to this user, network error) it shows
  * an explanatory toast and returns false instead of pretending it worked. */
-async function createRealActionItem({ accountName, accountId, title, description, priority, source }) {
+async function createRealActionItem({ accountName, accountId, title, description, priority, source, dueDate }) {
   const user = getCurrentUser();
   if (!user) {
     showToast('Your session expired — sign in again to create tasks.');
@@ -40,6 +40,7 @@ async function createRealActionItem({ accountName, accountId, title, description
         priority,
         assigned_to_id: isAdmin ? null : user.id,
         source: source || 'manual',
+        due_date: dueDate || null,
       }),
     });
     if (!res.ok) {
@@ -47,8 +48,9 @@ async function createRealActionItem({ accountName, accountId, title, description
       showToast(body.detail || `Could not create the task for ${accountName} (${res.status}).`);
       return false;
     }
+    const createdItem = await res.json().catch(() => null);
     refreshMyTasksBadge();
-    return true;
+    return createdItem || true;
   } catch (e) {
     showToast('Could not reach the server to create the task.');
     return false;
@@ -69,21 +71,49 @@ async function refreshMyTasksBadge() {
   }
 }
 
+function formatTaskDescription(desc) {
+  if (!desc || typeof desc !== 'string') return null;
+  const trimmed = desc.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > 280) {
+    const sentenceEnd = trimmed.slice(0, 280).lastIndexOf('. ');
+    if (sentenceEnd > 100) {
+      return trimmed.slice(0, sentenceEnd + 1);
+    }
+    const spaceIdx = trimmed.slice(0, 260).lastIndexOf(' ');
+    return (spaceIdx > 100 ? trimmed.slice(0, spaceIdx) : trimmed.slice(0, 260)) + '…';
+  }
+  return trimmed;
+}
+
 export function logTouch(accountName, context) {
   showToast(`Touch logged for ${accountName}${context ? ` — ${context}` : ''}`);
 }
 
 export async function createTask(accountName, title, opts = {}) {
-  const ok = await createRealActionItem({
+  const result = await createRealActionItem({
     accountName,
     accountId: opts.accountId || null,
     title,
-    description: opts.description || null,
+    description: formatTaskDescription(opts.description),
     priority: opts.priority || priorityFromScore(opts.score),
     source: opts.source,
+    dueDate: opts.dueDate || null,
   });
-  if (ok) showToast(`Task created for ${accountName} — see My Tasks`);
-  return ok;
+  if (result) {
+    const itemId = result && typeof result === 'object' && result.id ? result.id : null;
+    if (itemId) {
+      showToast(`Task created for ${accountName}`, {
+        action: {
+          label: 'Edit & set due date',
+          onClick: () => { window.location.href = `/tasks?edit=${itemId}`; },
+        },
+      });
+    } else {
+      showToast(`Task created for ${accountName} — see My Tasks`);
+    }
+  }
+  return result;
 }
 
 export async function pushToCrm(accountName, title, opts = {}) {
