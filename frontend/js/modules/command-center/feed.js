@@ -1,7 +1,7 @@
 import { getCommandCenter, isGenerated } from './generator.js';
 import { esc, relativeTime, ageInDays } from './utils.js';
 import { ccState, matchesCurrentAccount } from './state.js';
-import { createTask } from './actions.js';
+import { createTask, isTasked, markAsTasked } from './actions.js';
 import { clearGlobalAccountFilter } from './account-filter.js';
 
 function matchesAccount(sig) {
@@ -121,9 +121,12 @@ function rowHtml(sig) {
           ${newBadge}
         </div>
         <div class="cc-sig-action-wrap">
-          <button type="button" class="cc-btn cc-btn-primary cc-btn-xs cc-sig-task-btn" data-act="task" title="Create assigned task for ${esc(sig.account_name)}">
-            <i class="fa-solid fa-plus"></i> Create task
-          </button>
+          ${(() => {
+            const tasked = isTasked(sig.account_name, sig.title, sig.account_id);
+            const btnCls = tasked ? 'cc-btn-done' : 'cc-btn-primary';
+            const btnHtml = tasked ? '<i class="fa-solid fa-check"></i> Tasked' : '<i class="fa-solid fa-plus"></i> Create task';
+            return `<button type="button" class="cc-btn ${btnCls} cc-btn-xs cc-sig-task-btn" data-act="task" title="${tasked ? 'Task already created' : `Create assigned task for ${esc(sig.account_name)}`}" ${tasked ? 'disabled' : ''}>${btnHtml}</button>`;
+          })()}
         </div>
       </div>
 
@@ -203,9 +206,11 @@ export function renderFeed() {
           source: 'signal_feed',
         });
         if (ok) {
+          markAsTasked(sig.account_name, sig.title, sig.account_id);
           btn.innerHTML = '<i class="fa-solid fa-check"></i> Tasked';
           btn.classList.remove('cc-btn-primary');
           btn.classList.add('cc-btn-done');
+          btn.disabled = true;
         } else {
           btn.innerHTML = origHtml;
           btn.disabled = false;

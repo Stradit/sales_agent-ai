@@ -199,6 +199,72 @@
   </div>
 </div>
 
+<!-- Clean & Focused "Close Ticket" Modal -->
+<div class="tp-modal-backdrop" id="tpCloseModalBackdrop" style="display:none;">
+  <div class="tp-modal-card" style="max-width: 480px;" role="dialog" aria-modal="true" aria-labelledby="tpCloseModalTitle">
+    <div class="tp-modal-header">
+      <div class="tp-modal-title-wrap">
+        <div class="tp-modal-icon" style="background: rgba(16, 185, 129, 0.12); color: #10b981;">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div>
+          <h2 class="tp-modal-title" id="tpCloseModalTitle">Close Ticket</h2>
+          <p class="tp-modal-subtitle">Add a closing comment or resolution reason for this ticket</p>
+        </div>
+      </div>
+      <button type="button" class="tp-modal-close" id="tpCloseModalCloseBtn" aria-label="Close modal">&times;</button>
+    </div>
+
+    <form id="tpCloseTaskForm" class="tp-modal-form">
+      <input type="hidden" id="tpCloseTaskId" value="">
+      <div class="tp-form-group">
+        <label for="tpCloseComment" class="tp-label">Closing Reason / Resolution Comment <span class="tp-req">*</span></label>
+        <textarea id="tpCloseComment" class="tp-textarea" rows="3" placeholder="e.g. Completed client presentation; proposal sent and agreed..." required></textarea>
+      </div>
+
+      <div class="tp-modal-footer">
+        <button type="button" class="tp-btn-secondary" id="tpCloseModalCancelBtn">Cancel</button>
+        <button type="submit" class="tp-btn-primary" id="tpCloseSubmitBtn" style="background:#10b981; border-color:#10b981;">
+          <i class="fa-solid fa-check"></i> Confirm & Close Ticket
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Clean & Focused "Reopen Ticket" Modal -->
+<div class="tp-modal-backdrop" id="tpReopenModalBackdrop" style="display:none;">
+  <div class="tp-modal-card" style="max-width: 480px;" role="dialog" aria-modal="true" aria-labelledby="tpReopenModalTitle">
+    <div class="tp-modal-header">
+      <div class="tp-modal-title-wrap">
+        <div class="tp-modal-icon" style="background: rgba(14, 165, 233, 0.12); color: #0284c7;">
+          <i class="fa-solid fa-rotate-left"></i>
+        </div>
+        <div>
+          <h2 class="tp-modal-title" id="tpReopenModalTitle">Reopen Ticket</h2>
+          <p class="tp-modal-subtitle">Provide a reason or context for reopening this ticket</p>
+        </div>
+      </div>
+      <button type="button" class="tp-modal-close" id="tpReopenModalCloseBtn" aria-label="Close modal">&times;</button>
+    </div>
+
+    <form id="tpReopenTaskForm" class="tp-modal-form">
+      <input type="hidden" id="tpReopenTaskId" value="">
+      <div class="tp-form-group">
+        <label for="tpReopenComment" class="tp-label">Reopen Reason <span class="tp-req">*</span></label>
+        <textarea id="tpReopenComment" class="tp-textarea" rows="3" placeholder="e.g. Client requested contract scope amendments or additional deliverables..." required></textarea>
+      </div>
+
+      <div class="tp-modal-footer">
+        <button type="button" class="tp-btn-secondary" id="tpReopenModalCancelBtn">Cancel</button>
+        <button type="submit" class="tp-btn-primary" id="tpReopenSubmitBtn" style="background:#0284c7; border-color:#0284c7;">
+          <i class="fa-solid fa-rotate-left"></i> Confirm & Reopen Ticket
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 {% include "partials/drawer.html" %}

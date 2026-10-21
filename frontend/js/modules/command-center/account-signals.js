@@ -96,19 +96,61 @@ function getAccountCoverage(a) {
     ? a.vp_count
     : (Array.isArray(a.personas) ? a.personas.filter(p => (p.tier || '').toLowerCase().includes('vp')).length : 0);
 
-  return { total, cSuite, vp };
+  const dir = typeof a.director_count === 'number'
+    ? a.director_count
+    : (Array.isArray(a.personas) ? a.personas.filter(p => (p.tier || '').toLowerCase().includes('director')).length : 0);
+
+  const mgr = typeof a.manager_count === 'number'
+    ? a.manager_count
+    : (Array.isArray(a.personas) ? a.personas.filter(p => (p.tier || '').toLowerCase().includes('manager')).length : 0);
+
+  return { total, cSuite, vp, dir, mgr };
 }
 
 function coverageEntries(accounts) {
   const gaps = [];
+  const isSingle = accounts.length === 1;
+
   for (const a of accounts) {
-    const { total, cSuite, vp } = getAccountCoverage(a);
+    const { total, cSuite, vp, dir, mgr } = getAccountCoverage(a);
+
     if (total === 0) {
       gaps.push({ account: a, total, cSuite, gapType: 'no-contacts', gapLabel: 'No contacts mapped' });
-    } else if (cSuite === 0) {
-      gaps.push({ account: a, total, cSuite, gapType: 'no-csuite', gapLabel: 'No C-suite mapped' });
-    } else if (vp === 0 && total < 10) {
-      gaps.push({ account: a, total, cSuite, gapType: 'no-vp', gapLabel: 'No VP tier mapped' });
+      continue;
+    }
+
+    if (isSingle) {
+      // In single-account mode, surface specific actionable tier blindspots
+      if (cSuite === 0) {
+        gaps.push({ account: a, total, cSuite, gapType: 'no-csuite', gapLabel: 'No C-suite decision makers' });
+      } else if (cSuite <= 2) {
+        gaps.push({ account: a, total, cSuite, gapType: 'thin-csuite', gapLabel: `Thin C-suite (${cSuite} mapped)` });
+      }
+
+      if (vp === 0) {
+        gaps.push({ account: a, total, cSuite, gapType: 'no-vp', gapLabel: 'No VP tier mapped' });
+      } else if (vp <= 2) {
+        gaps.push({ account: a, total, cSuite, gapType: 'thin-vp', gapLabel: `Thin VP tier (${vp} mapped)` });
+      }
+
+      if (dir === 0) {
+        gaps.push({ account: a, total, cSuite, gapType: 'no-director', gapLabel: 'No Director-level champions' });
+      }
+
+      if (mgr === 0 && total < 10) {
+        gaps.push({ account: a, total, cSuite, gapType: 'no-manager', gapLabel: 'No Manager-level operators' });
+      }
+    } else {
+      // In global multi-account mode, highlight accounts with structural risk
+      if (cSuite === 0) {
+        gaps.push({ account: a, total, cSuite, gapType: 'no-csuite', gapLabel: 'No C-suite mapped' });
+      } else if (vp === 0) {
+        gaps.push({ account: a, total, cSuite, gapType: 'no-vp', gapLabel: 'No VP tier mapped' });
+      } else if (vp <= 2) {
+        gaps.push({ account: a, total, cSuite, gapType: 'thin-vp', gapLabel: `Thin VP tier (${vp} mapped)` });
+      } else if (dir === 0) {
+        gaps.push({ account: a, total, cSuite, gapType: 'no-director', gapLabel: 'No Director tier mapped' });
+      }
     }
   }
   return gaps.sort((a, b) => a.total - b.total);
@@ -208,8 +250,17 @@ function renderCoveragePieChart(accounts, activeAccountName) {
 
     accounts.forEach((a, i) => {
       const counts = getAccountCoverage(a);
-      const name = a.name || a.display_name || a.key || `Account ${a.id}`;
-      const shortName = name.length > 16 ? name.substring(0, 14) + '…' : name;
+      let rawName = a.display_name || a.name || a.key || `Account ${a.id}`;
+      let cleanName = rawName
+        .replace(/,?\s*(Inc\.?|LLC|Corporation|Corp\.?|Company|Co\.?|Group)\s*$/i, '')
+        .trim();
+      if (/depository\s*trust/i.test(cleanName)) cleanName = 'Depository Trust';
+      else if (/bank\s*of\s*new\s*york/i.test(cleanName)) cleanName = 'BNY Mellon';
+      else if (/vanguard/i.test(cleanName)) cleanName = 'Vanguard';
+      else if (/blackrock/i.test(cleanName)) cleanName = 'BlackRock';
+      else if (/northern\s*trust/i.test(cleanName)) cleanName = 'Northern Trust';
+
+      const shortName = cleanName.length > 20 ? cleanName.substring(0, 18) + '…' : cleanName;
       labels.push(shortName);
       data.push(counts.total);
       bgColors.push(palette[i % palette.length]);
@@ -229,7 +280,7 @@ function renderCoveragePieChart(accounts, activeAccountName) {
     coverageChartInstance = null;
   }
 
-  // Inline Plugin: Render bold numbers directly in colored slice areas
+  // Inline Plugin: Render bold numbers directly in colored slice areas using dashboard Roboto font
   const sliceNumbersPlugin = {
     id: 'ccSliceNumbers',
     afterDatasetsDraw(chart) {
@@ -249,7 +300,7 @@ function renderCoveragePieChart(accounts, activeAccountName) {
         const midAngle = (startAngle + endAngle) / 2;
 
         ctx.save();
-        ctx.font = '700 11px Inter, system-ui, -apple-system, sans-serif';
+        ctx.font = '700 11px Roboto, system-ui, -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
@@ -298,7 +349,7 @@ function renderCoveragePieChart(accounts, activeAccountName) {
     }
   };
 
-  // Inline Plugin: Bold total count in center cutout
+  // Inline Plugin: Bold total count in center cutout with dashboard-matching typography
   const centerMetricPlugin = {
     id: 'ccCenterMetric',
     beforeDraw(chart) {
@@ -312,11 +363,11 @@ function renderCoveragePieChart(accounts, activeAccountName) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      ctx.font = '700 17px Inter, system-ui, -apple-system, sans-serif';
+      ctx.font = '700 17px Roboto, system-ui, -apple-system, sans-serif';
       ctx.fillStyle = dark ? '#F8FAFC' : '#0F172A';
       ctx.fillText(totalMapped.toLocaleString(), x, y - 5);
 
-      ctx.font = '700 9px Inter, system-ui, -apple-system, sans-serif';
+      ctx.font = '700 9px Roboto, system-ui, -apple-system, sans-serif';
       ctx.fillStyle = dark ? '#94A3B8' : '#64748B';
       ctx.fillText('MAPPED', x, y + 11);
       ctx.restore();
@@ -362,16 +413,16 @@ function renderCoveragePieChart(accounts, activeAccountName) {
         legend: {
           position: 'right',
           labels: {
-            boxWidth: 11,
-            boxHeight: 11,
-            borderRadius: 0,
-            padding: 7,
+            boxWidth: 12,
+            boxHeight: 12,
+            borderRadius: 2,
+            padding: 9,
             font: {
-              family: 'Inter, system-ui, -apple-system, sans-serif',
-              size: 11.5,
+              family: 'Roboto, system-ui, -apple-system, sans-serif',
+              size: 12.5,
               weight: '600'
             },
-            color: isDark ? '#F1F5F9' : '#0F172A',
+            color: isDark ? '#F8FAFC' : '#0F172A',
             generateLabels: (chart) => {
               const dataset = chart.data.datasets[0];
               return chart.data.labels.map((label, idx) => {
@@ -390,8 +441,8 @@ function renderCoveragePieChart(accounts, activeAccountName) {
         },
         tooltip: {
           backgroundColor: '#0F172A',
-          titleFont: { family: 'Inter, system-ui, sans-serif', size: 12, weight: '700' },
-          bodyFont: { family: 'Inter, system-ui, sans-serif', size: 12, weight: '500' },
+          titleFont: { family: 'Roboto, system-ui, sans-serif', size: 12, weight: '700' },
+          bodyFont: { family: 'Roboto, system-ui, sans-serif', size: 12, weight: '500' },
           padding: 8,
           cornerRadius: 6,
           callbacks: {
@@ -411,8 +462,8 @@ export async function renderCoverageGaps() {
   const hasFilter = (ccState.activeAccountIds && ccState.activeAccountIds.size > 0) || ccState.activeAccountId;
   const names = ccState.selectedAccountNames || [];
   const emptyMsg = hasFilter
-    ? 'Selected accounts have full executive C-suite coverage mapped.'
-    : 'Every account has at least one C-suite contact mapped.';
+    ? 'Selected account has full C-suite, VP, and Director coverage mapped.'
+    : 'All accounts have active leadership coverage mapped.';
 
   // 1. Render the underlying gaps list
   await renderWidget('ccCoverageList', emptyMsg, coverageEntries, coverageRowHtml);

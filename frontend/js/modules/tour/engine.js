@@ -470,16 +470,47 @@ function positionSpotlightAndPopover(targetEl, step, tourData) {
     popoverLeft = (window.innerWidth / 2) - (popoverWidth / 2);
   }
 
-  // Viewport containment: ensure card does not clip off-screen
-  const screenPad = 12;
+  // Viewport containment: ensure card does not clip off-screen (horizontally and vertically)
+  const screenPad = 14;
   const baseLeft = isFixed ? 0 : window.scrollX;
   const maxLeft = baseLeft + window.innerWidth - popoverWidth - screenPad;
   const minLeft = baseLeft + screenPad;
   popoverLeft = Math.max(minLeft, Math.min(popoverLeft, maxLeft));
 
+  const baseTop = isFixed ? 0 : window.scrollY;
+  const maxTop = baseTop + window.innerHeight - popoverHeight - screenPad;
+  const minTop = baseTop + screenPad;
+  if (maxTop >= minTop) {
+    popoverTop = Math.max(minTop, Math.min(popoverTop, maxTop));
+  } else {
+    popoverTop = minTop;
+  }
+
   popoverEl.setAttribute('data-placement', placement);
-  popoverEl.style.top = `${Math.max(10, popoverTop)}px`;
-  popoverEl.style.left = `${Math.max(10, popoverLeft)}px`;
+  popoverEl.style.top = `${Math.round(popoverTop)}px`;
+  popoverEl.style.left = `${Math.round(popoverLeft)}px`;
+
+  // Dynamically align the pointer arrow to point directly at the target element
+  const arrowEl = popoverEl.querySelector('.doshin-tour-arrow');
+  if (arrowEl && targetRect) {
+    if (placement === 'left' || placement === 'right') {
+      const targetCenterY = targetRect.viewportTop + (targetRect.height / 2);
+      const popoverViewportTop = isFixed ? popoverTop : (popoverTop - window.scrollY);
+      const arrowRelY = targetCenterY - popoverViewportTop;
+      const clampedY = Math.max(22, Math.min(popoverHeight - 22, arrowRelY));
+      arrowEl.style.top = `${Math.round(clampedY)}px`;
+      arrowEl.style.transform = 'translateY(-50%) rotate(45deg)';
+      arrowEl.style.left = '';
+    } else if (placement === 'top' || placement === 'bottom') {
+      const targetCenterX = targetRect.viewportLeft + (targetRect.width / 2);
+      const popoverViewportLeft = isFixed ? popoverLeft : (popoverLeft - window.scrollX);
+      const arrowRelX = targetCenterX - popoverViewportLeft;
+      const clampedX = Math.max(22, Math.min(popoverWidth - 22, arrowRelX));
+      arrowEl.style.left = `${Math.round(clampedX)}px`;
+      arrowEl.style.transform = 'translateX(-50%) rotate(45deg)';
+      arrowEl.style.top = '';
+    }
+  }
 
   // Reveal popover
   requestAnimationFrame(() => {

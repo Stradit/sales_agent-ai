@@ -57,15 +57,85 @@ async function createRealActionItem({ accountName, accountId, title, description
   }
 }
 
+const TASKED_KEY = 'doshin_cc_tasked_items';
+
+function getTaskedSet() {
+  try {
+    const raw = localStorage.getItem(TASKED_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveTaskedSet(set) {
+  try {
+    localStorage.setItem(TASKED_KEY, JSON.stringify([...set].slice(-500)));
+  } catch { /* ignore */ }
+}
+
+function itemKey(accountName, title, accountId) {
+  const acc = (accountName || '').toLowerCase().trim();
+  const tit = (title || '').toLowerCase().trim();
+  return `${accountId || acc}::${tit}`;
+}
+
+export function isTasked(accountName, title, accountId) {
+  if (!title) return false;
+  const set = getTaskedSet();
+  if (set.has(itemKey(accountName, title, accountId))) return true;
+  if (accountName && set.has(itemKey(accountName, title, null))) return true;
+  if (accountId && set.has(itemKey(null, title, accountId))) return true;
+  return false;
+}
+
+export function markAsTasked(accountName, title, accountId) {
+  if (!title) return;
+  const set = getTaskedSet();
+  set.add(itemKey(accountName, title, accountId));
+  if (accountName) set.add(itemKey(accountName, title, null));
+  if (accountId) set.add(itemKey(null, title, accountId));
+  saveTaskedSet(set);
+}
+
+export async function syncTaskedItemsFromApi() {
+  try {
+    const res = await fetch('/api/me/action-items');
+    if (!res.ok) return;
+    const data = await res.json();
+    const items = data.action_items || [];
+    const set = getTaskedSet();
+    items.forEach(i => {
+      if (i.title && i.status !== 'done' && i.status !== 'cancelled') {
+        set.add(itemKey(i.account_name, i.title, i.account_id));
+        if (i.account_name) set.add(itemKey(i.account_name, i.title, null));
+        if (i.account_id) set.add(itemKey(null, i.title, i.account_id));
+      }
+    });
+    saveTaskedSet(set);
+  } catch { /* ignore */ }
+}
+
 async function refreshMyTasksBadge() {
   const badge = document.getElementById('topbarMyTasksBadge');
-  if (!badge) return;
   try {
     const res = await fetch('/api/me/action-items');
     if (!res.ok) return;
     const data = await res.json();
     const open = (data.action_items || []).filter(i => i.status !== 'done' && i.status !== 'cancelled');
-    badge.textContent = open.length;
+    if (badge) badge.textContent = open.length;
+    // Keep local tasked set in sync with active action items
+    const set = getTaskedSet();
+    open.forEach(i => {
+      if (i.title) {
+        set.add(itemKey(i.account_name, i.title, i.account_id));
+        if (i.account_name) set.add(itemKey(i.account_name, i.title, null));
+        if (i.account_id) set.add(itemKey(null, i.title, i.account_id));
+      }
+    });
+    saveTaskedSet(set);
   } catch (e) {
     // best-effort — the badge just stays at its previous count
   }
@@ -101,6 +171,7 @@ export async function createTask(accountName, title, opts = {}) {
     dueDate: opts.dueDate || null,
   });
   if (result) {
+    markAsTasked(accountName, title, opts.accountId);
     const itemId = result && typeof result === 'object' && result.id ? result.id : null;
     if (itemId) {
       showToast(`Task created for ${accountName}`, {

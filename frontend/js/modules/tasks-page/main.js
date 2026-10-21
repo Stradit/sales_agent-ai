@@ -35,6 +35,8 @@ function toDatetimeLocal(isoStr) {
 }
 
 let openEditModalFn = null;
+let openCloseModalFn = null;
+let openReopenModalFn = null;
 let deepLinkOpened = false;
 
 const tp = {
@@ -58,7 +60,8 @@ function scopedItems() {
       const desc = (i.description || '').toLowerCase();
       const acct = (i.account_name || '').toLowerCase();
       const persona = (i.persona_name || (i.persona && i.persona.name) || '').toLowerCase();
-      if (!title.includes(q) && !desc.includes(q) && !acct.includes(q) && !persona.includes(q)) {
+      const source = (i.source || '').toLowerCase();
+      if (!title.includes(q) && !desc.includes(q) && !acct.includes(q) && !persona.includes(q) && !source.includes(q)) {
         return false;
       }
     }
@@ -152,17 +155,92 @@ function formatDescriptionHtml(text) {
   });
 }
 
+function extractNotes(desc) {
+  if (!desc) return { mainDesc: '', closingNote: null, reopenNote: null };
+
+  let main = desc;
+  let closingNote = null;
+  let reopenNote = null;
+
+  const rMarker = '\n\nReopen Note: ';
+  const rIdx = main.lastIndexOf(rMarker);
+  if (rIdx !== -1) {
+    reopenNote = main.slice(rIdx + rMarker.length).trim();
+    main = main.slice(0, rIdx).trim();
+  } else if (main.startsWith('Reopen Note: ')) {
+    reopenNote = main.slice(13).trim();
+    main = '';
+  }
+
+  const cMarker = '\n\nClosing Note: ';
+  const altMarker = '\n\n[Closing Note]: ';
+  let cIdx = main.lastIndexOf(cMarker);
+  let cLen = cMarker.length;
+  if (cIdx === -1) {
+    cIdx = main.lastIndexOf(altMarker);
+    cLen = altMarker.length;
+  }
+  if (cIdx !== -1) {
+    closingNote = main.slice(cIdx + cLen).trim();
+    main = main.slice(0, cIdx).trim();
+  } else if (main.startsWith('Closing Note: ')) {
+    closingNote = main.slice(14).trim();
+    main = '';
+  } else if (main.startsWith('[Closing Note]: ')) {
+    closingNote = main.slice(16).trim();
+    main = '';
+  }
+
+  return { mainDesc: main, closingNote, reopenNote };
+}
+
+function formatSourceTag(source) {
+  if (!source) return '';
+  const s = String(source).toLowerCase().trim();
+  if (s === 'signal_feed' || s === 'priority_signal' || s === 'llm_suggested') {
+    return `
+      <span class="tp-tag tp-tag-signal" title="Created from Priority Signal Feed">
+        <i class="fa-solid fa-bolt"></i> Signal Feed
+      </span>`;
+  }
+  if (s === 'playbook') {
+    return `
+      <span class="tp-tag tp-tag-playbook" title="Created from This Week's Playbook">
+        <i class="fa-solid fa-book-bookmark"></i> Playbook
+      </span>`;
+  }
+  if (s === 'deal' || s === 'deals') {
+    return `
+      <span class="tp-tag tp-tag-deal" title="Created from Deals Pipeline">
+        <i class="fa-solid fa-handshake"></i> Deals
+      </span>`;
+  }
+  if (s === 'hiring' || s === 'hiring_radar' || s === 'hiring_signals') {
+    return `
+      <span class="tp-tag tp-tag-hiring" title="Created from Hiring Signals">
+        <i class="fa-solid fa-user-plus"></i> Hiring Radar
+      </span>`;
+  }
+  if (s === 'dossier' || s === 'account_dossier') {
+    return `
+      <span class="tp-tag tp-tag-dossier" title="Created from Account Dossier">
+        <i class="fa-regular fa-folder-open"></i> Dossier
+      </span>`;
+  }
+  return '';
+}
+
 function renderTaskCard(item) {
   const isDone = item.status === 'done';
   const isPending = item.status === 'pending_review';
   const isOverdue = Boolean(item.is_overdue && (item.status === 'open' || item.status === 'in_progress'));
   const isHigh = item.priority === 'high' && !isDone;
-  const isSignal = item.source === 'llm_suggested' || item.source === 'priority_signal' || item.source === 'signal_feed';
   const personaName = item.persona_name || (item.persona && item.persona.name) || '';
   const priorityClass = item.priority === 'high' ? 'tp-tag-priority-high' : item.priority === 'low' ? 'tp-tag-priority-low' : 'tp-tag-priority-med';
   const priorityLabel = item.priority === 'high' ? 'High' : item.priority === 'low' ? 'Low' : 'Medium';
 
-  const hasLongDesc = Boolean(item.description && item.description.length > 130);
+  const { mainDesc, closingNote, reopenNote } = extractNotes(item.description);
+  const hasLongDesc = Boolean(mainDesc && mainDesc.length > 130);
 
   return `
     <div class="tp-task-item ${isDone ? 'is-done' : ''} ${isOverdue ? 'is-overdue' : ''} ${isHigh ? 'is-high' : ''} ${isPending ? 'is-pending' : ''}" data-task-id="${item.id}">
@@ -170,17 +248,35 @@ function renderTaskCard(item) {
         <div class="tp-task-title-wrap">
           <span class="tp-task-id-badge" title="Task ID #${item.id}">#${item.id}</span>
           <div class="tp-task-text-wrap">
-            <h3 class="tp-task-title ${isDone ? 'line-through text-muted' : ''}">${esc(item.title)}</h3>
-            ${item.description ? `
+            <h3 class="tp-task-title ${isDone ? 'text-muted' : ''}">${esc(item.title)}</h3>
+            ${mainDesc ? `
               <div class="tp-task-desc-wrap">
                 <div class="tp-task-desc ${isDone ? 'text-muted' : ''} ${hasLongDesc ? 'is-clamped' : ''}">
-                  ${formatDescriptionHtml(item.description)}
+                  ${formatDescriptionHtml(mainDesc)}
                 </div>
                 ${hasLongDesc ? `
                   <button type="button" class="tp-desc-toggle-btn" data-action="toggle-desc" title="Expand or collapse full description">
                     <span>Show more</span> <i class="fa-solid fa-chevron-down"></i>
                   </button>
                 ` : ''}
+              </div>
+            ` : ''}
+            ${isDone && closingNote ? `
+              <div class="tp-closing-comment" title="Resolution comment entered when closing ticket">
+                <i class="fa-solid fa-clipboard-check"></i>
+                <div class="tp-closing-comment-body">
+                  <span class="tp-closing-comment-label">Closing Reason / Comment</span>
+                  <span class="tp-closing-comment-text">${formatDescriptionHtml(closingNote)}</span>
+                </div>
+              </div>
+            ` : ''}
+            ${!isDone && reopenNote ? `
+              <div class="tp-reopen-comment" title="Reason entered when ticket was reopened">
+                <i class="fa-solid fa-rotate-left"></i>
+                <div class="tp-reopen-comment-body">
+                  <span class="tp-reopen-comment-label">Reopen Reason</span>
+                  <span class="tp-reopen-comment-text">${formatDescriptionHtml(reopenNote)}</span>
+                </div>
               </div>
             ` : ''}
           </div>
@@ -194,16 +290,16 @@ function renderTaskCard(item) {
               <i class="fa-solid fa-xmark"></i> Dismiss
             </button>
           ` : `
-            <select class="tp-select" data-action="set-status" data-item-id="${item.id}" title="Change status" style="font-size:.75rem; padding:4px 8px;">
+            <select class="tp-select" data-action="set-status" data-item-id="${item.id}" ${isDone ? 'disabled' : ''} title="${isDone ? 'Ticket is closed. Click Reopen to activate.' : 'Change status'}" style="font-size:.75rem; padding:4px 8px; ${isDone ? 'opacity:0.65; cursor:not-allowed;' : ''}">
               <option value="open" ${item.status === 'open' ? 'selected' : ''}>Open</option>
               <option value="in_progress" ${item.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
               <option value="done" ${item.status === 'done' ? 'selected' : ''}>Closed / Done</option>
               <option value="cancelled" ${item.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
             </select>
-            <button type="button" class="tp-btn-edit" data-action="edit" data-item-id="${item.id}" title="Edit task details & due date">
-              <i class="fa-solid fa-pen-to-square"></i> Edit
-            </button>
             ${!isDone ? `
+              <button type="button" class="tp-btn-edit" data-action="edit" data-item-id="${item.id}" title="Edit task details & due date">
+                <i class="fa-solid fa-pen-to-square"></i> Edit
+              </button>
               <button type="button" class="tp-btn-close-ticket" data-action="complete" data-item-id="${item.id}" title="Close this task / ticket">
                 <i class="fa-solid fa-circle-check"></i> Close Ticket
               </button>
@@ -230,11 +326,7 @@ function renderTaskCard(item) {
             <i class="fa-solid fa-circle-check"></i> Closed
           </span>
         ` : ''}
-        ${isSignal ? `
-          <span class="tp-tag tp-tag-signal" title="Signal Trigger Feed">
-            <i class="fa-solid fa-bolt"></i> Signal Feed
-          </span>
-        ` : ''}
+        ${formatSourceTag(item.source)}
         ${item.account_id ? `
           <span class="tp-tag tp-tag-account">
             <i class="fa-solid fa-building"></i>
@@ -336,8 +428,19 @@ function initListDelegation() {
   list?.addEventListener('change', async (e) => {
     const select = e.target.closest('[data-action="set-status"]');
     if (!select) return;
+    const itemId = Number(select.dataset.itemId);
+    const item = tp.items.find(i => i.id === itemId);
+
+    if (select.value === 'done') {
+      if (item && openCloseModalFn) {
+        select.value = item.status || 'open';
+        openCloseModalFn(item);
+        return;
+      }
+    }
+
     try {
-      await fetch(`/api/action-items/${select.dataset.itemId}`, {
+      await fetch(`/api/action-items/${itemId}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: select.value }),
       });
@@ -395,13 +498,20 @@ function initListDelegation() {
         });
         showToast('Task assigned to you');
       } else if (action === 'complete') {
+        const item = tp.items.find(i => i.id === Number(itemId));
+        if (item && openCloseModalFn) {
+          openCloseModalFn(item);
+          return;
+        }
         await fetch(`/api/action-items/${itemId}/complete`, { method: 'POST' });
         showToast('Ticket closed successfully!');
       } else if (action === 'reopen') {
-        await fetch(`/api/action-items/${itemId}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'open' }),
-        });
+        const item = tp.items.find(i => i.id === Number(itemId));
+        if (item && openReopenModalFn) {
+          openReopenModalFn(item);
+          return;
+        }
+        await fetch(`/api/action-items/${itemId}/reopen`, { method: 'POST' });
         showToast('Ticket reopened');
       } else if (action === 'delete') {
         if (!window.confirm('Are you sure you want to delete this task?')) return;
@@ -657,6 +767,144 @@ function initCreateTaskModal() {
   });
 }
 
+function initCloseTicketModal() {
+  const backdrop = el('tpCloseModalBackdrop');
+  const form = el('tpCloseTaskForm');
+  const closeBtn = el('tpCloseModalCloseBtn');
+  const cancelBtn = el('tpCloseModalCancelBtn');
+  const taskIdInput = el('tpCloseTaskId');
+  const commentInput = el('tpCloseComment');
+  const submitBtn = el('tpCloseSubmitBtn');
+  const titleEl = el('tpCloseModalTitle');
+
+  function open(item) {
+    if (!backdrop || !item) return;
+    taskIdInput.value = item.id;
+    if (commentInput) commentInput.value = '';
+    if (titleEl) titleEl.textContent = `Close Ticket #${item.id}`;
+    backdrop.style.display = 'flex';
+    setTimeout(() => commentInput?.focus(), 50);
+  }
+
+  function close() {
+    if (!backdrop) return;
+    backdrop.style.display = 'none';
+    if (form) form.reset();
+  }
+
+  openCloseModalFn = open;
+
+  closeBtn?.addEventListener('click', close);
+  cancelBtn?.addEventListener('click', close);
+  backdrop?.addEventListener('click', (e) => {
+    if (e.target === backdrop) close();
+  });
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const itemId = taskIdInput.value;
+    const comment = (commentInput?.value || '').trim();
+    if (!itemId) return;
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Closing...';
+    }
+
+    try {
+      const res = await fetch(`/api/action-items/${itemId}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Server error (${res.status})`);
+      }
+      close();
+      showToast('Ticket closed successfully with comment.');
+      await refetchAndRender();
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Could not close ticket.');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Confirm & Close Ticket';
+      }
+    }
+  });
+}
+
+function initReopenTicketModal() {
+  const backdrop = el('tpReopenModalBackdrop');
+  const form = el('tpReopenTaskForm');
+  const closeBtn = el('tpReopenModalCloseBtn');
+  const cancelBtn = el('tpReopenModalCancelBtn');
+  const taskIdInput = el('tpReopenTaskId');
+  const commentInput = el('tpReopenComment');
+  const submitBtn = el('tpReopenSubmitBtn');
+  const titleEl = el('tpReopenModalTitle');
+
+  function open(item) {
+    if (!backdrop || !item) return;
+    taskIdInput.value = item.id;
+    if (commentInput) commentInput.value = '';
+    if (titleEl) titleEl.textContent = `Reopen Ticket #${item.id}`;
+    backdrop.style.display = 'flex';
+    setTimeout(() => commentInput?.focus(), 50);
+  }
+
+  function close() {
+    if (!backdrop) return;
+    backdrop.style.display = 'none';
+    if (form) form.reset();
+  }
+
+  openReopenModalFn = open;
+
+  closeBtn?.addEventListener('click', close);
+  cancelBtn?.addEventListener('click', close);
+  backdrop?.addEventListener('click', (e) => {
+    if (e.target === backdrop) close();
+  });
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const itemId = taskIdInput.value;
+    const comment = (commentInput?.value || '').trim();
+    if (!itemId) return;
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Reopening...';
+    }
+
+    try {
+      const res = await fetch(`/api/action-items/${itemId}/reopen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Server error (${res.status})`);
+      }
+      close();
+      showToast('Ticket reopened successfully with reason.');
+      await refetchAndRender();
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Could not reopen ticket.');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> Confirm & Reopen Ticket';
+      }
+    }
+  });
+}
+
 function init() {
   initThemeToggle();
   initAccountsNav();
@@ -664,6 +912,8 @@ function init() {
   initListDelegation();
   wireExport();
   initCreateTaskModal();
+  initCloseTicketModal();
+  initReopenTicketModal();
   refetchAndRender();
 }
 

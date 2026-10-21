@@ -85,6 +85,59 @@
   background: none; font-family: inherit; cursor: pointer;
 }
 
+/* ── Search Palette Topbar Trigger ───────────────────────────── */
+.sp-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0 11px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  line-height: 1;
+}
+.sp-trigger:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #FFFFFF;
+  transform: translateY(-1px);
+}
+.sp-trigger i {
+  color: var(--brand-light, #F0894F);
+  font-size: 0.85rem;
+}
+.sp-trigger-kbd {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit !important;
+  font-size: 0.65rem !important;
+  font-weight: 700 !important;
+  padding: 2px 6px !important;
+  border-radius: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.22) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #FFFFFF !important;
+  line-height: 1.1 !important;
+  box-shadow: none !important;
+  letter-spacing: 0.3px;
+}
+.sp-trigger:hover .sp-trigger-kbd {
+  background: rgba(255, 255, 255, 0.22) !important;
+  border-color: rgba(255, 255, 255, 0.38) !important;
+  color: #FFFFFF !important;
+}
+
 .topbar-auth-widget { display: flex; align-items: center; gap: 8px; }
 
 /* ── Compact Profile Button & Popover ────────────────────────── */

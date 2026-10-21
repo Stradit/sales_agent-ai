@@ -115,6 +115,9 @@ async function computeKpi() {
 export async function renderKpiStrip() {
   const k = await computeKpi();
   const deltaCls = k.velocityDeltaPct >= 0 ? 'cc-delta-up' : 'cc-delta-down';
+  const deltaIcon = k.velocityDeltaPct >= 0
+    ? '<i class="fa-solid fa-arrow-trend-up" aria-hidden="true" style="margin-right:2px; font-size:0.7rem;"></i>'
+    : '<i class="fa-solid fa-arrow-trend-down" aria-hidden="true" style="margin-right:2px; font-size:0.7rem;"></i>';
 
   const card1 = `
     <div class="cc-kpi-card cc-kpi-clickable" data-kpi-action="jump-feed" title="Click to view Priority Signal Feed" tabindex="0" role="button">
@@ -123,7 +126,7 @@ export async function renderKpiStrip() {
         <span class="cc-kpi-label">Signal velocity this week</span>
         <i class="fa-solid fa-arrow-up-right-from-square cc-kpi-icon"></i>
       </div>
-      <div class="cc-kpi-value">${k.generated ? k.velocity : '&mdash;'}${k.generated ? ` <span class="cc-kpi-delta ${deltaCls}">${k.velocityDeltaPct >= 0 ? '+' : ''}${k.velocityDeltaPct}%</span>` : ''}</div>
+      <div class="cc-kpi-value">${k.generated ? k.velocity : '&mdash;'}${k.generated ? ` <span class="cc-kpi-delta ${deltaCls}">${deltaIcon}${k.velocityDeltaPct >= 0 ? '+' : ''}${k.velocityDeltaPct}%</span>` : ''}</div>
       <div class="cc-kpi-foot">${k.generated ? 'signals vs. last week' : 'not generated yet'} &middot; <span class="cc-kpi-action-text">View Feed &rarr;</span></div>
     </div>`;
 

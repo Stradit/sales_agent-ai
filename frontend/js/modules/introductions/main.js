@@ -951,14 +951,24 @@ async function loadPartnerUsers() {
 }
 
 function wireBack() {
-  // Return to wherever the user came from in this app; a direct visit falls back to the deals pipeline.
+  // Return to wherever the user came from in this app; a direct visit or sibling CRM jump falls back to Accounts.
   $('inBack').addEventListener('click', (e) => {
     let internal = false;
+    let isCrmSibling = false;
     try {
       const ref = document.referrer ? new URL(document.referrer) : null;
       internal = !!ref && ref.origin === location.origin && ref.pathname !== location.pathname && !ref.pathname.startsWith('/login');
+      if (ref && ['/deals', '/email-sync', '/forecast'].includes(ref.pathname)) {
+        isCrmSibling = true;
+      }
     } catch { /* ignore */ }
-    if (internal && history.length > 1) { e.preventDefault(); history.back(); }
+    if (internal && !isCrmSibling && history.length > 1) {
+      e.preventDefault();
+      history.back();
+    } else {
+      e.preventDefault();
+      location.assign('/accounts');
+    }
   });
 }
 

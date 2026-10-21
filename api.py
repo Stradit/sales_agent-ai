@@ -982,6 +982,9 @@ if FASTAPI_AVAILABLE:
         due_date: Optional[str] = None
         assigned_to_id: Optional[int] = None
 
+    class ActionItemCompleteRequest(BaseModel):
+        comment: Optional[str] = None
+
     # ══════════════════════════════════════════════════════
     # TAB 1: ACCOUNT LEVEL ENDPOINTS
     # ══════════════════════════════════════════════════════
@@ -6142,16 +6145,25 @@ if FASTAPI_AVAILABLE:
                     raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
                 if assignee.role in auth.READ_ONLY_ROLES:
                     raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
-            item = ActionItem(
-                account_id=account_id, persona_id=body.persona_id, title=body.title,
-                description=body.description, priority=body.priority,
-                status=body.status if body.status in ("open", "in_progress", "done") else "open",
-                due_date=_parse_due_date(body.due_date), assigned_to_id=body.assigned_to_id,
-                created_by_id=user.id, source=body.source,
-            )
-            session.add(item)
-            session.commit()
-            session.refresh(item)
+            # Avoid creating duplicates if an identical open action item already exists
+            existing = (session.query(ActionItem)
+                        .filter(ActionItem.account_id == account_id,
+                                ActionItem.title == body.title,
+                                ActionItem.status.in_(("open", "in_progress", "pending_review")))
+                        .first())
+            if existing:
+                item = existing
+            else:
+                item = ActionItem(
+                    account_id=account_id, persona_id=body.persona_id, title=body.title,
+                    description=body.description, priority=body.priority,
+                    status=body.status if body.status in ("open", "in_progress", "done") else "open",
+                    due_date=_parse_due_date(body.due_date), assigned_to_id=body.assigned_to_id,
+                    created_by_id=user.id, source=body.source,
+                )
+                session.add(item)
+                session.commit()
+                session.refresh(item)
             item = (session.query(ActionItem)
                     .options(selectinload(ActionItem.persona), selectinload(ActionItem.assigned_to),
                              selectinload(ActionItem.created_by))
@@ -6384,7 +6396,11 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @app.post("/api/action-items/{item_id}/complete", tags=["8. Action Items"])
-    def complete_action_item(item_id: int, user: User = Depends(auth.require_action_item_account_access)):
+    def complete_action_item(
+        item_id: int,
+        body: Optional[ActionItemCompleteRequest] = None,
+        user: User = Depends(auth.require_action_item_account_access)
+    ):
         session = get_session()
         try:
             item = (session.query(ActionItem)
@@ -6395,6 +6411,12 @@ if FASTAPI_AVAILABLE:
                 raise HTTPException(status_code=404, detail="Action item not found")
             item.status = "done"
             item.completed_at = datetime.now(timezone.utc)
+            if body and body.comment and body.comment.strip():
+                clean_comment = body.comment.strip()
+                if item.description:
+                    item.description = f"{item.description}\n\nClosing Note: {clean_comment}"
+                else:
+                    item.description = f"Closing Note: {clean_comment}"
             session.commit()
             session.refresh(item)
             return _serialize_action_item(item)
@@ -6402,7 +6424,11 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @app.post("/api/action-items/{item_id}/reopen", tags=["8. Action Items"])
-    def reopen_action_item(item_id: int, user: User = Depends(auth.require_action_item_account_access)):
+    def reopen_action_item(
+        item_id: int,
+        body: Optional[ActionItemCompleteRequest] = None,
+        user: User = Depends(auth.require_action_item_account_access)
+    ):
         """Reopens a closed action item, resetting its completed status and restoring due evaluation."""
         session = get_session()
         try:
@@ -6414,6 +6440,12 @@ if FASTAPI_AVAILABLE:
                 raise HTTPException(status_code=404, detail="Action item not found")
             item.status = "open"
             item.completed_at = None
+            if body and body.comment and body.comment.strip():
+                clean_comment = body.comment.strip()
+                if item.description:
+                    item.description = f"{item.description}\n\nReopen Note: {clean_comment}"
+                else:
+                    item.description = f"Reopen Note: {clean_comment}"
             session.commit()
             session.refresh(item)
             return _serialize_action_item(item)

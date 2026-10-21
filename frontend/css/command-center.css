@@ -9,7 +9,11 @@
    which already supplies the 24px/28px padding + scroll + background —
    nothing extra needed here beyond a bottom gutter to match the rest of
    the app's panels. */
-.dash-main { padding-bottom: 32px; }
+.dash-main {
+  padding-bottom: 32px;
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable;
+}
 
 /* ── Header ──────────────────────────────────────────────────── */
 .cc-header {
@@ -55,6 +59,16 @@
   transition: all 0.18s ease !important;
   white-space: nowrap !important;
   cursor: pointer !important;
+  max-width: 190px !important;
+  overflow: hidden !important;
+}
+#ccAcctFilterBtnText {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
 }
 .cc-acct-filter-btn.is-filtered {
   background: var(--brand) !important;
@@ -65,9 +79,9 @@
 .cc-acct-filter-menu {
   position: absolute !important;
   top: calc(100% + 6px) !important;
-  left: 0 !important;
-  width: 310px !important;
-  max-width: 90vw !important;
+  left: 0;
+  width: 290px !important;
+  max-width: calc(100vw - 32px) !important;
   background: var(--panel-bg, #FFFFFF) !important;
   border: 1px solid var(--border-color, #CBD5E1) !important;
   border-radius: 0 !important;
@@ -205,6 +219,14 @@
   color: var(--brand, #2563EB) !important;
   font-weight: 600 !important;
 }
+.cc-sub-acct-name {
+  display: inline-block !important;
+  max-width: 250px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  vertical-align: middle !important;
+}
 [data-theme="dark"] .cc-acct-filter-menu {
   background: #1E293B !important;
   border-color: #334155 !important;
@@ -245,6 +267,7 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  max-width: 260px;
 }
 .cc-account-tag {
   display: inline-flex;
@@ -258,6 +281,18 @@
   padding: 3px 7px;
   border-radius: 0;
   animation: ccTagFade 0.15s ease;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-account-tag > span:first-of-type {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
 }
 @keyframes ccTagFade {
   from { opacity: 0; transform: scale(0.9); }
@@ -1788,6 +1823,7 @@
 .cc-track-persona-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   font-size: 0.68rem;
   font-weight: 700;
@@ -1796,10 +1832,81 @@
   letter-spacing: 0.03em;
 }
 
+.cc-track-verified-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
 .cc-track-persona-info {
   font-size: 0.78rem;
   color: var(--text-primary);
   line-height: 1.4;
+}
+
+.cc-track-persona-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cc-track-persona-sep {
+  color: var(--text-muted, #94a3b8);
+}
+
+.cc-track-persona-title {
+  color: var(--text-secondary, #64748b);
+  font-size: 0.75rem;
+}
+
+.cc-track-persona-contact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.cc-track-email-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--brand, #E46521);
+  text-decoration: none;
+  background: rgba(228, 101, 33, 0.08);
+  padding: 4px 10px;
+  border: 1px solid rgba(228, 101, 33, 0.22);
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.cc-track-email-link:hover {
+  background: var(--brand, #E46521);
+  color: #ffffff;
+  border-color: var(--brand, #E46521);
+}
+
+.cc-track-email-arrow {
+  font-size: 0.65rem;
+  opacity: 0.75;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.cc-track-email-link:hover .cc-track-email-arrow {
+  opacity: 1;
+  color: #ffffff;
+  transform: translate(1px, -1px);
 }
 
 .cc-track-pitch-box {
@@ -4798,8 +4905,6 @@
 .cc-coverage-canvas-container canvas {
   max-width: 100% !important;
   max-height: 210px !important;
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
 }
 
 /* Dark mode adjustments for Coverage Chart */
@@ -4967,6 +5072,8 @@
 
 .cc-news-account-select {
   height: 28px;
+  width: 145px;
+  max-width: 145px;
   padding: 2px 24px 2px 24px;
   font-size: 0.72rem;
   font-weight: 500;
@@ -4976,8 +5083,10 @@
   border-radius: 0;
   cursor: pointer;
   outline: none;
-  transition: all 0.15s ease;
-  max-width: 200px;
+  transition: border-color 0.15s ease;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .cc-news-account-select:hover {

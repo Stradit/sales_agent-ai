@@ -1,6 +1,6 @@
 import { esc, formatMoney } from './utils.js';
 import { ccState } from './state.js';
-import { logTouch, createTask } from './actions.js';
+import { logTouch, createTask, isTasked, markAsTasked } from './actions.js';
 import { loadRecentMovements } from './exec-movements.js';
 import { renderSkeleton } from '../skeleton.js';
 
@@ -43,7 +43,13 @@ export async function openDossier(account) {
     </div>
     <div class="cc-drawer-footer-actions">
       <button type="button" class="cc-btn cc-btn-ghost" id="ccDrawerLogTouch">Log touch</button>
-      <button type="button" class="cc-btn cc-btn-primary" id="ccDrawerCreateTask">Create task</button>
+      ${(() => {
+        const title = `Follow up with ${account.name}`;
+        const tasked = isTasked(account.name, title, account.id);
+        const btnCls = tasked ? 'cc-btn-done' : 'cc-btn-primary';
+        const btnHtml = tasked ? '<i class="fa-solid fa-check"></i> Tasked' : 'Create task';
+        return `<button type="button" class="cc-btn ${btnCls}" id="ccDrawerCreateTask" ${tasked ? 'disabled' : ''}>${btnHtml}</button>`;
+      })()}
     </div>`;
   el('ccDrawer').classList.add('open');
   el('ccDrawerBackdrop').classList.add('open');
@@ -52,8 +58,17 @@ export async function openDossier(account) {
   el('ccDrawerCreateTask').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
-    await createTask(account.name, `Follow up with ${account.name}`, { score: account.compositeScore });
-    btn.disabled = false;
+    const title = `Follow up with ${account.name}`;
+    const ok = await createTask(account.name, title, { accountId: account.id, score: account.compositeScore, source: 'dossier' });
+    if (ok) {
+      markAsTasked(account.name, title, account.id);
+      btn.innerHTML = '<i class="fa-solid fa-check"></i> Tasked';
+      btn.classList.remove('cc-btn-primary');
+      btn.classList.add('cc-btn-done');
+      btn.disabled = true;
+    } else {
+      btn.disabled = false;
+    }
   });
 
   try {

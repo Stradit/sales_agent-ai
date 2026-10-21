@@ -200,7 +200,31 @@ async function saveFx(currency, rate) {
   } catch (err) { showToast(err.message); }
 }
 
+function wireBack() {
+  const btn = $('fcBack');
+  if (!btn) return;
+  btn.addEventListener('click', (e) => {
+    let internal = false;
+    let isCrmSibling = false;
+    try {
+      const ref = document.referrer ? new URL(document.referrer) : null;
+      internal = !!ref && ref.origin === location.origin && ref.pathname !== location.pathname && !ref.pathname.startsWith('/login');
+      if (ref && ['/deals', '/email-sync', '/introductions'].includes(ref.pathname)) {
+        isCrmSibling = true;
+      }
+    } catch { /* ignore */ }
+    if (internal && !isCrmSibling && history.length > 1) {
+      e.preventDefault();
+      history.back();
+    } else {
+      e.preventDefault();
+      location.assign('/accounts');
+    }
+  });
+}
+
 function wire() {
+  wireBack();
   ['fcPeriod', 'fcBusinessLine', 'fcOwner'].forEach(id => $(id).addEventListener('change', () => { st.dealFilter = null; load(); }));
   document.querySelector('.fc-seg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-group]');

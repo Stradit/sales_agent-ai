@@ -362,6 +362,42 @@
   color: #d97706;
   font-weight: 600;
 }
+.tp-tag-playbook {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4f46e5;
+  font-weight: 600;
+}
+.tp-tag-deal {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  font-weight: 600;
+}
+.tp-tag-hiring {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0284c7;
+  font-weight: 600;
+}
+.tp-tag-dossier {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+  font-weight: 600;
+}
+[data-theme="dark"] .tp-tag-playbook {
+  background: rgba(99, 102, 241, 0.22);
+  color: #a5b4fc;
+}
+[data-theme="dark"] .tp-tag-deal {
+  background: rgba(16, 185, 129, 0.22);
+  color: #6ee7b7;
+}
+[data-theme="dark"] .tp-tag-hiring {
+  background: rgba(14, 165, 233, 0.22);
+  color: #7dd3fc;
+}
+[data-theme="dark"] .tp-tag-dossier {
+  background: rgba(148, 163, 184, 0.22);
+  color: #cbd5e1;
+}
 .tp-tag-pending {
   background: rgba(147, 51, 234, 0.12);
   color: var(--brand);
@@ -660,6 +696,94 @@
   margin-top: 8px;
   padding-top: 14px;
   border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+/* ── Closing Reason / Comment Callout ────────────────────────── */
+.tp-closing-comment {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(16, 185, 129, 0.08);
+  border-left: 3px solid #10b981;
+  border-radius: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.tp-closing-comment i {
+  color: #10b981;
+  margin-top: 2px;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.tp-closing-comment-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.tp-closing-comment-label {
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #047857;
+}
+.tp-closing-comment-text {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+[data-theme="dark"] .tp-closing-comment {
+  background: rgba(16, 185, 129, 0.12);
+  border-left-color: #34d399;
+}
+[data-theme="dark"] .tp-closing-comment-label {
+  color: #34d399;
+}
+
+/* ── Reopen Reason / Comment Callout ─────────────────────────── */
+.tp-reopen-comment {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(14, 165, 233, 0.08);
+  border-left: 3px solid #0284c7;
+  border-radius: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.tp-reopen-comment i {
+  color: #0284c7;
+  margin-top: 2px;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.tp-reopen-comment-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.tp-reopen-comment-label {
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #0284c7;
+}
+.tp-reopen-comment-text {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+[data-theme="dark"] .tp-reopen-comment {
+  background: rgba(14, 165, 233, 0.12);
+  border-left-color: #38bdf8;
+}
+[data-theme="dark"] .tp-reopen-comment-label {
+  color: #38bdf8;
 }
 
 /* ── Responsive adjustments ──────────────────────────────────── */
