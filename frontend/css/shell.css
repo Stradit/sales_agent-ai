@@ -300,15 +300,34 @@
 }
 
 .profile-role-tag.role-super-admin {
-  background: rgba(228, 101, 33, 0.16);
+  background: rgba(99, 102, 241, 0.16);
   color: #818cf8;
-  border: 1px solid rgba(228, 101, 33, 0.3);
+  border: 1px solid rgba(99, 102, 241, 0.3);
 }
 
+.profile-role-tag.role-sales,
 .profile-role-tag.role-user {
   background: rgba(16, 185, 129, 0.14);
   color: #34d399;
   border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.profile-role-tag.role-manager {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.profile-role-tag.role-viewer {
+  background: rgba(59, 130, 246, 0.14);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.profile-role-tag.role-partner {
+  background: rgba(6, 182, 212, 0.14);
+  color: #22d3ee;
+  border: 1px solid rgba(6, 182, 212, 0.3);
 }
 
 .profile-dropdown-divider {

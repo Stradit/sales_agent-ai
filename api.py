@@ -240,9 +240,10 @@ if FASTAPI_AVAILABLE:
 
     def _user_public(u: User) -> Dict[str, Any]:
         is_sa = u.role == "super_admin"
+        role_label = auth.ROLE_LABELS.get(u.role, u.role.replace("_", " ").title() if u.role else "Sales Rep")
         return {
             "id": u.id, "email": u.email, "full_name": u.full_name,
-            "role": u.role, "is_active": u.is_active,
+            "role": u.role, "role_label": role_label, "is_active": u.is_active,
             "has_dashboard_access": is_sa or (u.has_dashboard_access if u.has_dashboard_access is not None else True),
             "has_command_center_access": is_sa or (u.has_command_center_access if u.has_command_center_access is not None else True),
             "has_tasks_access": is_sa or (u.has_tasks_access if u.has_tasks_access is not None else True),
@@ -6141,8 +6142,8 @@ if FASTAPI_AVAILABLE:
                 assignee = session.query(User).filter_by(id=body.assigned_to_id).first()
                 if not assignee:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
-                if assignee.role in ("super_admin", "admin"):
-                    raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in ("super_admin", "admin", "sales_manager"):
+                    raise HTTPException(status_code=400, detail="Tasks can only be assigned to sales team members, not high-authority roles (administrators or managers).")
                 if assignee.role in auth.READ_ONLY_ROLES:
                     raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
             # Avoid creating duplicates if an identical open action item already exists
@@ -6203,8 +6204,8 @@ if FASTAPI_AVAILABLE:
                 assignee = session.query(User).filter_by(id=assigned_id).first()
                 if not assignee:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
-                if assignee.role in ("super_admin", "admin"):
-                    raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in ("super_admin", "admin", "sales_manager"):
+                    raise HTTPException(status_code=400, detail="Tasks can only be assigned to sales team members, not high-authority roles (administrators or managers).")
                 if assignee.role in auth.READ_ONLY_ROLES:
                     raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
             elif user.role == "user":
@@ -6284,8 +6285,8 @@ if FASTAPI_AVAILABLE:
                 assignee = session.query(User).filter_by(id=body.assigned_to_id).first()
                 if not assignee:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
-                if assignee.role in ("super_admin", "admin"):
-                    raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in ("super_admin", "admin", "sales_manager"):
+                    raise HTTPException(status_code=400, detail="Tasks can only be assigned to sales team members, not high-authority roles (administrators or managers).")
                 if assignee.role in auth.READ_ONLY_ROLES:
                     raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
 
@@ -6530,6 +6531,7 @@ if FASTAPI_AVAILABLE:
         status: Optional[str] = None,
         priority: Optional[str] = None,
         account_id: Optional[int] = None,
+        account_ids: Optional[str] = None,
         assigned_to_id: Optional[int] = None,
         search: Optional[str] = None,
         user: User = Depends(auth.get_current_user),
@@ -6553,7 +6555,14 @@ if FASTAPI_AVAILABLE:
             elif assigned_to_id is not None:
                 query = query.filter(ActionItem.assigned_to_id == assigned_to_id)
 
-            if account_id is not None:
+            if account_ids:
+                try:
+                    parsed_ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()]
+                    if parsed_ids:
+                        query = query.filter(ActionItem.account_id.in_(parsed_ids))
+                except ValueError:
+                    pass
+            elif account_id is not None:
                 query = query.filter(ActionItem.account_id == account_id)
             if priority:
                 query = query.filter(ActionItem.priority == priority)
@@ -6688,17 +6697,19 @@ if FASTAPI_AVAILABLE:
 
     @app.get("/api/me/action-items/export", tags=["8. Action Items"])
     def export_my_action_items(status: Optional[str] = None, account_id: Optional[int] = None,
+                               account_ids: Optional[str] = None,
                                priority: Optional[str] = None, user: User = Depends(auth.get_current_user)):
         """My Tasks as Excel — same access rules and filters as the /tasks page."""
         from apps.sales_copilot import exports
-        items = list_my_action_items(status=status, account_id=account_id, priority=priority, user=user)["action_items"]
+        items = list_my_action_items(status=status, account_id=account_id, account_ids=account_ids, priority=priority, user=user)["action_items"]
         headers = ["Title", "Status", "Priority", "Due", "Account", "Contact", "Description", "Created"]
         rows = [[i.get("title"), i.get("status"), i.get("priority"), (i.get("due_date") or "")[:10],
                  i.get("account_name"), (i.get("persona") or {}).get("name") if isinstance(i.get("persona"), dict) else i.get("persona_name"),
                  i.get("description"), (i.get("created_at") or "")[:10]] for i in items]
+        filter_acct_str = account_ids or (str(account_id) if account_id else 'all')
         content = exports.rows_xlsx("My tasks", headers, rows, [48, 12, 10, 12, 22, 24, 60, 12],
                                     about=[["Exported for", user.full_name or user.email], ["Exported at", exports._now()],
-                                           ["Filters", f"status={status or 'all'}, priority={priority or 'all'}, account={account_id or 'all'}"],
+                                           ["Filters", f"status={status or 'all'}, priority={priority or 'all'}, account={filter_acct_str}"],
                                            ["Rows", len(rows)]])
         return _xlsx_response(content, "my-tasks.xlsx")
 

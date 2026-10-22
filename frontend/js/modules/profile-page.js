@@ -16,6 +16,7 @@ import { initThemeToggle } from './theme.js';
 import { initTopbarAuth } from './topbar-auth.js';
 import { mountTimeline } from './activity-timeline.js';
 import { openContactEditor } from './crm-extras.js';
+import { wireBackButton } from './page-lineage.js';
 
 initThemeToggle();
 
@@ -169,13 +170,13 @@ async function init() {
   const personaId = parseInt(params.get('persona_id'), 10);
   const main = el('profilePageMain');
   const backLink = el('profilePageBack');
+  const fallbackUrl = accountId ? `/?account=${encodeURIComponent(accountId)}` : '/';
+  if (backLink) wireBackButton(backLink, fallbackUrl, true);
 
   if (!accountId || !personaId) {
     main.innerHTML = `<div class="profile-page-error">Missing or invalid link — this page needs both an account and a contact to show.</div>`;
     return;
   }
-
-  backLink.href = `/?account=${encodeURIComponent(accountId)}`;
 
   // This page opens in its own tab — restore the session from the refresh
   // cookie first (also renders the shared topbar's theme toggle / auth widget).

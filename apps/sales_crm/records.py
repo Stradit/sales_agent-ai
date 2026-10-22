@@ -64,9 +64,10 @@ def account_crm(account_id: int, user: User = Depends(permissions.require_roles(
                   {"a": account_id}).mappings().fetchone()
     if not r:
         raise HTTPException(404, "Account not found.")
-    return {**dict(r), "assignable": assignable_users(s, account_id),
-            "business_lines": [dict(x) for x in s.execute(text("SELECT id, name FROM business_lines WHERE active ORDER BY sort, name")).mappings()],
-            "can_edit": not (auth.AUTH_ENFORCED and user.role in auth.READ_ONLY_ROLES)}
+    admin = permissions.is_admin(user)
+    return {**dict(r), "assignable": assignable_users(s, account_id) if admin else [],
+            "business_lines": [dict(x) for x in s.execute(text("SELECT id, name FROM business_lines WHERE active ORDER BY sort, name")).mappings()] if admin else [],
+            "can_edit": admin}
 
 
 class AccountCrmIn(BaseModel):
@@ -78,6 +79,8 @@ class AccountCrmIn(BaseModel):
 
 @router.patch("/accounts/{account_id}")
 def update_account_crm(account_id: int, body: AccountCrmIn, user: User = Depends(permissions.require_write), s=Depends(_session)):
+    if auth.AUTH_ENFORCED and not permissions.is_admin(user):
+        raise HTTPException(403, "Only administrators have authority to assign account owners or business lines.")
     _scope_check(s, user, account_id)
     cur = s.execute(text("SELECT display_name, owner_user_id FROM accounts WHERE id = :a"), {"a": account_id}).fetchone()
     details: Dict[str, Any] = {}

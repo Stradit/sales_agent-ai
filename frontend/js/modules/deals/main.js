@@ -400,7 +400,7 @@ function renderRoom() {
           <a class="dl-warm-link" href="/introductions?new=1&account_id=${d.account_id}"><i class="fa-solid fa-route"></i> Who can introduce me?</a></div>` : ''}
         ${d.stakeholders.map(p => `<div class="dl-person">
             <span class="dl-avatar" ${photoAttr(p, p.persona_id)}>${esc(initials(p.name))}</span>
-            <div><div class="dl-person-name"><a href="/profile?account=${p.account_id}&persona_id=${p.persona_id}" target="_blank" rel="noopener">${esc(p.name)}</a></div>
+            <div><div class="dl-person-name"><a href="/profile?account=${p.account_id}&persona_id=${p.persona_id}&from=${encodeURIComponent(location.pathname + location.search)}" target="_blank" rel="noopener">${esc(p.name)}</a></div>
               <div class="dl-person-title">${esc(p.title || '')}</div>
               ${p.recent_move ? '<div class="dl-person-flag"><i class="fa-solid fa-user-clock"></i> Recent leadership change</div>' : ''}</div>
             <div class="dl-person-ctl">

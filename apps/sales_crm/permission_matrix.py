@@ -627,13 +627,17 @@ def main() -> int:
         check("manager deletes rep's hand-added contact", c.delete(f"/api/crm/contacts/{mcid}", headers=H["manager"]), 403)
         check("pipeline contact can't be deleted", c.delete(f"/api/crm/contacts/{persona}", headers=H["rep"]), 400)
         check("rep deletes own contact", c.delete(f"/api/crm/contacts/{mcid}", headers=H["rep"]), 200)
-        cr = check("rep reads account owner info", c.get(f"/api/crm/accounts/{a_in}/crm", headers=H["rep"]), 200).json()
+        cr_admin = check("admin reads account owner info", c.get(f"/api/crm/accounts/{a_in}/crm", headers=H["admin"]), 200).json()
+        cr_rep = check("rep reads account owner info", c.get(f"/api/crm/accounts/{a_in}/crm", headers=H["rep"]), 200).json()
         results.append(("assignable includes rep + manager, not outsider",
-                        1 if {rep, manager} <= {u["id"] for u in cr.get("assignable", [])} and outsider not in {u["id"] for u in cr.get("assignable", [])} else 0, 1))
+                        1 if {rep, manager} <= {u["id"] for u in cr_admin.get("assignable", [])} and outsider not in {u["id"] for u in cr_admin.get("assignable", [])} else 0, 1))
+        results.append(("non-admin cannot edit and has no assignable users",
+                        1 if cr_rep.get("can_edit") is False and cr_rep.get("assignable") == [] else 0, 1))
         orig_owner = s.execute(text("SELECT owner_user_id, primary_business_line_id FROM accounts WHERE id = :a"), {"a": a_in}).fetchone()
-        check("owner without account access refused", c.patch(f"/api/crm/accounts/{a_in}", headers=H["rep"], json={"owner_user_id": outsider}), 400)
+        check("owner without account access refused", c.patch(f"/api/crm/accounts/{a_in}", headers=H["admin"], json={"owner_user_id": outsider}), 400)
         check("viewer sets account owner", c.patch(f"/api/crm/accounts/{a_in}", headers=H["viewer"], json={"owner_user_id": rep}), 403)
-        check("rep sets manager as owner + business line", c.patch(f"/api/crm/accounts/{a_in}", headers=H["rep"],
+        check("rep sets account owner refused", c.patch(f"/api/crm/accounts/{a_in}", headers=H["rep"], json={"owner_user_id": manager}), 403)
+        check("admin sets manager as owner + business line", c.patch(f"/api/crm/accounts/{a_in}", headers=H["admin"],
                                                                    json={"owner_user_id": manager, "primary_business_line_id": bl}), 200)
         n = s.execute(text("SELECT count(*) FROM crm_notifications WHERE user_id = :u AND kind = 'account_assigned'"), {"u": manager}).scalar()
         results.append(("new owner gets an account_assigned notification", 1 if n == 1 else 0, 1))

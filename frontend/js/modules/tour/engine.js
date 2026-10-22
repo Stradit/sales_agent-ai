@@ -20,11 +20,16 @@ export function getTourStorageKey(pageKey) {
     if (user && (user.id || user.email)) {
       userIdentifier = String(user.id || user.email).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
     } else {
-      const rawUser = localStorage.getItem('user');
-      if (rawUser) {
-        const parsed = JSON.parse(rawUser);
-        if (parsed && (parsed.id || parsed.email)) {
-          userIdentifier = String(parsed.id || parsed.email).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      const storedId = localStorage.getItem('doshin_user_id') || localStorage.getItem('doshin_user_email');
+      if (storedId) {
+        userIdentifier = String(storedId).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      } else {
+        const rawUser = localStorage.getItem('user');
+        if (rawUser) {
+          const parsed = JSON.parse(rawUser);
+          if (parsed && (parsed.id || parsed.email)) {
+            userIdentifier = String(parsed.id || parsed.email).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+          }
         }
       }
     }
@@ -33,18 +38,107 @@ export function getTourStorageKey(pageKey) {
 }
 
 /**
+ * Checks if a tour for the given page has already been completed, skipped, or dismissed.
+ */
+export function isTourSeen(pageKey) {
+  if (!pageKey) return true;
+
+  try {
+    // 1. If tour was dismissed globally, in this session, or completed across the app
+    if (localStorage.getItem('doshin_tour_dismissed_global') === 'true' ||
+        sessionStorage.getItem('doshin_tour_dismissed_session') === 'true' ||
+        localStorage.getItem('doshin_tour_seen_all') === 'true') {
+      return true;
+    }
+
+    // 2. If this specific page tour was dismissed or completed
+    if (localStorage.getItem(`doshin_tour_dismissed_${pageKey}`) === 'true' ||
+        localStorage.getItem(`doshin_tour_completed_${pageKey}`) === 'true' ||
+        localStorage.getItem(`doshin_tour_seen_${pageKey}`) === 'true' ||
+        localStorage.getItem(`doshin_tour_${pageKey}`) === 'true') {
+      return true;
+    }
+
+    // 3. Check version-specific keys (both generic and fallback)
+    if (localStorage.getItem(`doshin_tour_${TOUR_RELEASE_VERSION}_${pageKey}`) === 'true' ||
+        localStorage.getItem(`doshin_tour_${TOUR_RELEASE_VERSION}_user_${pageKey}`) === 'true') {
+      return true;
+    }
+
+    // 4. Check user-scoped key
+    const storageKey = getTourStorageKey(pageKey);
+    if (localStorage.getItem(storageKey) === 'true') {
+      return true;
+    }
+
+    // 5. Scan any matching key in localStorage for this pageKey
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('doshin_tour_') && k.endsWith(`_${pageKey}`) && localStorage.getItem(k) === 'true') {
+        return true;
+      }
+    }
+  } catch (_) {}
+
+  return false;
+}
+
+/**
+ * Marks a tour as completed or dismissed in storage so it never re-triggers on refresh.
+ */
+export function markTourSeen(pageKey, isSkipped = false) {
+  if (!pageKey) return;
+  try {
+    const primaryKey = getTourStorageKey(pageKey);
+    localStorage.setItem(primaryKey, 'true');
+
+    // Also mark generic keys to avoid race conditions when user identity loads later
+    localStorage.setItem(`doshin_tour_${TOUR_RELEASE_VERSION}_${pageKey}`, 'true');
+    localStorage.setItem(`doshin_tour_seen_${pageKey}`, 'true');
+    localStorage.setItem(`doshin_tour_${pageKey}`, 'true');
+    localStorage.setItem(`doshin_tour_${TOUR_RELEASE_VERSION}_user_${pageKey}`, 'true');
+    localStorage.setItem(`doshin_tour_user_${pageKey}`, 'true');
+
+    if (isSkipped) {
+      localStorage.setItem(`doshin_tour_dismissed_${pageKey}`, 'true');
+      localStorage.setItem('doshin_tour_dismissed_global', 'true');
+      sessionStorage.setItem('doshin_tour_dismissed_session', 'true');
+    } else {
+      localStorage.setItem(`doshin_tour_completed_${pageKey}`, 'true');
+      sessionStorage.setItem('doshin_tour_completed_session', 'true');
+    }
+  } catch (_) {}
+}
+
+/**
  * Clears tour completion flags for testing / re-triggering
  */
 export function resetTourSeen(pageKey) {
-  if (pageKey) {
-    localStorage.removeItem(getTourStorageKey(pageKey));
-  } else {
-    Object.keys(localStorage).forEach((k) => {
-      if (k.startsWith('doshin_tour_')) {
-        localStorage.removeItem(k);
+  try {
+    if (pageKey) {
+      localStorage.removeItem(getTourStorageKey(pageKey));
+      localStorage.removeItem(`doshin_tour_${TOUR_RELEASE_VERSION}_${pageKey}`);
+      localStorage.removeItem(`doshin_tour_seen_${pageKey}`);
+      localStorage.removeItem(`doshin_tour_${pageKey}`);
+      localStorage.removeItem(`doshin_tour_dismissed_${pageKey}`);
+      localStorage.removeItem(`doshin_tour_completed_${pageKey}`);
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('doshin_tour_') && k.endsWith(`_${pageKey}`)) {
+          localStorage.removeItem(k);
+        }
       }
-    });
-  }
+    } else {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('doshin_tour_')) {
+          localStorage.removeItem(k);
+        }
+      }
+      sessionStorage.removeItem('doshin_tour_dismissed_session');
+      sessionStorage.removeItem('doshin_tour_completed_session');
+    }
+  } catch (_) {}
 }
 
 if (typeof window !== 'undefined') {
@@ -52,6 +146,8 @@ if (typeof window !== 'undefined') {
     start: (key) => startTour(key, true),
     reset: resetTourSeen,
     getStorageKey: getTourStorageKey,
+    isSeen: isTourSeen,
+    markSeen: markTourSeen,
     version: TOUR_RELEASE_VERSION
   };
 }
@@ -83,6 +179,9 @@ function clearActiveTarget() {
  */
 export function detectPageTourKey() {
   const path = (window.location.pathname || '').toLowerCase();
+  if (path.includes('login') || path.includes('signup') || path.includes('forgot') || path.includes('reset')) {
+    return null;
+  }
   if (path.includes('command-center')) return 'command-center';
   if (path.includes('copilot') && !path.includes('copilot-pipeline')) return 'copilot';
   if (path.includes('capture')) return 'capture';
@@ -101,6 +200,9 @@ function ensureTourDom() {
   if (!backdropEl) {
     backdropEl = document.createElement('div');
     backdropEl.className = 'doshin-tour-backdrop';
+    backdropEl.addEventListener('click', () => {
+      endTour(true);
+    });
     document.body.appendChild(backdropEl);
   }
 
@@ -137,12 +239,12 @@ function isElementVisible(el) {
  */
 export function startTour(pageKey, force = false) {
   const key = pageKey || detectPageTourKey();
+  if (!key) return;
   const tourData = TOUR_PAGES[key];
   if (!tourData || !tourData.steps || tourData.steps.length === 0) return;
 
-  const storageKey = getTourStorageKey(key);
-  if (!force && localStorage.getItem(storageKey)) {
-    return; // Already completed and not explicitly requested
+  if (!force && isTourSeen(key)) {
+    return; // Already completed or dismissed and not explicitly requested
   }
 
   ensureTourDom();
@@ -227,7 +329,7 @@ export function endTour(isSkipped = false) {
   }
 
   if (currentTourKey) {
-    localStorage.setItem(getTourStorageKey(currentTourKey), 'true');
+    markTourSeen(currentTourKey, isSkipped);
   }
 
   if (boundKeyHandler) {
@@ -528,16 +630,28 @@ export function initTourAutoLaunch(delayMs = 1200) {
     topbarBtn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      startTour(detectPageTourKey(), true);
+      const pageKey = detectPageTourKey();
+      if (pageKey) startTour(pageKey, true);
     };
   }
 
-  // Automatic first-login / first-visit launch
   const key = detectPageTourKey();
+  if (!key) return;
+
+  // Never auto-launch on login / auth pages
+  const path = (window.location.pathname || '').toLowerCase();
+  if (path.includes('login') || path.includes('signup') || path.includes('forgot') || path.includes('reset')) {
+    return;
+  }
+
+  // If already seen / dismissed, do NOT queue auto-launch
+  if (isTourSeen(key)) {
+    return;
+  }
+
+  // Automatic first-visit launch with safety check
   setTimeout(() => {
-    const storageKey = getTourStorageKey(key);
-    const seen = localStorage.getItem(storageKey);
-    if (!seen) {
+    if (!isTourSeen(key)) {
       startTour(key, false);
     }
   }, delayMs);

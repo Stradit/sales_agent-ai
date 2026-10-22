@@ -4,6 +4,7 @@
 // Styles: css/crm-extras.css. Viewers see values read-only (the API refuses writes anyway).
 import { esc } from './utils.js';
 import { showToast } from './toast.js';
+import { getCurrentUser } from './auth-client.js';
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
@@ -70,16 +71,22 @@ export async function mountAccountCrm(el, accountId) {
   if (!el || !accountId) return;
   let d;
   try { d = await api(`/api/crm/accounts/${accountId}/crm`); } catch { el.innerHTML = ''; return; }
-  const ro = !d.can_edit || isViewer();
+  const me = getCurrentUser();
+  const isAdmin = Boolean(me && (me.role === 'super_admin' || me.role === 'admin'));
+  const ro = !isAdmin || !d.can_edit || isViewer();
   const render = () => {
     el.innerHTML = `<span class="cx-meta"><i class="fa-solid fa-user-tie"></i> Owner
         ${ro ? `<strong>${esc(d.owner_name || 'Unassigned')}</strong>` : `<select data-crm="owner" aria-label="Account owner">
-          <option value="">Unassigned</option>${d.assignable.map(u => `<option value="${u.id}"${u.id === d.owner_user_id ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`}</span>
+          <option value="">Unassigned</option>${(d.assignable || []).map(u => `<option value="${u.id}"${u.id === d.owner_user_id ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`}</span>
       <span class="cx-meta"><i class="fa-solid fa-layer-group"></i> Business line
         ${ro ? `<strong>${esc(d.business_line_name || 'Not set')}</strong>` : `<select data-crm="bl" aria-label="Primary business line">
-          <option value="">Not set</option>${d.business_lines.map(b => `<option value="${b.id}"${b.id === d.primary_business_line_id ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`}</span>`;
+          <option value="">Not set</option>${(d.business_lines || []).map(b => `<option value="${b.id}"${b.id === d.primary_business_line_id ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`}</span>`;
   };
   render();
+  if (ro) {
+    el.onchange = null;
+    return;
+  }
   el.onchange = async (e) => {
     const t = e.target.closest('[data-crm]');
     if (!t) return;

@@ -64,3 +64,10 @@ scripts/*_pdf.py
 
 # Filled-in production settings (real keys) — never committed. Template: deploy/.env.production.example
 deploy/.env.production
+
+# Agent skills and workflow configurations
+.agents/
+skills/
+*SKILL.md
+*skill.md
+

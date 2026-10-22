@@ -67,13 +67,14 @@ def main() -> int:
     try:
         acct = s.execute(text("SELECT id, display_name FROM accounts ORDER BY id LIMIT 1")).fetchone()
         persona = s.execute(text("SELECT id FROM personas WHERE account_id = :a ORDER BY id LIMIT 1"), {"a": acct[0]}).scalar()
+        admin = mk("super_admin")
         manager = mk("sales_manager")
         rep = mk("user", manager)
         partner = mk("partner")
         s.execute(text("INSERT INTO user_account_access (user_id, account_id) VALUES (:u, :a)"), {"u": rep, "a": acct[0]})
         s.commit()
-        notify.suppress({rep, manager, partner})     # only these throw-away users can ever get a (stub) email
-        H = {"rep": tok(rep), "manager": tok(manager), "partner": tok(partner)}
+        notify.suppress({admin, rep, manager, partner})     # only these throw-away users can ever get a (stub) email
+        H = {"admin": tok(admin), "rep": tok(rep), "manager": tok(manager), "partner": tok(partner)}
 
         # 1. While the org switch is off, notifications are recorded as 'held' and nothing is sent
         notify.enabled = lambda _s: False
@@ -128,7 +129,8 @@ def main() -> int:
         introductions.mark_stale(s)
         check("stale intro → owner", len(outbox(manager, "intro_stale")) == 1)
         orig = s.execute(text("SELECT owner_user_id FROM accounts WHERE id = :a"), {"a": acct[0]}).scalar()
-        c.patch(f"/api/crm/accounts/{acct[0]}", headers=H["rep"], json={"owner_user_id": manager})
+        check("rep cannot assign account owner", c.patch(f"/api/crm/accounts/{acct[0]}", headers=H["rep"], json={"owner_user_id": manager}).status_code == 403)
+        c.patch(f"/api/crm/accounts/{acct[0]}", headers=H["admin"], json={"owner_user_id": manager})
         check("new account owner notified", len(outbox(manager, "account_assigned")) == 1)
         s.execute(text("UPDATE accounts SET owner_user_id = :o WHERE id = :a"), {"o": orig, "a": acct[0]}); s.commit()
         t = c.post("/api/crm/notifications/test", headers=H["rep"]).json()

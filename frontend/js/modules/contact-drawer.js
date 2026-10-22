@@ -191,7 +191,8 @@ contactDrawer.addEventListener('click', async function (e) {
   if (viewProfileBtn) {
     const p = state.activeDrawerPersona;
     if (p && p.id != null && state.activeAccountId != null) {
-      window.open(`/profile?account=${encodeURIComponent(state.activeAccountId)}&persona_id=${encodeURIComponent(p.id)}`, '_blank', 'noopener');
+      const fromPath = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
+      window.open(`/profile?account=${encodeURIComponent(state.activeAccountId)}&persona_id=${encodeURIComponent(p.id)}&from=${fromPath}`, '_blank', 'noopener');
     }
     return;
   }

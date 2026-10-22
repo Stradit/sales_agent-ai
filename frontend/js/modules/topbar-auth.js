@@ -30,17 +30,45 @@ document.getElementById('myTasksDrawerClose')?.addEventListener('click', closeMy
 document.getElementById('myTasksDrawerBackdrop')?.addEventListener('click', closeMyTasksDrawer);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMyTasksDrawer(); });
 
-const ROLE_NAMES = { super_admin: 'Super Administrator', sales_manager: 'Sales Manager', user: 'Sales Rep',
-  viewer: 'Viewer (read-only)', partner: 'Partner / Advisor' };
+const ROLE_CONFIG = {
+  super_admin: { label: 'Super Admin', className: 'role-super-admin', icon: 'bi-shield-check' },
+  sales_manager: { label: 'Sales Manager', className: 'role-manager', icon: 'bi-briefcase-fill' },
+  user: { label: 'Sales Rep', className: 'role-sales', icon: 'bi-award-fill' },
+  sales_rep: { label: 'Sales Rep', className: 'role-sales', icon: 'bi-award-fill' },
+  viewer: { label: 'Viewer', className: 'role-viewer', icon: 'bi-eye' },
+  partner: { label: 'Partner / Advisor', className: 'role-partner', icon: 'bi-handshake' }
+};
 
-function formatUserRole(role) {
-  if (ROLE_NAMES[role]) return ROLE_NAMES[role];
-  if (!role) return 'Standard User';
-  const r = String(role).toLowerCase().replace(/_/g, ' ');
-  if (r === 'super admin') return 'Super Administrator';
-  if (r === 'ae' || r === 'sales rep') return 'Account Executive';
-  if (r === 'leader' || r === 'sales leader') return 'Sales Leader';
-  return r.charAt(0).toUpperCase() + r.slice(1);
+export function getUserRoleBadge(user) {
+  if (!user) return { label: 'Sales Rep', className: 'role-sales', icon: 'bi-award-fill' };
+  const roleKey = (user.role || '').toLowerCase().trim();
+  const assignedLabel = user.role_label || '';
+
+  if (ROLE_CONFIG[roleKey]) {
+    const config = ROLE_CONFIG[roleKey];
+    return {
+      ...config,
+      label: assignedLabel || config.label
+    };
+  }
+
+  // Any custom role assigned by super admin
+  if (roleKey) {
+    const formatted = assignedLabel || roleKey
+      .replace(/[_-]+/g, ' ')
+      .split(/\s+/)
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+    const isAdm = roleKey.includes('admin');
+    const isMgr = roleKey.includes('manager') || roleKey.includes('lead');
+    return {
+      label: formatted,
+      className: isAdm ? 'role-super-admin' : (isMgr ? 'role-manager' : 'role-sales'),
+      icon: isAdm ? 'bi-shield-check' : (isMgr ? 'bi-briefcase-fill' : 'bi-award-fill')
+    };
+  }
+
+  return { label: assignedLabel || 'Sales Rep', className: 'role-sales', icon: 'bi-award-fill' };
 }
 
 function getUserInitials(user) {
@@ -75,12 +103,13 @@ function render() {
   const displayName = user.full_name || (user.email ? user.email.split('@')[0] : 'User');
   const initials = getUserInitials(user);
   const isSuperAdmin = user.role === 'super_admin';
+  const roleBadge = getUserRoleBadge(user);
 
   el.innerHTML = `
     ${showTasks ? '<button type="button" id="topbarMyTasksBtn" class="topbar-link topbar-link-btn" title="View assigned action items"><i class="bi bi-list-check"></i> My Tasks <span class="tab-badge" id="topbarMyTasksBadge">…</span></button>' : ''}
     
     <div class="topbar-profile-container" id="topbarProfileContainer">
-      <button type="button" class="topbar-profile-btn" id="topbarProfileBtn" aria-expanded="false" aria-haspopup="true" title="User profile for ${esc(displayName)}">
+      <button type="button" class="topbar-profile-btn" id="topbarProfileBtn" aria-expanded="false" aria-haspopup="true" title="User profile for ${esc(displayName)} (${esc(roleBadge.label)})">
         <div class="topbar-profile-avatar">${esc(initials)}</div>
         <span class="topbar-profile-label">${esc(displayName)}</span>
         <i class="bi bi-chevron-down topbar-profile-arrow"></i>
@@ -96,9 +125,9 @@ function render() {
         </div>
 
         <div class="profile-dropdown-role-row">
-          <span class="profile-role-tag ${isSuperAdmin ? 'role-super-admin' : 'role-user'}">
-            <i class="bi ${isSuperAdmin ? 'bi-shield-check' : 'bi-person-badge'}"></i>
-            ${isSuperAdmin ? 'Super Admin' : 'User'}
+          <span class="profile-role-tag ${roleBadge.className}">
+            <i class="bi ${roleBadge.icon}"></i>
+            ${esc(roleBadge.label)}
           </span>
         </div>
 

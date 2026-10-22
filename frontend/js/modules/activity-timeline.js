@@ -60,8 +60,9 @@ export function mountTimeline(el, ctx) {
   function linkChips(a) {
     return a.links.filter(l => `${l.object_type}:${l.object_id}` !== selfKey && !(l.object_type === 'account' && ctx.objectType !== 'account' && l.matched_by === 'derived'))
       .map(l => {
+        const fromPath = encodeURIComponent(window.location.pathname + window.location.search);
         const href = l.object_type === 'deal' ? `/deals?deal=${l.object_id}` : l.object_type === 'introduction' ? `/introductions?intro=${l.object_id}`
-          : l.object_type === 'persona' ? `/profile?account=${l.persona_account_id}&persona_id=${l.object_id}` : `/?account=${l.object_id}`;
+          : l.object_type === 'persona' ? `/profile?account=${l.persona_account_id}&persona_id=${l.object_id}&from=${fromPath}` : `/?account=${l.object_id}`;
         return `<a class="at-chip" href="${href}"><i class="fa-solid ${OBJ_ICON[l.object_type]}"></i> ${esc(l.name || l.object_type)}</a>`;
       }).join('');
   }
