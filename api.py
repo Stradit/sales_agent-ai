@@ -446,48 +446,40 @@ if FASTAPI_AVAILABLE:
                 "grant access to specific accounts shortly; ask them if you need "
                 "one urgently."
             )
+            # One invitation email whose only button sets the password: an
+            # admin-set temp password is a worse first-run experience than the
+            # user picking their own, and never having to see the temp password
+            # anywhere (audit log, admin's clipboard) is a small but real
+            # security win. Setting it is also what lets them sign in, so a
+            # separate "Sign In" welcome email only adds noise.
+            reset_token = auth.issue_password_reset_token(
+                session, new_user, expire_minutes=auth.INVITE_TOKEN_EXPIRE_HOURS * 60)
+            reset_link = f"{base_url}/reset-password?token={reset_token}"
+            invited_by = current.full_name or current.email
+            expiry_note = (
+                f"This link expires in {auth.INVITE_TOKEN_EXPIRE_HOURS} hours. If it has expired, "
+                f"use \"Forgot password\" on the sign-in page ({base_url}/login) to get a new one."
+            )
             background_tasks.add_task(
                 email_sender.send_email,
                 new_user.email,
-                "Welcome to Doshin",
+                "You're invited to Doshin - set your password",
                 (
                     f"Hi {new_user.full_name or new_user.email},\n\n"
-                    f"An account has been created for you on Doshin by "
-                    f"{current.full_name or current.email}.\n\n"
+                    f"{invited_by} has invited you to Doshin.\n\n"
                     f"Email: {new_user.email}\nRole: {new_user.role}\n\n"
                     f"Access: {access_note}\n\n"
-                    f"Sign in here: {base_url}/login\n"
-                    "You'll receive a separate email shortly to set your own password.\n"
+                    f"Set your password to activate your account:\n{reset_link}\n\n"
+                    f"{expiry_note}\n"
                 ),
                 html_body=email_sender.render_html(
                     "Welcome to Doshin",
                     [f"Hi {new_user.full_name or new_user.email},",
-                     f"An account has been created for you by {current.full_name or current.email}.",
+                     f"{invited_by} has invited you to Doshin. Set your password to activate your account.",
                      f"Email: {new_user.email}  •  Role: {new_user.role}",
                      access_note],
-                    cta_label="Sign In", cta_url=f"{base_url}/login",
-                    footnote="You'll receive a separate email shortly to set your own password.",
-                ),
-            )
-
-            # An admin-set temp password is a worse first-run experience
-            # than the user picking their own — and never having to see the
-            # temp password anywhere (audit log, admin's clipboard) is a
-            # small but real security win.
-            reset_token = auth.issue_password_reset_token(session, new_user)
-            reset_link = f"{base_url}/reset-password?token={reset_token}"
-            background_tasks.add_task(
-                email_sender.send_email,
-                new_user.email, "Set your Doshin password",
-                f"Hi {new_user.full_name or new_user.email},\n\n"
-                "Set your password to finish setting up your account "
-                f"(expires in {auth.RESET_TOKEN_EXPIRE_MINUTES} minutes):\n{reset_link}\n",
-                html_body=email_sender.render_html(
-                    "Set your password",
-                    [f"Hi {new_user.full_name or new_user.email},",
-                     "One last step to finish setting up your account — choose your own password."],
                     cta_label="Set Password", cta_url=reset_link,
-                    footnote=f"This link expires in {auth.RESET_TOKEN_EXPIRE_MINUTES} minutes.",
+                    footnote=expiry_note,
                 ),
             )
             return _user_public(new_user)

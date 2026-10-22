@@ -30,10 +30,17 @@ SMTP_USER = os.getenv("SMTP_USERNAME", "") or os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "") or SMTP_USER
 
-BRAND = "#0061FF"
-INK = "#1A1D23"
-MUTED = "#6B7280"
-BORDER = "#E5E7EB"
+# Brand palette, mirrored from frontend/css/tokens.css (email clients can't
+# read CSS variables): orange for the action, navy for the header and ink.
+BRAND = "#E46521"        # --brand
+BRAND_DARK = "#C9541A"   # --brand-hover: links, which need more contrast on white
+NAVY = "#001233"         # --navy / --topbar-bg
+INK = "#001233"          # --text-primary
+TEXT = "#4C5671"         # --text-secondary
+MUTED = "#8D9097"        # --text-muted
+BORDER = "#E7EAF0"       # --panel-border
+PAGE_BG = "#F5F6F9"      # --content-bg
+FONT = "Roboto,'Segoe UI',Helvetica,Arial,sans-serif"
 
 
 def is_configured() -> bool:
@@ -47,23 +54,23 @@ def render_html(heading: str, lines: list, cta_label: str = None, cta_url: str =
     paragraphs (escaped); pass pre-built HTML only via `footnote` if needed.
     """
     body_html = "".join(
-        f'<p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:{INK};">{escape(line)}</p>'
+        f'<p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:{TEXT};">{escape(line)}</p>'
         for line in lines
     )
     button_html = ""
     if cta_label and cta_url:
         button_html = f'''
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0;">
-          <tr><td style="border-radius:8px;background:{BRAND};">
+          <tr><td style="background:{BRAND};">
             <a href="{escape(cta_url)}" target="_blank"
                style="display:inline-block;padding:12px 26px;font-size:14px;font-weight:700;
-                      color:#ffffff;text-decoration:none;border-radius:8px;">
+                      color:#ffffff;text-decoration:none;font-family:{FONT};">
               {escape(cta_label)}
             </a>
           </td></tr>
         </table>
         <p style="margin:0 0 14px;font-size:12px;line-height:1.5;color:{MUTED};word-break:break-all;">
-          Or copy this link: <a href="{escape(cta_url)}" style="color:{BRAND};">{escape(cta_url)}</a>
+          Or copy this link: <a href="{escape(cta_url)}" style="color:{BRAND_DARK};">{escape(cta_url)}</a>
         </p>'''
 
     footnote_html = (
@@ -73,14 +80,14 @@ def render_html(heading: str, lines: list, cta_label: str = None, cta_url: str =
 
     return f'''<!DOCTYPE html>
 <html>
-<body style="margin:0;padding:0;background:#F7F8FA;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F7F8FA;padding:32px 16px;">
+<body style="margin:0;padding:0;background:{PAGE_BG};font-family:{FONT};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{PAGE_BG};padding:32px 16px;">
     <tr><td align="center">
       <table role="presentation" width="480" cellpadding="0" cellspacing="0"
-             style="background:#ffffff;border:1px solid {BORDER};border-radius:12px;overflow:hidden;max-width:480px;width:100%;">
-        <tr><td style="background:{BRAND};padding:20px 28px;">
-          <span style="font-size:15px;font-weight:800;color:#ffffff;letter-spacing:-.01em;">
-            &#9679; Doshin
+             style="background:#ffffff;border:1px solid {BORDER};max-width:480px;width:100%;">
+        <tr><td style="background:{NAVY};padding:20px 28px;border-bottom:3px solid {BRAND};">
+          <span style="font-size:16px;font-weight:800;color:#ffffff;letter-spacing:-.01em;">
+            <span style="color:{BRAND};">&#9679;</span> Doshin
           </span>
         </td></tr>
         <tr><td style="padding:28px 28px 24px;">
