@@ -944,6 +944,8 @@ function wireBoard() {
       if (!$('dlModal').hidden) {
         if (st.newDirty) showToast('Unsaved deal — use Cancel to discard it');
         else closeNewDeal();
+      } else if (!$('dlWorkflowModal').hidden) {
+        $('dlWorkflowModal').hidden = true;
       } else if (!$('dlRoom').hidden) closeRoom();
     }
   });
@@ -1041,6 +1043,10 @@ async function init() {
   wireBoard();
   wireRoom();
   wireNewDeal();
+  // Workflow guide
+  $('dlWorkflowBtn').addEventListener('click', () => { $('dlWorkflowModal').hidden = false; });
+  $('dlWorkflowClose').addEventListener('click', () => { $('dlWorkflowModal').hidden = true; });
+  $('dlWorkflowModal').addEventListener('click', (e) => { if (e.target === $('dlWorkflowModal')) $('dlWorkflowModal').hidden = true; });
   loadUsers().then(() => { if (st.deal && st.tab === 'tasks') renderRoom(); });
   initViews({ st, $, api, esc, money, dateLabel, isOverdue, healthBadge, needsAttention, lostText, openDeal,
     showToast, OPEN_STAGES, reload: loadDeals });

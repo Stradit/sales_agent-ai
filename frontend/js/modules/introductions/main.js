@@ -1012,6 +1012,8 @@ async function init() {
     if (!$('inModal').hidden) {
       if (st.newDirty) showToast('Unsaved introduction — use Cancel to discard it');
       else closeNew();
+    } else if (!$('inWorkflowModal').hidden) {
+      $('inWorkflowModal').hidden = true;
     } else if (!$('inRoom').hidden) closeRoom();
   });
   wireBack();
@@ -1020,6 +1022,10 @@ async function init() {
   wireRoom();
   wireNew();
   wireViews();
+  // Workflow guide
+  $('inWorkflowBtn').addEventListener('click', () => { $('inWorkflowModal').hidden = false; });
+  $('inWorkflowClose').addEventListener('click', () => { $('inWorkflowModal').hidden = true; });
+  $('inWorkflowModal').addEventListener('click', (e) => { if (e.target === $('inWorkflowModal')) $('inWorkflowModal').hidden = true; });
   await loadIntros();
   if (p.get('intro')) openIntro(Number(p.get('intro')));
   if (p.get('new') === '1') openNew({ account_id: p.get('account_id'), persona_id: p.get('persona_id') });

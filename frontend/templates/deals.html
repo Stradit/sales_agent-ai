@@ -35,6 +35,7 @@
           <select id="dlBusinessLine" class="dl-select" aria-label="Filter by business line"><option value="">All business lines</option></select>
           <label class="dl-toggle"><input type="checkbox" id="dlMine"> My deals</label>
           <label class="dl-toggle dl-attn-toggle" title="Quiet deals, overdue next steps and close dates in the past"><input type="checkbox" id="dlAttention"> Needs attention <span class="dl-count" id="dlAttentionCount">0</span></label>
+          <button type="button" class="dl-btn dl-btn-workflow" id="dlWorkflowBtn"><i class="fa-solid fa-diagram-project"></i> How it works</button>
           <button type="button" class="dl-btn dl-btn-primary" id="dlNew"><i class="fa-solid fa-plus"></i> New deal</button>
         </div>
       </header>
@@ -95,6 +96,111 @@
     <p class="dl-confirm-note">Its buying committee, exit criteria and change log are deleted too. Tasks stay on My Tasks. This can't be undone.</p>
     <footer><button type="button" class="dl-btn" id="dlConfirmNo">Cancel</button>
       <button type="button" class="dl-btn dl-btn-danger" id="dlConfirmYes"><i class="fa-regular fa-trash-can"></i> Delete deal</button></footer>
+  </div>
+</div>
+
+<!-- Workflow Guide modal -->
+<div class="dl-modal-wrap" id="dlWorkflowModal" hidden>
+  <div class="dl-modal wf-modal" role="dialog" aria-modal="true" aria-labelledby="dlWorkflowTitle">
+    <header class="wf-header">
+      <div class="wf-header-left">
+        <div class="wf-header-icon wf-header-icon--deals"><i class="fa-solid fa-diagram-next"></i></div>
+        <div>
+          <h2 id="dlWorkflowTitle">Deals Pipeline Workflow</h2>
+          <p>How a deal progresses from first contact to a closed win</p>
+        </div>
+      </div>
+      <button type="button" class="dl-icon" id="dlWorkflowClose" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+    </header>
+
+    <div class="wf-body">
+
+      <!-- ── STAGE PIPELINE ── -->
+      <div class="wf-pipeline-label">Pipeline Stages</div>
+      <div class="wf-pipeline wf-pipeline--deals">
+
+        <div class="wf-stage wf-stage-d1">
+          <div class="wf-stage-num">1</div>
+          <div class="wf-stage-icon"><i class="fa-solid fa-handshake"></i></div>
+          <div class="wf-stage-name">Intro</div>
+          <div class="wf-stage-desc">Deal created from a converted introduction. First conversations are happening.</div>
+        </div>
+        <div class="wf-connector"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <div class="wf-stage wf-stage-d2">
+          <div class="wf-stage-num">2</div>
+          <div class="wf-stage-icon"><i class="fa-solid fa-magnifying-glass-chart"></i></div>
+          <div class="wf-stage-name">Discovery</div>
+          <div class="wf-stage-desc">Understanding the prospect's needs, pain points and decision process.</div>
+        </div>
+        <div class="wf-connector"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <div class="wf-stage wf-stage-d3">
+          <div class="wf-stage-num">3</div>
+          <div class="wf-stage-icon"><i class="fa-solid fa-file-lines"></i></div>
+          <div class="wf-stage-name">Proposal</div>
+          <div class="wf-stage-desc">Formal proposal or SOW presented to the prospect. Negotiation begins.</div>
+          <div class="wf-stage-tip"><i class="fa-solid fa-bolt"></i> Can win directly from here</div>
+        </div>
+        <div class="wf-connector"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <div class="wf-stage wf-stage-d4">
+          <div class="wf-stage-num">4</div>
+          <div class="wf-stage-icon"><i class="fa-solid fa-flask"></i></div>
+          <div class="wf-stage-name">Pilot</div>
+          <div class="wf-stage-desc">Running a limited proof-of-concept or trial to validate the solution.</div>
+        </div>
+        <div class="wf-connector"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <div class="wf-stage wf-stage-d5">
+          <div class="wf-stage-num">5</div>
+          <div class="wf-stage-icon"><i class="fa-solid fa-file-signature"></i></div>
+          <div class="wf-stage-name">Contract</div>
+          <div class="wf-stage-desc">Legal and procurement review. Signatures pending. Nearly at the finish line.</div>
+        </div>
+        <div class="wf-connector wf-connector-hot"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <div class="wf-stage wf-stage-won">
+          <div class="wf-stage-icon"><i class="fa-solid fa-trophy"></i></div>
+          <div class="wf-stage-name">WON</div>
+          <div class="wf-stage-desc">Deal closed successfully. Relationship moves to delivery.</div>
+        </div>
+
+      </div><!-- /wf-pipeline -->
+
+      <!-- ── EXIT PATHS ── -->
+      <div class="wf-exits">
+        <div class="wf-exit-label">How deals close — win or loss</div>
+        <div class="wf-exit-row">
+          <div class="wf-exit wf-exit-won">
+            <div class="wf-exit-icon"><i class="fa-solid fa-trophy"></i></div>
+            <div>
+              <div class="wf-exit-name">WON</div>
+              <div class="wf-exit-desc">Contract signed and deal is live. Can happen from Proposal, Pilot or Contract stage.</div>
+            </div>
+          </div>
+          <div class="wf-exit wf-exit-lost">
+            <div class="wf-exit-icon"><i class="fa-solid fa-circle-xmark"></i></div>
+            <div>
+              <div class="wf-exit-name">LOST</div>
+              <div class="wf-exit-desc">Prospect went with a competitor, budget cut, or deal fell through. Log the reason to improve future deals.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── KEY ACTIONS ── -->
+      <div class="wf-keys">
+        <div class="wf-key-label">Key things to track on every deal</div>
+        <div class="wf-key-row">
+          <div class="wf-key"><i class="fa-solid fa-bullseye"></i> <span>Next step &amp; due date</span></div>
+          <div class="wf-key"><i class="fa-solid fa-users"></i> <span>Buying committee contacts</span></div>
+          <div class="wf-key"><i class="fa-solid fa-dollar-sign"></i> <span>Deal value &amp; expected close</span></div>
+          <div class="wf-key"><i class="fa-solid fa-heart-pulse"></i> <span>Health score &amp; attention flags</span></div>
+        </div>
+      </div>
+
+    </div><!-- /wf-body -->
   </div>
 </div>
 
