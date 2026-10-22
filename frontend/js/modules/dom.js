@@ -10,7 +10,6 @@ export const navSearch = el('navSearch');
 export const navSearchClear = el('navSearchClear');
 export const navSortSelect = el('navSortSelect');
 export const navToggleAllTree = el('navToggleAllTree');
-export const navDigestBtn = el('navDigestBtn');
 export const navAccountCount = el('navAccountCount');
 export const filterCountAll = el('filterCountAll');
 export const topbarTicker = el('topbarTicker');

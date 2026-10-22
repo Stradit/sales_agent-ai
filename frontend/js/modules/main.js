@@ -193,10 +193,6 @@ initTopbarAuth().then((user) => {
   }
   // Hide quick-jump nav links for dashboards the user has had revoked
   if (user.role !== 'super_admin') {
-    if (user.has_dashboard_access === false) {
-      const dashBtn = document.getElementById('navDigestBtn');
-      if (dashBtn) dashBtn.style.display = 'none';
-    }
     if (user.has_command_center_access === false) {
       const ccLink = document.querySelector('.nav-digest-wrap a[href="/command-center"]');
       if (ccLink) ccLink.style.display = 'none';

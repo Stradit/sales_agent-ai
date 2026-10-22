@@ -184,14 +184,6 @@ export const TOUR_PAGES = {
         preferredPlacement: 'bottom'
       },
       {
-        target: '#navDigestBtn',
-        title: 'Command Center Quick Jump',
-        icon: 'fa-solid fa-chart-line',
-        desc: 'Quickly toggle between the cross-account global dashboard and individual account deep-dives.',
-        tip: 'Click here anytime to return to the global macro overview.',
-        preferredPlacement: 'right'
-      },
-      {
         target: '#dashNav',
         targetFallback: '#navAccountList',
         title: 'Account Navigator Tree',
