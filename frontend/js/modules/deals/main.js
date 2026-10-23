@@ -13,7 +13,7 @@ import { photoAttr } from '../persona-photo.js';
 import { initViews, refreshViews, filtersChanged } from './views.js';
 import { planPane, planTabLabel, planClick, planChange, planSubmit, resetPlanEditing } from './plan.js';
 import { initRoomShare, roomShareBox, roomShareClick, roomShareSubmit } from './room-share.js';
-import { initNba, nbaCard, nbaClick, nbaInput } from './nba.js';
+import { initNba, nbaCard, nbaClick, nbaInput, closeEmailWidget } from './nba.js';
 
 const $ = (id) => document.getElementById(id);
 const OPEN_STAGES = ['intro', 'discovery', 'proposal', 'pilot', 'contract'];
@@ -133,7 +133,8 @@ function digestList(title, icon, items, tone) {
 async function loadDigest() {
   const box = $('dlDigest');
   try {
-    const g = await api(`/pipeline/digest?days=7${$('dlMine').checked ? '&mine=true' : ''}`);
+    const isMine = !!($('dlMine') && $('dlMine').checked);
+    const g = await api(`/pipeline/digest?days=7${isMine ? '&mine=true' : ''}`);
     const t = g.totals;
     if (!t.open && !g.closed.length) { box.innerHTML = ''; return; }
     const moves = g.moves.map(m => ({ id: m.deal_id, name: m.name, account_name: m.account_name,
@@ -158,16 +159,16 @@ async function loadDeals() {
   const params = new URLSearchParams();
   if ($('dlAccount').value) params.set('account_id', $('dlAccount').value);
   if ($('dlBusinessLine').value) params.set('business_line_id', $('dlBusinessLine').value);
-  if ($('dlMine').checked) params.set('mine', 'true');
+  if ($('dlMine') && $('dlMine').checked) params.set('mine', 'true');
   if ($('dlSearch').value.trim()) params.set('q', $('dlSearch').value.trim());
   try {
     const data = await api(`?${params}`);
     st.deals = data.deals;
     st.summary = data.summary;
     st.lostCategories = data.lost_categories || st.lostCategories || {};
-    if (data.own_only) {   // sales reps only ever see their own deals (server-enforced)
+    if (data.own_only && $('dlMine')) {   // sales reps only ever see their own deals (server-enforced)
       $('dlMine').checked = true; $('dlMine').disabled = true;
-      $('dlMine').closest('label').title = 'Sales reps see the deals they own';
+      if ($('dlMine').closest('label')) $('dlMine').closest('label').title = 'Sales reps see the deals they own';
     }
     renderBoard();
     loadDigest();
@@ -328,6 +329,8 @@ function stageBox(d) {
 function renderRoom() {
   const d = st.deal;
   if (!d) return;
+  const room = $('dlRoom');
+  const prevScroll = room ? room.scrollTop : 0;
   const idx = OPEN_STAGES.indexOf(d.stage);
   const h = d.health || {};
   const byStage = OPEN_STAGES.map(s => ({ s, items: d.checklist.filter(c => c.stage === s) }));
@@ -450,6 +453,7 @@ function renderRoom() {
     mountTimeline($('dlTimeline'), { objectType: 'deal', objectId: d.id, accountId: d.account_id, dealId: d.id,
       onChange: () => { api(`/${d.id}`).then(fresh => { if (st.deal && st.deal.id === fresh.id) { st.deal.tasks = fresh.tasks; st.deal.health = fresh.health; } loadDeals(); }).catch(() => {}); } });
   }
+  if (room && prevScroll > 0) room.scrollTop = prevScroll;
 }
 
 // ── Tasks ────────────────────────────────────────────────────────────────────
@@ -563,6 +567,7 @@ async function openDeal(id) {
 }
 
 function closeRoom() {
+  closeEmailWidget();
   $('dlOverlay').hidden = true;
   $('dlRoom').hidden = true;
   st.deal = null;
@@ -946,6 +951,8 @@ function wireBoard() {
         else closeNewDeal();
       } else if (!$('dlWorkflowModal').hidden) {
         $('dlWorkflowModal').hidden = true;
+      } else if ($('dlEmailWidget') && !$('dlEmailWidget').hidden) {
+        closeEmailWidget();
       } else if (!$('dlRoom').hidden) closeRoom();
     }
   });
@@ -1033,8 +1040,8 @@ async function init() {
     + ((st.meta && st.meta.business_lines) || []).map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
   if (params.get('business_line_id')) $('dlBusinessLine').value = params.get('business_line_id');
   $('dlBusinessLine').addEventListener('change', () => { filtersChanged(); loadDeals(); });
-  $('dlMine').addEventListener('change', () => { filtersChanged(); loadDeals(); });
-  $('dlAttention').addEventListener('change', () => { filtersChanged(); renderBoard(); });
+  if ($('dlMine')) $('dlMine').addEventListener('change', () => { filtersChanged(); loadDeals(); });
+  if ($('dlAttention')) $('dlAttention').addEventListener('change', () => { filtersChanged(); renderBoard(); });
   $('dlDigest').addEventListener('click', (e) => {
     const b = e.target.closest('[data-deal-open]');
     if (b) openDeal(Number(b.dataset.dealOpen));

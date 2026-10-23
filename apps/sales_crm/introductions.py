@@ -393,14 +393,15 @@ def _check_refs(s, user, account_id: Optional[int], persona_id: Optional[int], b
 
 
 @router.get("/people")
-def people_picker(account_id: int, q: str = "", user: User = Depends(permissions.require_roles("sales_manager", "user", "viewer")),
+def people_picker(account_id: int, q: str = "", limit: int = 50, user: User = Depends(permissions.require_roles("sales_manager", "user", "viewer")),
                   s=Depends(_session)):
     """Contact picker for one account (names and titles only — no contact details)."""
     if account_id not in auth.account_scope(s, user):
         raise HTTPException(404, "Account not found.")
     return _q(s, """SELECT p.id, coalesce(p.full_name, p.display_name) AS name, p.title
                     FROM personas p WHERE p.account_id = :a AND coalesce(p.full_name, p.display_name) ILIKE :q
-                    ORDER BY p.hierarchy_level NULLS LAST, 2 LIMIT 20""", a=account_id, q=f"%{q.strip()}%")
+                    ORDER BY p.hierarchy_level NULLS LAST, 2 LIMIT :lim""", a=account_id, q=f"%{q.strip()}%",
+              lim=min(max(limit, 1), 200))
 
 
 # How much a past introduction says about a connector's reach (#7 warm-path finder)

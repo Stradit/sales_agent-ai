@@ -34,14 +34,28 @@ export function roomShareBox(d) {
       ${ro ? '' : '<button type="button" class="dl-btn dl-btn-primary" data-room-create><i class="fa-solid fa-link"></i> Create customer link</button>'}
     </section>`;
   }
+function formatRoomLink(link) {
+  if (!link) return '';
+  try {
+    const u = new URL(link);
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      return `${location.origin}${u.pathname}`;
+    }
+    return link;
+  } catch {
+    return link;
+  }
+}
+
   const viewed = r.view_count
     ? `<span class="dl-share-seen"><i class="fa-solid fa-eye"></i> Opened ${r.view_count} time${r.view_count === 1 ? '' : 's'} · last ${c.esc(ago(r.last_viewed_at))}</span>`
     : '<span class="dl-muted"><i class="fa-regular fa-eye-slash"></i> Not opened yet</span>';
+  const displayLink = formatRoomLink(r.link);
   return `<section class="dl-share" aria-labelledby="dlShareTitle">
     <h3 id="dlShareTitle"><i class="fa-solid fa-share-nodes"></i> Shared with the customer ${r.expired ? '<span class="dl-overdue">· link expired</span>' : ''}</h3>
-    ${r.link ? `<div class="dl-share-link"><input readonly value="${c.esc(r.link)}" aria-label="Customer link" id="dlShareLink">
+    ${displayLink ? `<div class="dl-share-link"><input readonly value="${c.esc(displayLink)}" aria-label="Customer link" id="dlShareLink">
       <button type="button" class="dl-btn" data-room-copy><i class="fa-regular fa-copy"></i> Copy</button>
-      <a class="dl-btn" href="${c.esc(r.link)}" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-arrow-up-right-from-square"></i> Preview</a></div>`
+      <a class="dl-btn" href="${c.esc(displayLink)}" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-arrow-up-right-from-square"></i> Preview</a></div>`
       : '<p class="dl-warn">This link can no longer be shown (the encryption key changed) — create a new link.</p>'}
     <div class="dl-share-meta">${viewed}<span class="dl-muted">Expires ${c.esc(c.dateLabel(r.expires_at))}</span></div>
     ${ro ? '' : rs.editing ? editForm(r) : `<div class="dl-share-actions">

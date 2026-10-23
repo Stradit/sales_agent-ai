@@ -777,6 +777,30 @@ def add_note(deal_id: int, body: NoteIn, user: User = Depends(auth.get_current_u
 
 # ── Next best action (#12): AI draft for the one suggested action ───────────
 
+def _clean_email_subject(subj: str, default_title: str = "") -> str:
+    """Cleans an email subject line so it is a natural, professional customer-facing subject.
+    Removes internal CRM prefixes like 'Next step:', 'Do or reschedule:', 'Action:', etc.
+    """
+    import re
+    if not subj:
+        subj = default_title or "Following up"
+    s = subj.strip()
+    for _ in range(3):
+        cleaned = re.sub(
+            r"^(?:(?:Our\s+)?Next\s+step(?:\s+is)?\s*:\s*|Do\s+or\s+reschedule\s*:\s*|Confirm\s+(?:the\s+)?next\s+step(?:\s+with\s+[^:]+)?\s*:\s*|Action\s*:\s*|Goal\s*:\s*|Subject\s*:\s*)",
+            "", s, flags=re.IGNORECASE
+        ).strip()
+        if cleaned == s:
+            break
+        s = cleaned
+    s = re.sub(r"^(?:Next\s+step\s*[-–—]\s*)", "", s, flags=re.IGNORECASE).strip()
+    if not s:
+        s = default_title or "Following up"
+    if s and s[0].islower():
+        s = s[0].upper() + s[1:]
+    return s[:200]
+
+
 @router.post("/{deal_id}/next-action/draft")
 def draft_next_action(deal_id: int, user: User = Depends(auth.get_current_user), s=Depends(_session)):
     """Drafts the email for the deal's current next best action (one LLM request, shared team budget)."""
@@ -804,13 +828,67 @@ def draft_next_action(deal_id: int, user: User = Depends(auth.get_current_user),
             body = str(j.get("body") or body).strip()
         except ValueError:
             pass
+    subject = _clean_email_subject(subject, default_title=action.get("title") or "")
     email = None
+    target_name = (action.get("target") or {}).get("name")
     pid = (action.get("target") or {}).get("persona_id")
     if pid:
         email = next((p.get("email") for p in d["stakeholders"] if p["persona_id"] == pid), None)
+    draft_row = s.execute(text("""
+        INSERT INTO deal_email_drafts (deal_id, user_id, action_code, stage, recipient_name, recipient_email, subject, body, model)
+        VALUES (:deal_id, :user_id, :action_code, :stage, :recipient_name, :recipient_email, :subject, :body, :model)
+        RETURNING id, created_at
+    """), {
+        "deal_id": deal_id,
+        "user_id": user.id,
+        "action_code": action["code"],
+        "stage": d.get("stage"),
+        "recipient_name": target_name,
+        "recipient_email": email,
+        "subject": subject,
+        "body": body,
+        "model": info.get("model")
+    }).mappings().fetchone()
     _log(s, deal_id, user.id, "field", f"Next best action: drafted an email ({action['title']})")
     s.commit()
-    return {"action": action["code"], "subject": subject, "body": body, "to": email, "model": info.get("model")}
+    return {
+        "id": draft_row["id"],
+        "action": action["code"],
+        "subject": subject,
+        "body": body,
+        "to": email,
+        "recipient_name": target_name,
+        "created_at": draft_row["created_at"].isoformat() if draft_row and draft_row.get("created_at") else None,
+        "model": info.get("model"),
+    }
+
+
+@router.get("/{deal_id}/email-drafts")
+def list_email_drafts(deal_id: int, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    """Returns the history of AI-generated email drafts for this deal, newest first."""
+    _get_deal_row(s, deal_id, user)
+    rows = s.execute(text("""
+        SELECT ed.id, ed.deal_id, ed.user_id, ed.action_code, ed.stage, ed.recipient_name, ed.recipient_email,
+               ed.subject, ed.body, ed.model, ed.created_at, u.full_name AS user_name, u.email AS user_email
+        FROM deal_email_drafts ed
+        LEFT JOIN users u ON u.id = ed.user_id
+        WHERE ed.deal_id = :deal_id
+        ORDER BY ed.created_at DESC
+    """), {"deal_id": deal_id}).mappings().fetchall()
+    return [{
+        "id": r["id"],
+        "deal_id": r["deal_id"],
+        "user_id": r["user_id"],
+        "user_name": r["user_name"] or r["user_email"] or "Unknown",
+        "action_code": r["action_code"],
+        "stage": r["stage"],
+        "recipient_name": r["recipient_name"],
+        "recipient_email": r["recipient_email"],
+        "subject": _clean_email_subject(r["subject"]),
+        "body": r["body"],
+        "model": r["model"],
+        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+    } for r in rows]
 
 
 # ── Close plan (#10): dated milestones both sides agree on ───────────────────

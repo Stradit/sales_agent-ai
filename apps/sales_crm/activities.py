@@ -141,7 +141,7 @@ def _add_links(s, activity_id: int, links: List[Tuple[str, int, str]]) -> None:
                               VALUES (:a, :t, :o, :m) ON CONFLICT DO NOTHING"""), {"a": activity_id, "t": r[0], "o": r[1], "m": r[2]})
 
 
-def _after_write(s, activity_id: int, user_id: Optional[int]) -> None:
+def _after_write(s, activity_id: int, user_id: Optional[int], mark_intro_meeting_held: Optional[bool] = None) -> None:
     """Denormalised last-activity dates + intro auto-progress to 'meeting held'."""
     act = s.execute(text("SELECT type, occurred_at, visibility FROM activities WHERE id = :a"), {"a": activity_id}).mappings().fetchone()
     if not act:
@@ -152,12 +152,15 @@ def _after_write(s, activity_id: int, user_id: Optional[int]) -> None:
                   {"w": act["occurred_at"], "a": activity_id, "ot": otype})
     if act["type"] not in MEETING_TYPES or act["occurred_at"] > datetime.now(timezone.utc):
         return
-    intros = s.execute(text("""
+    if mark_intro_meeting_held is False:
+        return
+    status_filter = "i.status IN ('requested','accepted','intro_made')" if mark_intro_meeting_held is True else "i.status = 'intro_made'"
+    intros = s.execute(text(f"""
         SELECT DISTINCT i.id, i.status FROM introductions i
         JOIN activity_links l ON l.activity_id = :a AND (
              (l.object_type = 'introduction' AND l.object_id = i.id)
           OR (l.object_type = 'persona' AND l.object_id = i.persona_id))
-        WHERE i.status IN ('requested','accepted','intro_made')"""), {"a": activity_id}).fetchall()
+        WHERE {status_filter}"""), {"a": activity_id}).fetchall()
     for iid, status in intros:
         s.execute(text("""UPDATE introductions SET status = 'meeting_held', meeting_at = coalesce(meeting_at, :w), updated_at = now()
                           WHERE id = :i"""), {"w": act["occurred_at"], "i": iid})
@@ -222,6 +225,7 @@ class ActivityIn(BaseModel):
     visibility: str = "team"
     links: List[LinkIn] = Field(default_factory=list)
     participant_persona_ids: List[int] = Field(default_factory=list)
+    mark_intro_meeting_held: Optional[bool] = None
 
 
 def _validate_common(type_: str, direction: Optional[str], visibility: str) -> None:
@@ -258,7 +262,7 @@ def create_activity(body: ActivityIn, user: User = Depends(permissions.require_w
                      "sm": (body.summary or "").strip() or None, "o": occurred, "du": body.duration_min, "u": user.id,
                      "v": body.visibility, "p": json.dumps(participants)}).scalar()
     _add_links(s, aid, links)
-    _after_write(s, aid, user.id)
+    _after_write(s, aid, user.id, mark_intro_meeting_held=body.mark_intro_meeting_held)
     s.commit()
     return get_activity(aid, user, s)
 
@@ -446,6 +450,7 @@ class TranscriptIn(BaseModel):
     occurred_at: Optional[datetime] = None
     duration_min: Optional[int] = Field(None, ge=0, le=1440)
     visibility: str = "team"
+    mark_intro_meeting_held: Optional[bool] = None
 
 
 @router.post("/transcript")
@@ -492,7 +497,7 @@ def upload_transcript(body: TranscriptIn, user: User = Depends(permissions.requi
     links += [("introduction", body.introduction_id, "manual")] if body.introduction_id else []
     links += [("persona", x["persona_id"], "speaker") for x in speakers if x.get("persona_id")]
     _add_links(s, aid, links)
-    _after_write(s, aid, user.id)
+    _after_write(s, aid, user.id, mark_intro_meeting_held=body.mark_intro_meeting_held)
     s.commit()
     out = get_activity(aid, user, s)
     out["matched_contacts"] = sum(1 for x in speakers if x.get("persona_id"))

@@ -101,13 +101,15 @@ async function loadWanted() {
   if (!wanted.length) return;
   box.innerHTML = `<h2 id="ptWantedTitle"><i class="fa-solid fa-bullseye"></i> Introductions StradIT is looking for</h2>
     <p class="pt-muted">Know someone here? Answer with one click — it goes straight to the right StradIT team.</p>
-    <div class="pt-wanted-grid">${wanted.map(w => `<article class="pt-card pt-wanted-card">
+    <div class="pt-wanted-grid">${wanted.map(w => `<article class="pt-card pt-wanted-card" data-answer="${w.id}" tabindex="0" role="button" aria-label="Introduce ${esc(w.role_wanted)} at ${esc(w.account_name)}">
       <strong>${esc(w.account_name)}</strong>
-      <span class="pt-wanted-role">${esc(w.role_wanted)}</span>
+      <span class="pt-wanted-role"><i class="fa-solid fa-user-check"></i> ${esc(w.role_wanted)}</span>
       ${w.business_line_name ? `<small>${esc(w.business_line_name)}</small>` : ''}
       ${w.note ? `<p>${esc(w.note)}</p>` : ''}
       ${w.submitted ? '<span class="pt-status converted"><i class="fa-solid fa-check"></i> You answered this</span>' : ''}
-      ${preview ? '' : `<button type="button" class="pt-btn${w.submitted ? '' : ' pt-primary'}" data-answer="${w.id}">${w.submitted ? 'Introduce someone else' : 'I can introduce'}</button>`}
+      <button type="button" class="pt-btn${w.submitted ? '' : ' pt-primary'}" data-answer="${w.id}">
+        <i class="fa-solid fa-handshake"></i> ${w.submitted ? 'Introduce someone else' : 'I can introduce'}
+      </button>
     </article>`).join('')}</div>`;
 }
 
@@ -115,14 +117,41 @@ function openForm(w = null) {
   answering = w;
   $('ptForm').reset();
   $('ptForm').hidden = false;
-  $('ptFormTitle').textContent = w ? `Introduce someone at ${w.account_name}` : 'Submit an introduction';
+
+  let contactName = '';
+  let contactTitle = '';
+  if (w && w.role_wanted) {
+    const raw = w.role_wanted.trim();
+    // Parse "Name (Title)"
+    const match = raw.match(/^([^(]+)\s*\(([^)]+)\)$/);
+    if (match) {
+      contactName = match[1].trim();
+      contactTitle = match[2].trim();
+    } else {
+      contactName = raw;
+    }
+  }
+
+  $('ptFormTitle').textContent = w
+    ? (contactName ? `Introduce ${contactName} at ${w.account_name}` : `Introduce someone at ${w.account_name}`)
+    : 'Submit an introduction';
   $('ptFormFor').hidden = !w;
-  $('ptFormFor').textContent = w ? `StradIT is looking for: ${w.role_wanted}` : '';
+  $('ptFormFor').innerHTML = w
+    ? `<i class="fa-solid fa-bullseye"></i> Connecting to the StradIT team for: <strong>${esc(w.role_wanted)}</strong> at <strong>${esc(w.account_name)}</strong>`
+    : '';
   $('ptCompany').value = w ? w.account_name : '';
   $('ptCompany').readOnly = !!w;
-  if (w) $('ptTitle').placeholder = w.role_wanted;
+  if (w) {
+    $('ptContact').value = contactName;
+    if (contactTitle) $('ptTitle').value = contactTitle;
+    else $('ptTitle').placeholder = w.role_wanted;
+  }
   $('ptForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  (w ? $('ptContact') : $('ptCompany')).focus();
+  if (w && contactName) {
+    $('ptContext').focus();
+  } else {
+    (w ? $('ptContact') : $('ptCompany')).focus();
+  }
 }
 
 let detailCache = {};
@@ -177,6 +206,15 @@ function wire() {
   $('ptWanted').addEventListener('click', (e) => {
     const b = e.target.closest('[data-answer]');
     if (b) openForm(wanted.find(w => String(w.id) === b.dataset.answer));
+  });
+  $('ptWanted').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      const b = e.target.closest('[data-answer]');
+      if (b) {
+        e.preventDefault();
+        openForm(wanted.find(w => String(w.id) === b.dataset.answer));
+      }
+    }
   });
   $('ptForm').addEventListener('submit', async (e) => {
     e.preventDefault();
