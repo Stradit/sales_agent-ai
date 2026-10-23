@@ -184,11 +184,12 @@ export const TOUR_PAGES = {
         preferredPlacement: 'bottom'
       },
       {
-        target: '#navDigestBtn',
-        title: 'Command Center Quick Jump',
-        icon: 'fa-solid fa-chart-line',
-        desc: 'Quickly toggle between the cross-account global dashboard and individual account deep-dives.',
-        tip: 'Click here anytime to return to the global macro overview.',
+        target: '.nav-digest-wrap a[href="/command-center"]',
+        targetFallback: '.nav-digest-wrap',
+        title: 'Sales Command Center Quick Jump',
+        icon: 'fa-solid fa-arrow-trend-up',
+        desc: 'Quickly access the Sales Command Center for priority action items, capital events, and market telemetry.',
+        tip: 'Click here anytime to return to the executive command center.',
         preferredPlacement: 'right'
       },
       {

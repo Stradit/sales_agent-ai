@@ -27,12 +27,22 @@ export function getCurrentUser() {
 function _applySession(data) {
   accessToken = data.access_token || null;
   currentUser = data.user || null;
+  try {
+    if (currentUser && (currentUser.id || currentUser.email)) {
+      localStorage.setItem('doshin_user_id', String(currentUser.id || ''));
+      localStorage.setItem('doshin_user_email', String(currentUser.email || ''));
+    }
+  } catch (_) {}
   return data;
 }
 
 export function clearSession() {
   accessToken = null;
   currentUser = null;
+  try {
+    localStorage.removeItem('doshin_user_id');
+    localStorage.removeItem('doshin_user_email');
+  } catch (_) {}
 }
 
 async function _parseOrThrow(res) {

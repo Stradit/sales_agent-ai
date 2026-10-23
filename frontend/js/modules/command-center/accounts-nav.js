@@ -100,30 +100,7 @@ function markCurrentPage() {
 // Only hide the link if they have neither.
 function updateDashboardLinkAccess() {
   const dashBtn = el('navDigestBtn');
-  if (!dashBtn) return;
-  const user = getCurrentUser();
-  const hasAccounts = accounts.length > 0;
-  const hasDashAccess = user && (user.role === 'super_admin' || user.has_dashboard_access !== false);
-
-  if (!hasDashAccess && !hasAccounts) {
-    dashBtn.style.display = 'none';
-    return;
-  }
-
-  if (!hasDashAccess && hasAccounts) {
-    const titleEl = dashBtn.querySelector('.nav-digest-title');
-    const subEl = dashBtn.querySelector('.nav-digest-sub');
-    if (titleEl) titleEl.textContent = 'Company Accounts';
-    if (subEl) subEl.textContent = 'View assigned account dossiers';
-    dashBtn.addEventListener('click', () => {
-      const first = accounts[0];
-      const key = first.key || first.ticker || first.name;
-      window.location.href = `/?account_key=${encodeURIComponent(key)}`;
-    });
-    return;
-  }
-
-  dashBtn.addEventListener('click', () => { window.location.href = '/accounts'; });
+  if (dashBtn) dashBtn.style.display = 'none';
 }
 
 // Sales Command Center is open by default, but a super_admin can revoke it per user

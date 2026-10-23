@@ -46,15 +46,34 @@ export async function initAccountFilter(onFilterChange) {
     updateFilterUi();
   }
 
+  function ensureMenuInViewport() {
+    if (!menu || menu.style.display === 'none') return;
+    menu.style.left = '0';
+    const rect = menu.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const pad = 16;
+    if (rect.right > viewportWidth - pad) {
+      const overflow = rect.right - (viewportWidth - pad);
+      menu.style.left = `-${overflow}px`;
+    }
+  }
+
   // Toggle Menu (matching Google News subscribe button logic)
   btn.onclick = (e) => {
     e.stopPropagation();
     const isHidden = menu.style.display === 'none' || !menu.style.display;
-    menu.style.display = isHidden ? 'block' : 'none';
-    if (isHidden && searchInput) {
-      setTimeout(() => searchInput.focus(), 60);
+    if (isHidden) {
+      menu.style.display = 'block';
+      ensureMenuInViewport();
+      if (searchInput) {
+        setTimeout(() => searchInput.focus({ preventScroll: true }), 60);
+      }
+    } else {
+      menu.style.display = 'none';
     }
   };
+
+  window.addEventListener('resize', ensureMenuInViewport);
 
   // Close on outside click
   if (!document.body.dataset.acctFilterListener) {

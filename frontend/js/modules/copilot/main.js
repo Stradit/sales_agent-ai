@@ -97,7 +97,7 @@ function renderContext(v) {
   if (ents && ents.persona) {
     const p = ents.persona;
     items.push(`<div class="cp-focus-item"><i class="fa-solid fa-user"></i>
-      <a href="/profile?account=${p.account_id}&persona_id=${p.id}" target="_blank" rel="noopener">${esc(p.name)}</a>
+      <a href="/profile?account=${p.account_id}&persona_id=${p.id}&from=${encodeURIComponent(location.pathname + location.search)}" target="_blank" rel="noopener">${esc(p.name)}</a>
       ${p.title ? `<span class="cp-focus-sub" title="${esc(fixText(p.title))}">${esc(shortTitle(p.title, 120))}</span>` : ''}</div>`);
   }
   ((ents && ents.accounts) || []).forEach(a => items.push(

@@ -73,7 +73,7 @@ function navigateTo(item) {
   else window.location.href = url;
 }
 
-const STYLESHEET = '/css/search-palette.css?v=1.1';
+const STYLESHEET = '/css/search-palette.css?v=1.2';
 const config = { getAccountId: () => null, open: null };
 
 /**

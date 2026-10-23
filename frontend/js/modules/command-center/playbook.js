@@ -1,6 +1,6 @@
 import { getCommandCenter, isGenerated, markPlayTasked } from './generator.js';
 import { esc, ageInDays, relativeTime } from './utils.js';
-import { createTask } from './actions.js';
+import { createTask, isTasked, markAsTasked } from './actions.js';
 import { ccState, matchesCurrentAccount } from './state.js';
 import { getCategoryMeta } from './feed.js';
 
@@ -32,7 +32,7 @@ function itemHtml(item, cc) {
     ? '<span class="cc-sig-new-badge"><span class="cc-pulse-dot"></span>NEW</span>'
     : '';
 
-  var tasked = !!item.tasked;
+  var tasked = !!item.tasked || isTasked(item.account_name, item.title, item.account_id);
   var btnCls = tasked ? 'cc-btn-done' : 'cc-btn-primary';
   var btnHtml = tasked
     ? '<i class="fa-solid fa-check"></i> Tasked'
@@ -105,9 +105,11 @@ export function renderPlaybook() {
         });
         if (ok) {
           markPlayTasked(item);
+          markAsTasked(item.account_name, item.title, item.account_id);
           btn.innerHTML = '<i class="fa-solid fa-check"></i> Tasked';
           btn.classList.remove('cc-btn-primary');
           btn.classList.add('cc-btn-done');
+          btn.disabled = true;
           document.dispatchEvent(new CustomEvent('cc:plays-changed'));
         } else {
           btn.disabled = false;

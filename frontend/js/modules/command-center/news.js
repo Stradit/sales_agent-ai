@@ -30,6 +30,19 @@ function saveSubscriptions(sub) {
   } catch (_) {}
 }
 
+function formatNewsAccountOptionLabel(account) {
+  const rawName = account.display_name || account.name || account.key || `Account ${account.id}`;
+  let cleanName = rawName
+    .replace(/,?\s*(Inc\.?|LLC|Corporation|Corp\.?|Company|Co\.?|Group)\s*$/i, '')
+    .trim();
+  if (/depository\s*trust/i.test(cleanName)) cleanName = 'Depository Trust';
+  else if (/bank\s*of\s*new\s*york/i.test(cleanName)) cleanName = 'BNY Mellon';
+  else if (/vanguard/i.test(cleanName)) cleanName = 'Vanguard';
+  else if (/blackrock/i.test(cleanName)) cleanName = 'BlackRock';
+  else if (/northern\s*trust/i.test(cleanName)) cleanName = 'Northern Trust';
+  return cleanName;
+}
+
 function updateSubscribeButtonUi(subs) {
   const btn = document.getElementById('ccNewsSubscribeBtn');
   if (!btn) return;
@@ -312,7 +325,7 @@ export async function renderNewsFeed(overrideAccountId, forceRefresh = false) {
         .map(
           a => `
         <option value="${a.id}" ${String(a.id) === String(activeNewsAccountId) ? 'selected' : ''}>
-          ${esc(a.name || a.display_name)}
+          ${esc(formatNewsAccountOptionLabel(a))}
         </option>
       `
         )

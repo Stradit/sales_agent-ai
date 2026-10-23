@@ -131,7 +131,31 @@ async function load() {
   catch (err) { $('capMain').innerHTML = `<p class="cap-error">${esc(err.message)}</p>`; }
 }
 
+function wireBack() {
+  const btn = $('capBack');
+  if (!btn) return;
+  btn.addEventListener('click', (e) => {
+    let internal = false;
+    let isCrmSibling = false;
+    try {
+      const ref = document.referrer ? new URL(document.referrer) : null;
+      internal = !!ref && ref.origin === location.origin && ref.pathname !== location.pathname && !ref.pathname.startsWith('/login');
+      if (ref && ['/deals', '/forecast', '/introductions'].includes(ref.pathname)) {
+        isCrmSibling = true;
+      }
+    } catch { /* ignore */ }
+    if (internal && !isCrmSibling && history.length > 1) {
+      e.preventDefault();
+      history.back();
+    } else {
+      e.preventDefault();
+      location.assign('/accounts');
+    }
+  });
+}
+
 function wire() {
+  wireBack();
   document.addEventListener('click', async (e) => {
     const t = e.target;
     if (t.closest('#capConnect')) {

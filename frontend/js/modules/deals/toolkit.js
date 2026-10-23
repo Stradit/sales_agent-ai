@@ -36,7 +36,7 @@ function intro(d, deal) {
         ${w.detail ? `<div class="tk-why-detail">${esc(w.detail)}</div>` : ''}
         <div class="tk-meta"><span class="tk-tag">${esc(w.label)}</span>${w.date ? ` ${esc(day(w.date))}` : ''}</div></div></li>`).join('');
   const who = d.who_to_approach.map(p => `<li class="tk-person">
-      <div><a href="/profile?account=${deal.account_id}&persona_id=${p.id}" target="_blank" rel="noopener">${esc(p.name)}</a>
+      <div><a href="/profile?account=${deal.account_id}&persona_id=${p.id}&from=${encodeURIComponent(location.pathname + location.search)}" target="_blank" rel="noopener">${esc(p.name)}</a>
         <div class="tk-meta">${esc(p.title || '')}</div>
         ${p.why.length ? `<div class="tk-chips">${p.why.map(w => `<span class="tk-tag">${esc(w)}</span>`).join('')}</div>` : ''}</div>
       <div class="tk-person-ctl">
