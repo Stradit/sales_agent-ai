@@ -1,7 +1,18 @@
-"""Tests for deal email drafts persistence and history API."""
+"""Tests for deal email drafts persistence and history API — needs a live Postgres."""
 import pytest
 from sqlalchemy import text
-from db.connection import get_session
+from sqlalchemy.exc import OperationalError
+from db.connection import engine, get_session
+
+
+@pytest.fixture(scope="module", autouse=True)
+def require_database():
+    # CI's unit-test job runs without a database; skip rather than fail there.
+    try:
+        with engine.connect():
+            pass
+    except OperationalError as e:
+        pytest.skip(f"Database not reachable: {e.orig}")
 
 
 def test_deal_email_drafts_table_exists():
