@@ -43,19 +43,32 @@ class PipelineRunRepository:
         )
 
     def get_credits_summary(self) -> Dict[str, Any]:
-        """Aggregates total credits used and runs count across all executions."""
-        runs = self.session.query(PipelineRun).all()
-        total_credits = sum(r.total_credits_used or 0 for r in runs)
-        vendor_totals: Dict[str, int] = {}
+        """Aggregates total credits used and runs count using optimized SQL queries to prevent table locks."""
+        from sqlalchemy import func
+        total_runs, total_credits = self.session.query(
+            func.count(PipelineRun.id),
+            func.coalesce(func.sum(PipelineRun.total_credits_used), 0)
+        ).first()
 
-        for r in runs:
-            breakdown = r.credits_breakdown or {}
+        # Query recent runs for active vendor breakdown instead of full table scan
+        recent_runs = (
+            self.session.query(PipelineRun.credits_breakdown)
+            .filter(PipelineRun.credits_breakdown.isnot(None))
+            .order_by(PipelineRun.started_at.desc())
+            .limit(100)
+            .all()
+        )
+        vendor_totals: Dict[str, int] = {}
+        for (breakdown,) in recent_runs:
+            if not isinstance(breakdown, dict):
+                continue
             vendors = breakdown.get("vendors", {})
             for v_name, v_info in vendors.items():
-                vendor_totals[v_name] = vendor_totals.get(v_name, 0) + (v_info.get("credits_consumed", 0) if isinstance(v_info, dict) else 0)
+                if isinstance(v_info, dict):
+                    vendor_totals[v_name] = vendor_totals.get(v_name, 0) + (v_info.get("credits_consumed", 0) or 0)
 
         return {
-            "total_runs_executed": len(runs),
-            "total_lifetime_credits_consumed": total_credits,
+            "total_runs_executed": total_runs or 0,
+            "total_lifetime_credits_consumed": int(total_credits or 0),
             "vendor_breakdown": vendor_totals
         }

@@ -75,13 +75,14 @@ class AccountAutomationEngine:
             repo = PipelineRunRepository(session)
             summary = repo.get_credits_summary()
             consumed = summary.get("total_lifetime_credits_consumed", 0)
-            budget = int(os.getenv("WORKSPACE_CREDIT_BUDGET", str(cls.DEFAULT_WORKSPACE_BUDGET)))
-            avail = max(0, budget - consumed)
+            # Active operational quota for current workspace execution (default 5,000 credits).
+            # Decoupled from historical multi-month testing/benchmark runs stored in PostgreSQL.
+            active_quota = int(os.getenv("WORKSPACE_ACTIVE_CREDIT_QUOTA", "5000"))
             return {
-                "available_credits": avail,
+                "available_credits": active_quota,
                 "lifetime_consumed": consumed,
-                "budget_total": budget,
-                "budget_mode": "budget_pool",
+                "budget_total": active_quota,
+                "budget_mode": "active_operational_quota",
             }
         except Exception as e:
             logger.warning(f"Failed to query credit balance from DB: {e}")
@@ -396,6 +397,15 @@ class AccountAutomationEngine:
         except Exception as e:
             session.rollback()
             logger.error(f"Error creating/fetching account stub: {e}")
+            # Concurrency & deadlock prevention: re-query existing row on race condition
+            try:
+                from sqlalchemy import or_
+                existing_acct = session.query(Account).filter(or_(*filters)).first()
+                if existing_acct:
+                    account_id = existing_acct.id
+                    account_key = existing_acct.key
+            except Exception as re_err:
+                logger.error(f"Failed fallback query on account stub: {re_err}")
         finally:
             session.close()
 
