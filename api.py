@@ -1153,6 +1153,21 @@ if FASTAPI_AVAILABLE:
             "message": f"Autonomous pipeline started for '{clean_name}'. Polling job '{job_id}'.",
         }
 
+    class AccountRetrySourcesRequest(BaseModel):
+        sources: Optional[List[str]] = None
+        include_empty: Optional[bool] = True
+
+    @account_router.post("/{account_id}/retry-sources", dependencies=[Depends(auth.require_role("super_admin"))])
+    def retry_account_sources_endpoint(account_id: int, req: Optional[AccountRetrySourcesRequest] = None):
+        """[Tab 1 - Selective Source Retry]: Re-invokes ONLY failed or empty sources for an account without re-fetching successful ones."""
+        sources = req.sources if req else None
+        include_empty = req.include_empty if req else True
+        return AccountAutomationEngine.retry_account_sources(
+            account_id=account_id,
+            specific_sources=sources,
+            include_empty=include_empty,
+        )
+
     @account_router.post("/fetch", dependencies=[Depends(auth.require_role("super_admin"))])
     def fetch_account_data(req: AccountFetchRequest):
         """[Tab 1 - Fetch Button]: Enterprise 11-source account intelligence collection.

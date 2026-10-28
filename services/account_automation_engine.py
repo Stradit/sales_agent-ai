@@ -305,6 +305,127 @@ class AccountAutomationEngine:
         return account_dossier, retry_summary
 
     @classmethod
+    def retry_account_sources(
+        cls,
+        account_id: int,
+        specific_sources: Optional[List[str]] = None,
+        include_empty: bool = True,
+    ) -> Dict[str, Any]:
+        """Selectively re-runs only failed or empty sources for an existing account.
+
+        1. Loads account from PostgreSQL.
+        2. Segregates failed/empty sources from last run if specific_sources is None.
+        3. Re-invokes ONLY the targeted failed connectors (preserving successful data).
+        4. Additively coalesces recovered data using CoalescenceEngine.
+        5. Commits to database and logs chronological event to pipeline_runs.
+        """
+        session = get_session()
+        try:
+            acct = session.query(Account).filter_by(id=account_id).first()
+            if not acct:
+                return {"status": "error", "message": f"Account #{account_id} not found."}
+
+            company_name = acct.legal_name or acct.display_name or acct.key
+            domain = acct.primary_domain or acct.domain
+            ticker = acct.stock_symbol
+            sec_cik = acct.sec_cik
+
+            # 1. Segregate failed or empty sources
+            targets = list(specific_sources or [])
+            if not targets:
+                last_run = (
+                    session.query(PipelineRun)
+                    .filter(PipelineRun.company_name.ilike(company_name))
+                    .order_by(PipelineRun.started_at.desc())
+                    .first()
+                )
+                if last_run and last_run.credits_breakdown:
+                    sec = (last_run.credits_breakdown.get("sections") or {}).get("account") or {}
+                    for r in sec.get("resources", []):
+                        st = (r.get("status") or "").lower()
+                        if st == "error" or (include_empty and st in ("empty", "ready")):
+                            targets.append(r["id"])
+
+            if not targets:
+                raw = acct.raw_data or {}
+                for cand in ["diffbot", "serper", "finnhub", "sec_edgar", "gleif", "opencorporates"]:
+                    if cand not in raw or not raw[cand]:
+                        targets.append(cand)
+
+            if not targets:
+                return {
+                    "status": "noop",
+                    "account_id": account_id,
+                    "company_name": company_name,
+                    "message": "All sources previously succeeded. No failed or empty sources to retry.",
+                }
+
+            logger.info(f"[Selective Retry] Re-running {len(targets)} sources for {company_name}: {targets}")
+
+            # 2. Build mock base dossier
+            mock_dossier = {
+                "display_name": company_name,
+                "domain": domain,
+                "stock_symbol": ticker,
+                "sec_cik": sec_cik,
+                "raw_data": copy.deepcopy(acct.raw_data or {}),
+                "multi_source_intelligence": copy.deepcopy(acct.multi_source_intelligence or {}),
+                "_telemetry": {"sources": {t: {"status": "pending_retry"} for t in targets}},
+            }
+
+            # 3. Re-run targeted sources
+            updated_dossier, summary = cls.retry_failed_sources(
+                account_dossier=mock_dossier,
+                failed_sources=targets,
+                effective_name=company_name,
+                effective_domain=domain,
+                effective_ticker=ticker,
+                effective_cik=sec_cik,
+            )
+
+            # 4. Additive Coalescence into Account
+            schema = AccountSchema.from_enriched_json({"account": updated_dossier})
+            repo = AccountRepository(session)
+            saved = repo.upsert(schema, raw_data=updated_dossier)
+            session.commit()
+            session.refresh(saved)
+
+            # 5. Log execution event in pipeline_runs
+            PipelineRunLogger.log_event(
+                company_name=company_name,
+                target_url=domain,
+                level="account",
+                action="retry_failed_sources",
+                status="success" if summary.get("recovered_sources") else "partial",
+                started_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(timezone.utc),
+                total_credits_used=len(summary.get("recovered_sources", [])),
+                entities_extracted={
+                    "account_id": account_id,
+                    "retried_sources": summary.get("retried_sources", []),
+                    "recovered_sources": summary.get("recovered_sources", []),
+                    "unrecovered_sources": summary.get("unrecovered_sources", []),
+                    "selective_retry": True,
+                },
+            )
+
+            return {
+                "status": "success",
+                "account_id": account_id,
+                "company_name": company_name,
+                "retried_sources": summary.get("retried_sources", []),
+                "recovered_sources": summary.get("recovered_sources", []),
+                "unrecovered_sources": summary.get("unrecovered_sources", []),
+                "message": f"Retried {len(targets)} sources. Recovered: {len(summary.get('recovered_sources', []))}, Unrecovered: {len(summary.get('unrecovered_sources', []))}.",
+            }
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error in retry_account_sources: {e}")
+            return {"status": "error", "error": str(e)}
+        finally:
+            session.close()
+
+    @classmethod
     def execute_account_automation(
         cls,
         company_name: str,
