@@ -10,6 +10,7 @@ drops the throwaway database. The result is what "version 0001" means; see docs/
 Needs pg_dump 18 on PATH or PG_BIN set.
 """
 import argparse
+import difflib
 import os
 import re
 import subprocess
@@ -120,6 +121,12 @@ def main() -> None:
         same = (OUT.exists() and OUT.read_text(encoding="utf-8") == sql
                 and MANIFEST.exists() and MANIFEST.read_text(encoding="utf-8") == manifest)
         print("baseline matches the startup schema code" if same else "baseline DIFFERS from the startup schema code")
+        if not same:   # show what differs, so a CI failure can be diagnosed from its log alone
+            for path, fresh in ((OUT, sql), (MANIFEST, manifest)):
+                old = path.read_text(encoding="utf-8") if path.exists() else ""
+                diff = list(difflib.unified_diff(old.splitlines(), fresh.splitlines(), f"committed/{path.name}",
+                                                 f"fresh/{path.name}", lineterm="", n=2))
+                print("\n".join(diff[:300]) + (f"\n... {len(diff) - 300} more diff lines" if len(diff) > 300 else ""))
         sys.exit(0 if same else 1)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(sql, encoding="utf-8", newline="\n")
