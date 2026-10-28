@@ -67,21 +67,6 @@ CREATE INDEX IF NOT EXISTS deal_activity_deal ON deal_activity (deal_id, created
 ALTER TABLE action_items ADD COLUMN IF NOT EXISTS deal_id bigint REFERENCES deals(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS action_items_deal ON action_items (deal_id) WHERE deal_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS deal_email_drafts (
-  id              bigserial PRIMARY KEY,
-  deal_id         bigint NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
-  user_id         int REFERENCES users(id) ON DELETE SET NULL,
-  action_code     text,
-  stage           text,
-  recipient_name  text,
-  recipient_email text,
-  subject         text NOT NULL,
-  body            text NOT NULL,
-  model           text,
-  created_at      timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS deal_email_drafts_deal ON deal_email_drafts (deal_id, created_at DESC);
-
 -- D3: MEDDICC qualification notes (free text per key)
 ALTER TABLE deals ADD COLUMN IF NOT EXISTS qualification jsonb NOT NULL DEFAULT '{}';
 
