@@ -1685,7 +1685,10 @@
       <div style="font-size:0.72rem;color:var(--text-muted);">
         <i class="bi bi-shield-check text-success"></i> Telemetry synchronized in real-time from PostgreSQL <code>pipeline_runs</code>.
       </div>
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 align-items-center">
+        <button type="button" class="btn btn-sm btn-warning d-none" id="btnBatchDetailsRetrySources">
+          <i class="bi bi-arrow-clockwise"></i> Retry Failed Sources
+        </button>
         <button type="button" class="btn btn-sm btn-outline-secondary" id="batchDetailsCopyAllBtn">
           <i class="bi bi-clipboard"></i> Copy Full Audit
         </button>

@@ -59,19 +59,37 @@ class PipelineRunLogger:
         entities_dict["company"] = safe_company
 
         logs_list = list(execution_logs or [])
-        log_entry = {
-            "timestamp": end_time.isoformat(),
-            "level": level,
-            "action": action,
-            "status": status,
-            "quality_score": float(quality_score or 0.0),
-            "quality_grade": quality_grade or "N/A",
-            "duration_seconds": duration,
-            "particulars": entities_dict,
-        }
-        if error_message:
-            log_entry["error"] = error_message
-        logs_list.append(log_entry)
+        if not logs_list:
+            log_entry = {
+                "timestamp": end_time.isoformat(),
+                "level": level,
+                "action": action,
+                "step_name": f"Pipeline Run ({action})",
+                "status": status,
+                "quality_score": float(quality_score or 0.0),
+                "quality_grade": quality_grade or "N/A",
+                "duration_seconds": duration,
+                "particulars": entities_dict,
+            }
+            if error_message:
+                log_entry["error"] = error_message
+            logs_list.append(log_entry)
+        else:
+            has_completion = any(l.get("action") == "completion" or str(l.get("step_name", "")).startswith("Pipeline Execution Completed") for l in logs_list)
+            if not has_completion:
+                completion_entry = {
+                    "timestamp": end_time.isoformat(),
+                    "level": level,
+                    "action": "completion",
+                    "step_name": f"Pipeline Execution Completed ({status.upper()})",
+                    "status": status,
+                    "quality_score": float(quality_score or 0.0),
+                    "quality_grade": quality_grade or "N/A",
+                    "duration_seconds": duration,
+                    "message": f"Execution finished for {safe_company} in {duration}s with status '{status}'.",
+                    "particulars": entities_dict,
+                }
+                logs_list.append(completion_entry)
 
         try:
             date_str = start_time.strftime("%Y-%m-%d")

@@ -8907,6 +8907,10 @@ $(function () {
                       ${dumpDisabled}
                       title="Persist all enriched account data into PostgreSQL accounts table"><i
                         class="bi bi-database-check"></i> Dump DB</button>
+              <button type="button" class="panel-btn acct-btn-retry-sources"
+                      style="border-color:#f59e0b;color:#d97706;"
+                      title="Selectively retry only failed or empty sources for this account without re-fetching successful data"><i
+                        class="bi bi-arrow-clockwise"></i> Retry Failed</button>
             </div>
             <div class="panel-status-msg" id="acctPanelStatusMsg"
               >${state.message || "Ready for data ingestion cycle."}</div>
@@ -8918,6 +8922,39 @@ $(function () {
     // Inject before the accountDataSection intel-tag pills
     $("#accountDataSection").before(panelHtml);
   }
+
+  // Account Selective Retry Button (Account View)
+  $(document).on("click", ".acct-btn-retry-sources", async function () {
+    if (!activeAccount || !activeAccount.id) return;
+    const $btn = $(this);
+    const origHtml = $btn.html();
+    const $status = $("#acctPanelStatusMsg");
+    $btn.html('<i class="bi bi-arrow-clockwise spinner-border spinner-border-sm"></i> Retrying...').prop("disabled", true);
+    $status.html('<span style="color:var(--text-muted);"><i class="bi bi-hourglass-split"></i> Retrying failed/empty sources for ' + esc(activeAccount.name) + '...</span>');
+    try {
+      const res = await fetch(`${API_BASE}/api/account/${activeAccount.id}/retry-sources`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ include_empty: true })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === "success") {
+        showToast(`Recovered ${data.recovered_sources?.length || 0} sources for ${data.company_name}!`, "success");
+        $status.html(`<span style="color:#10b981;"><i class="bi bi-check-circle"></i> Retried ${data.retried_sources?.length || 0} sources. Recovered: ${data.recovered_sources?.length || 0}.</span>`);
+        if (typeof window.loadData === "function") window.loadData(true);
+      } else if (data.status === "noop") {
+        showToast(data.message || "All sources previously succeeded.", "info");
+        $status.html(`<span style="color:var(--text-muted);">${esc(data.message)}</span>`);
+      } else {
+        showToast(data.message || data.error || "Retry failed", "error");
+        $status.html(`<span style="color:#ef4444;">${esc(data.message || data.error || "Retry failed")}</span>`);
+      }
+    } catch (err) {
+      showToast("Network error retrying sources: " + err.message, "error");
+    } finally {
+      $btn.html(origHtml).prop("disabled", false);
+    }
+  });
 
   // Account Pull Button
   $(document).on("click", ".acct-btn-pull", async function () {
@@ -12516,6 +12553,9 @@ $(function () {
     const isPersona = (run.pipeline_level === "persona" || (run.run_id && run.run_id.includes("_persona_")));
     const isLob = (run.pipeline_level === "lob" || (run.run_id && run.run_id.includes("_lob_")));
     const isFailed = (run.status === "failed" || run.status === "error" || (run.error_message && String(run.error_message).trim().length > 0));
+    const isDump = (run.action === "dump" || run.action === "db_dump" || run.action === "save");
+    const isAuto = (run.action === "auto_enrich_and_ingest");
+    const isSelectiveRetry = (run.action === "retry_failed_sources");
     const timeInfo = formatRunTime(run.started_at || run.completed_at);
 
     // Badges
@@ -12529,7 +12569,14 @@ $(function () {
         ? '<span class="badge" style="background:rgba(14,165,233,0.12);color:#0284c7;font-weight:600;"><i class="bi bi-diagram-3-fill"></i> LOB</span>'
         : '<span class="badge" style="background:rgba(16,185,129,0.12);color:#059669;font-weight:600;"><i class="bi bi-building"></i> Account</span>');
 
-    const actionBadge = `<span class="badge bg-secondary-subtle text-secondary-emphasis" style="font-weight:600;text-transform:uppercase;">${esc(run.action || "run")}</span>`;
+    let actionBadge = `<span class="badge bg-secondary-subtle text-secondary-emphasis" style="font-weight:600;text-transform:uppercase;">${esc(run.action || "run")}</span>`;
+    if (isDump) {
+      actionBadge = `<span class="badge" style="background:rgba(59,130,246,0.12);color:#2563eb;font-weight:600;"><i class="bi bi-database-check"></i> DB STORAGE COMMIT</span>`;
+    } else if (isAuto) {
+      actionBadge = `<span class="badge" style="background:rgba(16,185,129,0.12);color:#059669;font-weight:600;"><i class="bi bi-cpu-fill"></i> AUTO ENRICH &amp; INGEST</span>`;
+    } else if (isSelectiveRetry) {
+      actionBadge = `<span class="badge" style="background:rgba(245,158,11,0.12);color:#d97706;font-weight:600;"><i class="bi bi-arrow-repeat"></i> SELECTIVE RETRY</span>`;
+    }
 
     $("#batchRunDetailsStatusBadge").html(statusBadge);
     $("#batchRunDetailsLevelBadge").html(levelBadge);
@@ -12548,8 +12595,26 @@ $(function () {
 
     // Quick Metrics
     $("#batchRunDetailsDuration").text(`${(parseFloat(run.duration_seconds) || 0).toFixed(2)}s`);
-    $("#batchRunDetailsQualityScore").text(run.quality_score != null ? `${Math.round(run.quality_score)}% (Grade ${run.quality_grade || 'B'})` : "Unscored");
-    $("#batchRunDetailsCredits").text(`${run.total_credits_used || 0} cr`);
+    
+    // Quality Score formatting
+    const qScore = parseFloat(run.quality_score) || 0;
+    const qGrade = run.quality_grade || "N/A";
+    if (isDump && qScore === 0 && (qGrade === "N/A" || !qGrade)) {
+      $("#batchRunDetailsQualityScore").text("DB Staged").removeClass("text-success").addClass("text-secondary");
+      $("#batchRunDetailsQualityGrade").text("Internal DB record write");
+    } else {
+      $("#batchRunDetailsQualityScore").text(run.quality_score != null ? `${Math.round(qScore)}% (Grade ${qGrade})` : "Unscored").removeClass("text-secondary").addClass("text-success");
+      $("#batchRunDetailsQualityGrade").text("Data integrity score");
+    }
+
+    // Billable Credits formatting
+    if (isDump && (!run.total_credits_used || run.total_credits_used === 0)) {
+      $("#batchRunDetailsCredits").text("0 cr");
+      $("#batchRunDetailsCreditsSub").text("Unmetered DB commit");
+    } else {
+      $("#batchRunDetailsCredits").text(`${run.total_credits_used || 0} cr`);
+      $("#batchRunDetailsCreditsSub").text("Metered API consumption");
+    }
 
     const targetName = run.entities_extracted?.full_name || run.entities_extracted?.lob_name || run.entities_extracted?.title || run.entities_extracted?.company || run.company_name || "N/A";
     const targetSub = run.target_url || (run.entities_extracted?.account_id ? `Account #${run.entities_extracted.account_id}` : run.company_name || "");
@@ -12615,7 +12680,18 @@ $(function () {
       credHtml += `</div>`;
     }
     if (!credHtml) {
-      credHtml = `<div class="p-3 text-muted" style="font-size:0.80rem;">No detailed vendor credit breakdown recorded for this execution step. Total billable credits: <strong>${run.total_credits_used || 0} cr</strong>.</div>`;
+      if (isDump) {
+        credHtml = `
+          <div class="p-3 text-muted" style="font-size:0.80rem;background:rgba(59,130,246,0.04);border:1px dashed rgba(59,130,246,0.3);border-radius:8px;">
+            <div class="d-flex align-items-center gap-2 mb-1" style="color:#2563eb;font-weight:600;">
+              <i class="bi bi-database-check"></i> Database Record Storage Commit
+            </div>
+            <div>This execution was an internal PostgreSQL database record commit (action: <strong>${esc(run.action || 'dump')}</strong>). Internal database writes consume <strong>0 vendor API credits</strong>. Rate cards apply exclusively during external vendor intelligence collection.</div>
+          </div>
+        `;
+      } else {
+        credHtml = `<div class="p-3 text-muted" style="font-size:0.80rem;">No detailed vendor credit breakdown recorded for this execution step. Total billable credits: <strong>${run.total_credits_used || 0} cr</strong>.</div>`;
+      }
     }
     $("#batchRunDetailsCreditsContainer").html(credHtml);
 
@@ -12628,21 +12704,30 @@ $(function () {
       let logsHtml = '<div class="d-flex flex-column gap-2">';
       logs.forEach((logItem, idx) => {
         const logTime = logItem.timestamp ? new Date(logItem.timestamp).toLocaleTimeString() : `#${idx + 1}`;
-        const logStatus = logItem.status || "completed";
-        const isLogErr = (logStatus === "failed" || logItem.error);
+        const logStatus = (logItem.status || "completed").toLowerCase();
+        const isLogErr = (logStatus === "failed" || logStatus === "error" || logItem.error);
+        const isLogWarn = (logStatus === "partial" || logStatus === "empty");
+        const statusBadgeClass = isLogErr ? 'bg-danger-subtle text-danger' : (isLogWarn ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success');
+        const iconClass = isLogErr ? 'bi-x-circle' : (isLogWarn ? 'bi-exclamation-circle' : 'bi-check-circle');
+        const stepTitle = logItem.step_name || (logItem.action ? `Step: ${logItem.action.replace(/_/g, ' ').toUpperCase()}` : `Event #${idx + 1}`);
+        const sourceTag = logItem.source ? `<span class="badge bg-secondary-subtle text-secondary me-1" style="font-size:0.68rem;font-weight:600;">${esc(logItem.source.toUpperCase())}</span>` : '';
+        const durationText = logItem.duration_seconds != null ? `${(parseFloat(logItem.duration_seconds) || 0).toFixed(2)}s` : '';
+
         logsHtml += `
           <div style="border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;background:rgba(0,0,0,0.01);">
             <div class="d-flex justify-content-between align-items-center">
               <div class="d-flex align-items-center gap-2">
-                <span class="badge ${isLogErr ? 'bg-danger-subtle text-danger' : 'bg-success-subtle text-success'}" style="font-size:0.70rem;">
-                  <i class="bi ${isLogErr ? 'bi-x-circle' : 'bi-check-circle'}"></i> ${esc(logStatus)}
+                <span class="badge ${statusBadgeClass}" style="font-size:0.70rem;">
+                  <i class="bi ${iconClass}"></i> ${esc(logStatus.toUpperCase())}
                 </span>
-                <strong style="font-size:0.80rem;">Action: ${esc(logItem.action || 'run')} (${esc(logItem.level || 'pipeline')})</strong>
+                ${sourceTag}
+                <strong style="font-size:0.80rem;">${esc(stepTitle)}</strong>
               </div>
-              <span class="text-muted" style="font-size:0.70rem;">${esc(logTime)} &bull; ${(parseFloat(logItem.duration_seconds) || 0).toFixed(2)}s</span>
+              <span class="text-muted" style="font-size:0.70rem;">${esc(logTime)} ${durationText ? `&bull; ${durationText}` : ''}</span>
             </div>
+            ${logItem.message ? `<div class="mt-1" style="font-size:0.76rem;color:var(--text-primary);">${esc(logItem.message)}</div>` : ''}
             ${logItem.error ? `<div class="text-danger mt-1" style="font-size:0.75rem;"><i class="bi bi-exclamation-triangle"></i> ${esc(logItem.error)}</div>` : ''}
-            ${logItem.particulars ? `<div class="text-muted mt-1" style="font-size:0.72rem;word-break:break-all;">${esc(JSON.stringify(logItem.particulars))}</div>` : ''}
+            ${logItem.particulars && !logItem.message ? `<div class="text-muted mt-1" style="font-size:0.72rem;word-break:break-all;">${esc(JSON.stringify(logItem.particulars))}</div>` : ''}
           </div>
         `;
       });
@@ -12659,6 +12744,26 @@ $(function () {
     $(".batch-details-tab-btn[data-tab='entities']").addClass("active");
     $(".batch-details-pane").addClass("d-none");
     $("#batchTabEntities").removeClass("d-none");
+
+    // Check if run has account_id and any failed/empty sources eligible for retry
+    const acctId = run.entities_extracted?.account_id || (run.pipeline_level === 'account' ? (run.entities_extracted?.id || null) : null);
+    const unrecoveredSources = run.entities_extracted?.unrecovered_sources || [];
+    const secAccount = (run.credits_breakdown?.sections || {}).account || {};
+    const hasFailedResources = (secAccount.resources || []).some(r => {
+      const s = (r.status || '').toLowerCase();
+      return s === 'error' || s === 'empty';
+    });
+
+    const canRetry = Boolean(acctId && (unrecoveredSources.length > 0 || hasFailedResources || isFailed));
+
+    if (canRetry) {
+      $("#btnBatchDetailsRetrySources")
+        .removeClass("d-none")
+        .data("account-id", acctId)
+        .data("run-id", run.run_id);
+    } else {
+      $("#btnBatchDetailsRetrySources").addClass("d-none");
+    }
 
     // Open modal
     $("#batchRunDetailsBackdrop").removeClass("d-none");
@@ -12703,6 +12808,37 @@ $(function () {
     if (jsonText) {
       navigator.clipboard.writeText(jsonText);
       showToast("Telemetry JSON audit copied to clipboard!", "success");
+    }
+  });
+
+  $(document).on("click", "#btnBatchDetailsRetrySources", async function (e) {
+    e.preventDefault();
+    const accountId = $(this).data("account-id");
+    const runId = $(this).data("run-id");
+    if (!accountId) return;
+    const btn = $(this);
+    const origHtml = btn.html();
+    btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm me-1" role="status"></span> Retrying...');
+    try {
+      const res = await fetch(`${API_BASE}/api/account/${accountId}/retry-sources`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ include_empty: true })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === "success") {
+        showToast(`Recovered ${data.recovered_sources?.length || 0} sources for ${data.company_name}!`, "success");
+        if (typeof loadBatchRunHistory === "function") await loadBatchRunHistory();
+        if (runId) openBatchRunDetailsModal(runId);
+      } else if (data.status === "noop") {
+        showToast(data.message || "All sources previously succeeded.", "info");
+      } else {
+        showToast(data.message || data.error || "Retry failed", "error");
+      }
+    } catch (err) {
+      showToast("Network error retrying sources: " + err.message, "error");
+    } finally {
+      btn.prop("disabled", false).html(origHtml);
     }
   });
 

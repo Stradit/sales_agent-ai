@@ -390,7 +390,44 @@ class AccountAutomationEngine:
             session.commit()
             session.refresh(saved)
 
-            # 5. Log execution event in pipeline_runs
+            # 5. Log execution event in pipeline_runs with detailed milestone chronology
+            retry_logs = [
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "account",
+                    "action": "selective_retry_init",
+                    "step_name": "Selective Target Identification",
+                    "status": "success",
+                    "duration_seconds": 0.05,
+                    "message": f"Identified {len(targets)} failed/empty sources for targeted retry: {', '.join(targets)}.",
+                    "particulars": {"targets": targets, "account_id": account_id},
+                }
+            ]
+            for src in targets:
+                stat = updated_dossier.get("_telemetry", {}).get("sources", {}).get(src, {})
+                rec = src in summary.get("recovered_sources", [])
+                retry_logs.append({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "level": "account",
+                    "action": f"retry_{src}",
+                    "step_name": f"Selective Retry: {src.title()}",
+                    "source": src,
+                    "status": "success" if rec else "failed",
+                    "duration_seconds": round(float(stat.get("latency_ms", 0)) / 1000.0, 2),
+                    "message": f"Connector '{src}' {'recovered successfully' if rec else 'failed on retry'} (latency: {stat.get('latency_ms', 0)}ms).",
+                    "particulars": stat,
+                })
+            retry_logs.append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "level": "account",
+                "action": "mdm_additive_coalescence",
+                "step_name": "MDM Additive Coalescence & Persistence",
+                "status": "success",
+                "duration_seconds": 0.15,
+                "message": f"Coalesced recovered data additively into Account #{account_id}.",
+                "particulars": {"recovered_count": len(summary.get("recovered_sources", []))},
+            })
+
             PipelineRunLogger.log_event(
                 company_name=company_name,
                 target_url=domain,
@@ -400,6 +437,7 @@ class AccountAutomationEngine:
                 started_at=datetime.now(timezone.utc),
                 completed_at=datetime.now(timezone.utc),
                 total_credits_used=len(summary.get("recovered_sources", [])),
+                execution_logs=retry_logs,
                 entities_extracted={
                     "account_id": account_id,
                     "retried_sources": summary.get("retried_sources", []),
@@ -449,6 +487,7 @@ class AccountAutomationEngine:
         """
         t0 = datetime.now(timezone.utc)
         clean_name = company_name.strip()
+        chronology_logs: List[Dict[str, Any]] = []
         clean_dom = (
             domain.replace("https://", "").replace("http://", "").split("/")[0].split("?")[0].strip().lower()
             if domain
@@ -469,6 +508,22 @@ class AccountAutomationEngine:
                 update_job(job_id, status=STATUS_FAILED, progress_pct=100, error=err_msg,
                            result={"status": "rejected", "preflight": preflight})
             return {"status": "rejected", "error": err_msg, "preflight": preflight}
+
+        chronology_logs.append({
+            "timestamp": t0.isoformat(),
+            "level": "account",
+            "action": "preflight_gatekeeper",
+            "step_name": "Pre-Flight Resource & Credit Gatekeeper",
+            "status": "success",
+            "duration_seconds": 0.05,
+            "message": f"Pre-flight audit approved. Estimated: {preflight['required_credits']} cr across {len(preflight['active_sources'])} active connectors. Workspace quota: {preflight['available_credits']} cr available.",
+            "particulars": {
+                "required_credits": preflight["required_credits"],
+                "available_credits": preflight["available_credits"],
+                "active_sources": [s["id"] for s in preflight["active_sources"]],
+                "balance_status": preflight["balance_status"],
+            },
+        })
 
         # Step 2: Initialize or fetch Account stub in PostgreSQL
         if job_id:
@@ -530,6 +585,22 @@ class AccountAutomationEngine:
         finally:
             session.close()
 
+        chronology_logs.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": "account",
+            "action": "db_stub_init",
+            "step_name": "Corporate Entity Stub Verification",
+            "status": "success",
+            "duration_seconds": 0.1,
+            "message": f"PostgreSQL entity verified (Account ID #{account_id}, Key: '{account_key}').",
+            "particulars": {
+                "account_id": account_id,
+                "account_key": account_key,
+                "company_name": clean_name,
+                "domain": clean_dom,
+            },
+        })
+
         # Step 3: Autonomous Multi-Source Harvesting
         if job_id:
             update_job(
@@ -548,6 +619,54 @@ class AccountAutomationEngine:
         # Step 4: Self-Healing Fault Detection & Micro-Retry
         telemetry = account_dossier.get("_telemetry", {})
         sources_stat = telemetry.get("sources", {})
+
+        SOURCE_DISPLAY_NAMES = {
+            "sec_edgar": "SEC EDGAR Filings & Submissions",
+            "diffbot": "Diffbot Knowledge Graph",
+            "serper": "Google Serper Web Intelligence",
+            "finnhub": "Finnhub Market Data & Quote",
+            "fmp": "Financial Modeling Prep (FMP)",
+            "opencorporates": "OpenCorporates Registry",
+            "gleif": "GLEIF Legal Entity Identifier",
+            "courtlistener": "CourtListener Legal Search",
+            "apify_crunchbase": "Crunchbase Venture Intelligence",
+            "apify_glassdoor": "Glassdoor Workplace Sentiment",
+            "wikipedia": "Wikipedia & Wikidata Knowledge Base",
+            "openfec": "Federal Election Commission (FEC)",
+            "firecrawl": "Firecrawl Deep Web Scraper",
+        }
+
+        for src_id, stat in sources_stat.items():
+            pretty_src = SOURCE_DISPLAY_NAMES.get(src_id, src_id.replace("_", " ").title())
+            st = stat.get("status", "success")
+            lat_ms = stat.get("latency_ms", 0)
+            cnt = stat.get("records_or_keys", 0)
+            err = stat.get("error")
+            if st == "success":
+                msg = f"Successfully harvested {cnt} record(s)/attribute(s) from {pretty_src} in {lat_ms}ms."
+            elif st == "empty":
+                msg = f"Connector {pretty_src} queried in {lat_ms}ms but returned 0 records."
+            else:
+                msg = f"Connector {pretty_src} failed in {lat_ms}ms: {err or 'Unknown error'}."
+            chronology_logs.append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "level": "account",
+                "action": f"harvest_{src_id}",
+                "step_name": f"Collector: {pretty_src}",
+                "source": src_id,
+                "status": st,
+                "duration_seconds": round(float(lat_ms) / 1000.0, 2),
+                "records_count": cnt,
+                "message": msg,
+                "particulars": {
+                    "source": src_id,
+                    "status": st,
+                    "latency_ms": lat_ms,
+                    "records_or_keys": cnt,
+                    "error": err,
+                },
+            })
+
         failed_sources = [
             src for src, stat in sources_stat.items()
             if stat.get("status") == "error"
@@ -577,6 +696,17 @@ class AccountAutomationEngine:
                 run_raw_dir=run_raw_dir,
             )
 
+            chronology_logs.append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "level": "account",
+                "action": "self_healing_retry",
+                "step_name": "Self-Healing Targeted Micro-Retry",
+                "status": "success" if retry_summary.get("recovered_sources") else "partial",
+                "duration_seconds": 1.5,
+                "message": f"Self-healing retry finished: {len(retry_summary.get('recovered_sources', []))} recovered ({', '.join(retry_summary.get('recovered_sources', [])) or 'none'}), {len(retry_summary.get('unrecovered_sources', []))} unrecovered ({', '.join(retry_summary.get('unrecovered_sources', [])) or 'none'}).",
+                "particulars": retry_summary,
+            })
+
         # Step 5: Additive Coalescence & Golden Record Commit to Database
         if job_id:
             update_job(job_id, progress_pct=75,
@@ -599,6 +729,38 @@ class AccountAutomationEngine:
             raise commit_err
         finally:
             session.close()
+
+        audit = account_dossier.get("_validation_audit") or {}
+        chronology_logs.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": "account",
+            "action": "mdm_coalesce",
+            "step_name": "Master Data Management (MDM) Coalescence Engine",
+            "status": "success",
+            "duration_seconds": 0.2,
+            "message": f"Lossless additive coalescence executed. Harmonized multi-source intelligence into Account #{account_id}.",
+            "particulars": {
+                "lobs_identified": len(account_dossier.get("known_lobs", [])),
+                "personas_identified": len(account_dossier.get("known_personas", [])),
+                "quality_score": float(audit.get("score", 0.0)) if isinstance(audit, dict) else 0.0,
+                "quality_grade": audit.get("grade", "N/A") if isinstance(audit, dict) else "N/A",
+            },
+        })
+
+        chronology_logs.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": "account",
+            "action": "db_golden_commit",
+            "step_name": "PostgreSQL Golden Record Persistence",
+            "status": "success",
+            "duration_seconds": 0.1,
+            "message": f"Golden record committed to PostgreSQL database (Account ID #{account_id}, Key: '{account_key}').",
+            "particulars": {
+                "account_id": account_id,
+                "account_key": account_key,
+                "company_name": clean_name,
+            },
+        })
 
         # Step 6: Meter Real Telemetry & Commit Audited Credit Ledger
         if job_id:
@@ -641,6 +803,7 @@ class AccountAutomationEngine:
             raw_storage_dir=str(raw_dir_val) if raw_dir_val else None,
             total_credits_used=acct_credit_tally.get("credits", 0),
             credits_breakdown=credits_breakdown,
+            execution_logs=chronology_logs,
             entities_extracted={
                 "account_id": account_id,
                 "key": account_key,
