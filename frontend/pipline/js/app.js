@@ -9177,8 +9177,19 @@ $(function () {
 
   // Open modal
   $("#addNewAccountBtn").on("click", function () {
-    $("#newAccountName").val("");
+    $("#newAccountName").val("").removeClass("is-invalid");
     $("#newAccountDomain").val("");
+    $("#newAccountTicker").val("");
+    $("#accountCikBadge").hide();
+    $("#autoEnrichAccountToggle").prop("checked", true);
+    $("#accountExtractionControls").show();
+    $(".source-pill").addClass("active");
+    $(".source-pill[data-billable='false']").find("i").removeClass("bi-circle text-muted").addClass("bi-check-circle-fill text-success");
+    $(".source-pill[data-billable='true']").find("i").removeClass("bi-circle text-muted").addClass("bi-check-circle-fill text-primary");
+    $("#btnModalSaveStubOnly").show();
+    $("#startAccountBtnText").text("Start Autonomous Pipeline");
+    $("#modalBtnCreditBadge").text("5 cr").show();
+    $("#accountCreditSummaryBadge").html('<i class="bi bi-shield-check"></i> 5 Billable Credits &bull; Pre-Approved');
     const modal = new bootstrap.Modal(document.getElementById("addAccountModal"));
     modal.show();
     setTimeout(() => {
@@ -12919,16 +12930,18 @@ $(function () {
   // LOB AUTOMATION CLIENT ENGINE — PHASED INGESTION & HANDOFF
   // ══════════════════════════════════════════════════════════════════
   window._activeLobHandoffContext = null;
+  window._selectedLobBatchSize = 10;
 
   async function promptLobAutomationHandoff(accountId, companyName, domain, secCik) {
     window._activeLobHandoffContext = { accountId, companyName, domain, secCik };
+    window._selectedLobBatchSize = 10;
     const $modal = $("#lobHandoffPromptModal");
     const $body = $("#lobHandoffPromptModalBody");
 
     $body.html(`
-      <div style="text-align:center;padding:24px 0;">
-        <div class="spinner-border text-primary" role="status" style="width:2rem;height:2rem;"></div>
-        <p style="margin-top:12px;font-size:0.85rem;color:#64748b;">Checking pre-flight credit quota &amp; LOB discovery manifest...</p>
+      <div style="text-align:center;padding:28px 0;">
+        <div class="spinner-border text-primary" role="status" style="width:2.2rem;height:2.2rem;"></div>
+        <p style="margin-top:14px;font-size:0.86rem;color:#64748b;font-weight:600;">Verifying pre-flight rate cards &amp; scanning discovery manifest...</p>
       </div>
     `);
 
@@ -12947,50 +12960,99 @@ $(function () {
 
       const preflight = res.ok ? await res.json() : null;
       const count = preflight ? preflight.estimated_lob_count : 15;
-      const reqCr = preflight ? preflight.required_credits : count * 4;
       const availCr = preflight ? preflight.available_credits : 5000;
-      const isAllowed = preflight ? preflight.allowed : true;
-      const phases = Math.ceil(count / 10);
 
-      $body.html(`
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:16px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <div style="font-size:0.95rem;font-weight:700;color:#0f172a;">${esc(companyName)}</div>
-            <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:0.75rem;padding:5px 10px;border-radius:6px;">
-              ~${count} LOB Divisions Detected
-            </span>
-          </div>
+      function updateHandoffModalView(batchSize) {
+        window._selectedLobBatchSize = batchSize;
+        const phases = Math.ceil(count / batchSize);
+        const reqCr = count * 4;
+        const isAllowed = availCr >= reqCr;
 
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
-              <div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;font-weight:700;">Required Credits</div>
-              <div style="font-size:1.15rem;font-weight:800;color:${isAllowed ? '#059669' : '#dc2626'};">${reqCr} cr</div>
-              <div style="font-size:0.68rem;color:#64748b;">${phases} batch phases (10/batch)</div>
+        $body.html(`
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+              <div>
+                <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">${esc(companyName)}</div>
+                <div style="font-size:0.74rem;color:#64748b;">
+                  Account golden record committed &bull; Ready for Level 2 organizational hierarchy
+                </div>
+              </div>
+              <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:0.78rem;font-weight:700;padding:6px 12px;border-radius:8px;">
+                <i class="bi bi-diagram-3-fill"></i> ~${count} LOB Divisions Detected
+              </span>
             </div>
-            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
-              <div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;font-weight:700;">Workspace Balance</div>
-              <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">${availCr.toLocaleString()} cr</div>
-              <div style="font-size:0.68rem;color:#059669;font-weight:600;">
-                ${isAllowed ? '✓ Sufficient Balance' : '⚠ Insufficient Balance'}
+
+            <!-- Batch Partitioning Strategy Controls -->
+            <div style="background:#ffffff;border:1px solid #cbd5e1;border-radius:10px;padding:12px 14px;margin-bottom:14px;">
+              <div style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+                <span><i class="bi bi-sliders2"></i> Batch Partitioning Strategy</span>
+                <span style="font-size:0.7rem;color:#0284c7;font-weight:700;">${phases} Sequential Phases (${batchSize} / phase)</span>
+              </div>
+              <div class="btn-group w-100" role="group" id="lobBatchSizeSelector">
+                <button type="button" class="btn btn-sm ${batchSize === 10 ? 'btn-primary active' : 'btn-outline-secondary'} btn-batch-size-pill" data-batch="10" style="font-size:0.76rem;font-weight:700;">
+                  <i class="bi bi-shield-check"></i> 10 / Batch (Recommended)
+                </button>
+                <button type="button" class="btn btn-sm ${batchSize === 15 ? 'btn-primary active' : 'btn-outline-secondary'} btn-batch-size-pill" data-batch="15" style="font-size:0.76rem;font-weight:700;">
+                  <i class="bi bi-speedometer2"></i> 15 / Batch (Balanced)
+                </button>
+                <button type="button" class="btn btn-sm ${batchSize === 25 ? 'btn-primary active' : 'btn-outline-secondary'} btn-batch-size-pill" data-batch="25" style="font-size:0.76rem;font-weight:700;">
+                  <i class="bi bi-lightning-charge"></i> 25 / Batch (Fast)
+                </button>
+              </div>
+            </div>
+
+            <!-- Live Rate Card & Quota Tally -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
+              <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
+                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Required Credits</div>
+                <div style="font-size:1.15rem;font-weight:800;color:${isAllowed ? '#059669' : '#dc2626'};">${reqCr} cr</div>
+                <div style="font-size:0.68rem;color:#64748b;">4 cr &times; ${count} entities</div>
+              </div>
+              <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
+                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Workspace Balance</div>
+                <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">${availCr.toLocaleString()} cr</div>
+                <div style="font-size:0.68rem;color:#059669;font-weight:600;">
+                  ${isAllowed ? '✓ Pre-Approved' : '⚠ Shortage'}
+                </div>
+              </div>
+              <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
+                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Remaining Balance</div>
+                <div style="font-size:1.15rem;font-weight:800;color:#475569;">${Math.max(0, availCr - reqCr).toLocaleString()} cr</div>
+                <div style="font-size:0.68rem;color:#64748b;">Post-run margin</div>
+              </div>
+            </div>
+
+            <!-- 3-Phase Execution Architecture Visual Summary -->
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;font-size:0.76rem;color:#1e3a8a;line-height:1.5;">
+              <div style="font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;color:#1e40af;">
+                <i class="bi bi-cpu-fill"></i> Autonomous Execution Architecture
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div><strong>Phase 1: Lightweight Name Discovery:</strong> Scans SEC Form 10-K Ex-21 &amp; GLEIF (0 cr) &bull; Dumps initial stubs into DB.</div>
+                <div><strong>Phase 2: Phased Deep Enrichment:</strong> Chunks into ${phases} batches &bull; 3 concurrent worker threads with immediate PostgreSQL commit per batch.</div>
+                <div><strong>Phase 3: Deferred Self-Healing Retries:</strong> Isolates connector failures during batches and runs consolidated targeted retries only.</div>
               </div>
             </div>
           </div>
+        `);
 
-          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;font-size:0.78rem;color:#1e3a8a;line-height:1.5;">
-            <strong>Autonomous Phased Architecture:</strong><br/>
-            &bull; <strong>Phase 1:</strong> Fast Name Discovery &amp; Stub Ingestion into DB.<br/>
-            &bull; <strong>Phase 2:</strong> Chunks into ${phases} batch phases (commercial divisions first).<br/>
-            &bull; <strong>Phase 3:</strong> 3-thread concurrent enrichment with immediate DB commit per batch.<br/>
-            &bull; <strong>Phase 4:</strong> Post-batch consolidated retry ONLY on failed connector logs.
-          </div>
-        </div>
-      `);
+        $("#lobHandoffBtnCredits").text(reqCr);
 
-      if (!isAllowed) {
-        $("#btnStartAutomatedLobPipeline").prop("disabled", true).addClass("opacity-50");
-      } else {
-        $("#btnStartAutomatedLobPipeline").prop("disabled", false).removeClass("opacity-50");
+        if (!isAllowed) {
+          $("#btnStartAutomatedLobPipeline").prop("disabled", true).addClass("opacity-50");
+        } else {
+          $("#btnStartAutomatedLobPipeline").prop("disabled", false).removeClass("opacity-50");
+        }
       }
+
+      updateHandoffModalView(10);
+
+      // Event listener for batch size pill switcher
+      $(document).off("click", ".btn-batch-size-pill").on("click", ".btn-batch-size-pill", function() {
+        const batch = parseInt($(this).data("batch"), 10) || 10;
+        updateHandoffModalView(batch);
+      });
+
     } catch (err) {
       console.warn("Preflight error", err);
       $body.html(`
@@ -13001,7 +13063,8 @@ $(function () {
     }
   }
 
-  async function startAutomatedLobPipeline(accountId, companyName, domain, secCik) {
+  async function startAutomatedLobPipeline(accountId, companyName, domain, secCik, batchSize) {
+    batchSize = batchSize || window._selectedLobBatchSize || 10;
     $("#lobSection").removeClass("d-none");
     const $progress = $("#lobBatchProgress").removeClass("d-none");
     const $fill = $("#lobProgressFill").css("width", "10%").removeClass("dump");
@@ -13016,7 +13079,7 @@ $(function () {
           company_name: companyName,
           domain: domain,
           sec_cik: secCik,
-          batch_size: 10,
+          batch_size: batchSize,
         }),
       });
 
@@ -13149,7 +13212,8 @@ $(function () {
     $("#lobHandoffPromptModal").modal("hide");
     if (window._activeLobHandoffContext) {
       const { accountId, companyName, domain, secCik } = window._activeLobHandoffContext;
-      startAutomatedLobPipeline(accountId, companyName, domain, secCik);
+      const batchSize = window._selectedLobBatchSize || 10;
+      startAutomatedLobPipeline(accountId, companyName, domain, secCik, batchSize);
     }
   });
 
@@ -13174,16 +13238,75 @@ $(function () {
     promptLobAutomationHandoff(acctId, name, dom, cik);
   });
 
+  // ── Source Matrix Dynamic Calculation & Interactive UI ──
+  function updateAddAccountModalCredits() {
+    const isAutoEnrich = $("#autoEnrichAccountToggle").is(":checked");
+    if (!isAutoEnrich) {
+      $("#accountCreditSummaryBadge").html('<i class="bi bi-database"></i> 0 Credits &bull; Stub Only');
+      $("#modalBtnCreditBadge").hide();
+      $("#startAccountBtnText").text("Save Account Stub Only (0 cr)");
+      return;
+    }
 
-  // ── Source Chip Toggle Handler in Add Account Modal ──
+    const billableCount = $(".source-pill[data-billable='true'].active").length;
+    const totalActiveCount = $(".source-pill.active").length;
+    const totalCredits = billableCount * 1;
+
+    $("#accountCreditSummaryBadge").html(
+      `<i class="bi bi-shield-check"></i> ${totalCredits} Billable Credits &bull; Pre-Approved (${totalActiveCount}/11 Sources)`
+    );
+    $("#modalBtnCreditBadge").text(`${totalCredits} cr`).show();
+    $("#startAccountBtnText").text("Start Autonomous Pipeline");
+  }
+
+  // Toggle switch handler
+  $(document).on("change", "#autoEnrichAccountToggle", function() {
+    const isChecked = $(this).is(":checked");
+    if (isChecked) {
+      $("#accountExtractionControls").slideDown(200);
+      $("#btnModalSaveStubOnly").show();
+      updateAddAccountModalCredits();
+    } else {
+      $("#accountExtractionControls").slideUp(200);
+      $("#btnModalSaveStubOnly").hide();
+      $("#accountCreditSummaryBadge").html('<i class="bi bi-database"></i> 0 Credits &bull; Stub Only');
+      $("#modalBtnCreditBadge").hide();
+      $("#startAccountBtnText").text("Save Account Stub Only (0 cr)");
+    }
+  });
+
+  // Source pill toggle handler
   $(document).on("click", ".source-pill", function() {
     $(this).toggleClass("active");
+    const isBillable = $(this).data("billable") === true || $(this).data("billable") === "true";
     const $icon = $(this).find("i");
     if ($(this).hasClass("active")) {
-      $icon.removeClass("bi-circle text-muted").addClass("bi-check-circle-fill text-primary");
+      $icon.removeClass("bi-circle text-muted").addClass(isBillable ? "bi-check-circle-fill text-primary" : "bi-check-circle-fill text-success");
     } else {
-      $icon.removeClass("bi-check-circle-fill text-primary").addClass("bi-circle text-muted");
+      $icon.removeClass("bi-check-circle-fill text-primary text-success").addClass("bi-circle text-muted");
     }
+    updateAddAccountModalCredits();
+  });
+
+  // Matrix Quick Presets
+  $(document).on("click", "#btnSelectAllSources", function(e) {
+    e.preventDefault();
+    $(".source-pill").addClass("active");
+    $(".source-pill[data-billable='false']").find("i").removeClass("bi-circle text-muted").addClass("bi-check-circle-fill text-success");
+    $(".source-pill[data-billable='true']").find("i").removeClass("bi-circle text-muted").addClass("bi-check-circle-fill text-primary");
+    updateAddAccountModalCredits();
+  });
+
+  $(document).on("click", "#btnSelectFreeSources", function(e) {
+    e.preventDefault();
+    $(".source-pill[data-billable='false']").addClass("active").find("i").removeClass("bi-circle text-muted").addClass("bi-check-circle-fill text-success");
+    $(".source-pill[data-billable='true']").removeClass("active").find("i").removeClass("bi-check-circle-fill text-primary").addClass("bi-circle text-muted");
+    updateAddAccountModalCredits();
+  });
+
+  $(document).on("click", "#btnSelectRecommendedSources", function(e) {
+    e.preventDefault();
+    $("#btnSelectAllSources").trigger("click");
   });
 
   // Save Stub Only button in Add Account Modal
@@ -13199,46 +13322,52 @@ $(function () {
       .toLowerCase();
     if (!companyName) {
       showNotification("Please enter a company name.", "warning");
+      $("#newAccountName").focus();
       return;
     }
     $("#addAccountModal").modal("hide");
     createAccountStubOnly(companyName, domain, $(this));
   });
 
-  // Autodetect CIK visual badge when typing company name
+  // Credit Alert Modal Reconfigure Button
+  $(document).on("click", "#btnCreditAlertAdjustSources", function() {
+    $("#creditAlertModal").modal("hide");
+    $("#btnSelectFreeSources").trigger("click");
+    setTimeout(() => {
+      $("#addAccountModal").modal("show");
+    }, 300);
+  });
+
+  // Autodetect CIK and Corporate Metadata when typing company name
+  const KNOWN_ENTERPRISES = [
+    { key: "blackrock", name: "BlackRock, Inc.", cik: "0001364742", domain: "blackrock.com", ticker: "BLK" },
+    { key: "jpmorgan", name: "JPMorgan Chase & Co.", cik: "0000019617", domain: "jpmorganchase.com", ticker: "JPM" },
+    { key: "chase", name: "JPMorgan Chase & Co.", cik: "0000019617", domain: "jpmorganchase.com", ticker: "JPM" },
+    { key: "goldman", name: "The Goldman Sachs Group, Inc.", cik: "0000886982", domain: "goldmansachs.com", ticker: "GS" },
+    { key: "morgan stanley", name: "Morgan Stanley", cik: "0000895421", domain: "morganstanley.com", ticker: "MS" },
+    { key: "vanguard", name: "The Vanguard Group, Inc.", cik: "0000102909", domain: "vanguard.com", ticker: "VTI" },
+    { key: "bny", name: "The Bank of New York Mellon Corporation", cik: "0001390777", domain: "bny.com", ticker: "BK" },
+    { key: "apple", name: "Apple Inc.", cik: "0000320193", domain: "apple.com", ticker: "AAPL" },
+    { key: "microsoft", name: "Microsoft Corporation", cik: "0000789019", domain: "microsoft.com", ticker: "MSFT" }
+  ];
+
   $(document).on("input", "#newAccountName", function() {
     const val = $(this).val().toLowerCase().trim();
-    if (val.includes("blackrock") || val.includes("jpmorgan") || val.includes("vanguard") || val.includes("goldman") || val.includes("bny")) {
-      $("#accountCikBadge").show();
+    if (!val) {
+      $("#accountCikBadge").hide();
+      return;
+    }
+
+    const match = KNOWN_ENTERPRISES.find(e => val.includes(e.key));
+    if (match) {
+      $("#accountCikBadge").html(`<i class="bi bi-patch-check-fill"></i> SEC CIK: ${match.cik}`).show();
+      if (!$("#newAccountDomain").val().trim()) {
+        $("#newAccountDomain").val(match.domain);
+      }
+      if (!$("#newAccountTicker").val().trim()) {
+        $("#newAccountTicker").val(match.ticker);
+      }
     } else {
       $("#accountCikBadge").hide();
     }
-  });
-
-  // LOB Taxonomy Filter Bar click handler
-  $(document).on("click", ".lob-filter-btn", function() {
-    $(".lob-filter-btn").removeClass("btn-primary active").addClass("btn-outline-secondary");
-    $(this).removeClass("btn-outline-secondary").addClass("btn-primary active");
-
-    const filter = $(this).data("filter");
-    if (!activeAccount || !activeAccount.lobs) return;
-
-    let filtered = activeAccount.lobs;
-    if (filter === "commercial") {
-      filtered = activeAccount.lobs.filter(l => {
-        const rel = (l.relationship_type || "").toLowerCase();
-        return rel.includes("commercial") || rel.includes("operating division") || rel.includes("brand");
-      });
-    } else if (filter === "operating") {
-      filtered = activeAccount.lobs.filter(l => {
-        const rel = (l.relationship_type || "").toLowerCase();
-        return rel.includes("direct") || rel.includes("operating subsidiary");
-      });
-    } else if (filter === "sublobs") {
-      filtered = activeAccount.lobs.filter(l => (l.sub_lobs && l.sub_lobs.length > 0));
-    } else if (filter === "lei") {
-      filtered = activeAccount.lobs.filter(l => !!l.lei_code);
-    }
-
-    renderLobCardsList($("#lobCardsContainer"), filtered);
   });

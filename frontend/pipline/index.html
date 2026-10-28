@@ -286,25 +286,7 @@
             Click any card to load associated personas and feeds.
           </p>
           
-          <!-- LOB Multi-Tier Taxonomy Filter Bar -->
-          <div class="lob-taxonomy-filter-bar d-flex gap-2 mb-3" id="lobTaxonomyFilterBar" style="flex-wrap:wrap;">
-            <button type="button" class="btn btn-sm btn-primary active lob-filter-btn" data-filter="all" style="border-radius:8px;font-size:0.78rem;font-weight:700;padding:6px 14px;">
-              All Hierarchy (<span id="lobFilterCountAll">0</span>)
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-secondary lob-filter-btn" data-filter="commercial" style="border-radius:8px;font-size:0.78rem;font-weight:600;padding:6px 14px;">
-              <i class="bi bi-star-fill text-warning"></i> Commercial Divisions (<span id="lobFilterCountCommercial">0</span>)
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-secondary lob-filter-btn" data-filter="operating" style="border-radius:8px;font-size:0.78rem;font-weight:600;padding:6px 14px;">
-              Direct Operating Subsidiaries (<span id="lobFilterCountOperating">0</span>)
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-secondary lob-filter-btn" data-filter="sublobs" style="border-radius:8px;font-size:0.78rem;font-weight:600;padding:6px 14px;">
-              Level 3 Sub-LOBs (<span id="lobFilterCountSublobs">0</span>)
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-secondary lob-filter-btn" data-filter="lei" style="border-radius:8px;font-size:0.78rem;font-weight:600;padding:6px 14px;">
-              G20 LEI Verified (<span id="lobFilterCountLei">0</span>)
-            </button>
-          </div>
-<div class="compact-card-grid" id="lobCardsContainer"></div>
+          <div class="compact-card-grid" id="lobCardsContainer"></div>
         </div>
 
         <!-- ========================================================
@@ -512,13 +494,13 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=3.40.0"></script>
+<script src="js/app.js?v=3.41.0"></script>
 <script src="js/chatbot.js?v=2.3.6"></script>
 
 <!-- --- Enhanced Add New Account Modal --- -->
 <div class="modal fade" id="addAccountModal" tabindex="-1"
      aria-labelledby="addAccountModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered add-account-dialog">
+  <div class="modal-dialog modal-dialog-centered add-account-dialog" style="max-width:760px !important;">
     <div class="modal-content add-account-card">
       <div class="modal-header add-account-header">
         <div style="display:flex;align-items:center;gap:12px;">
@@ -530,15 +512,15 @@
           </div>
           <div>
             <h5 class="modal-title" id="addAccountModalLabel"
-                style="margin:0;font-size:1.05rem;font-weight:700;color:#fff;">Add New Account</h5>
-            <p style="margin:0;font-size:.74rem;color:rgba(255,255,255,0.85);">
-              Initialize corporate entity for automated multi-source intelligence harvesting
+                style="margin:0;font-size:1.05rem;font-weight:700;color:#fff;">Add New Enterprise Account</h5>
+            <p style="margin:0;font-size:.74rem;color:rgba(255,255,255,0.88);">
+              Autonomous multi-source intelligence harvesting &amp; lossless golden record DB merge
             </p>
           </div>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-            <div class="modal-body" style="padding:24px 28px;">
+      <div class="modal-body" style="padding:24px 28px;">
         <form id="addAccountForm" autocomplete="off">
           <div style="display:flex;flex-direction:column;gap:16px;">
             <div class="add-field-group">
@@ -549,72 +531,130 @@
                 </span>
               </label>
               <input type="text" id="newAccountName" class="add-field-input"
-                     placeholder="e.g. BlackRock, JPMorgan Chase, Goldman Sachs" required
+                     placeholder="e.g. BlackRock, Inc., JPMorgan Chase, Goldman Sachs" required
                      autocomplete="off" data-lpignore="true">
-              <div style="font-size:.68rem;color:#64748b;">Official corporate identity as recognized by market regulators</div>
+              <div style="font-size:.68rem;color:#64748b;">Official corporate identity as recognized by SEC, GLEIF &amp; market regulators</div>
             </div>
 
-            <div class="add-field-group">
-              <label for="newAccountDomain" class="add-field-label">
-                <i class="bi bi-globe"></i> Primary Corporate Domain
-                <span style="font-size:0.7rem;font-weight:400;color:#94a3b8;">(recommended)</span>
-              </label>
-              <input type="text" id="newAccountDomain" class="add-field-input"
-                     placeholder="e.g. blackrock.com"
-                     autocomplete="off" data-lpignore="true">
-              <div style="font-size:.68rem;color:#64748b;">Used to automatically discover ticker, SEC filings, executive directory &amp; news</div>
-            </div>
-
-            <!-- Autonomous Execution & Credit Gatekeeper Toggle -->
-            <div class="form-check form-switch" style="background:#f0fdf4;padding:14px 16px 14px 44px;border-radius:12px;border:1.5px solid #bbf7d0;margin-top:2px;">
-              <input class="form-check-input" type="checkbox" role="switch" id="autoEnrichAccountToggle" checked style="cursor:pointer;width:2.4em;height:1.25em;">
-              <label class="form-check-label" for="autoEnrichAccountToggle" style="font-weight:800;font-size:0.86rem;color:#166534;cursor:pointer;display:block;">
-                <i class="bi bi-cpu-fill" style="color:#16a34a;"></i> Auto-Enrich &amp; Ingest (Autonomous Pipeline)
-              </label>
-              <div style="font-size:0.72rem;color:#15803d;margin-top:2px;line-height:1.4;">
-                Pre-flight credit check &bull; 11-source harvest &bull; Self-healing retry &bull; Lossless golden record DB merge
+            <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:14px;">
+              <div class="add-field-group">
+                <label for="newAccountDomain" class="add-field-label">
+                  <i class="bi bi-globe"></i> Primary Corporate Domain
+                  <span style="font-size:0.7rem;font-weight:400;color:#94a3b8;">(recommended)</span>
+                </label>
+                <input type="text" id="newAccountDomain" class="add-field-input"
+                       placeholder="e.g. blackrock.com"
+                       autocomplete="off" data-lpignore="true">
+                <div style="font-size:.68rem;color:#64748b;">Used for deep web scraper &amp; sitelinks discovery</div>
+              </div>
+              <div class="add-field-group">
+                <label for="newAccountTicker" class="add-field-label">
+                  <i class="bi bi-graph-up-arrow"></i> Stock Ticker
+                  <span style="font-size:0.7rem;font-weight:400;color:#94a3b8;">(optional)</span>
+                </label>
+                <input type="text" id="newAccountTicker" class="add-field-input"
+                       placeholder="e.g. BLK, JPM, GS"
+                       autocomplete="off" data-lpignore="true" style="text-transform:uppercase;">
+                <div style="font-size:.68rem;color:#64748b;">Enables market filings &amp; news lookup</div>
               </div>
             </div>
 
-            <!-- Advanced Extraction Controls & Source Scope Section -->
-            <div id="accountExtractionControls" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                <div style="font-size:0.76rem;font-weight:800;text-transform:uppercase;color:#475569;letter-spacing:0.04em;">
-                  <i class="bi bi-sliders"></i> Extraction Controls &amp; Source Scope
+            <!-- Autonomous Execution & Credit Gatekeeper Toggle Card -->
+            <div class="form-check form-switch" style="background:#f0fdf4;padding:14px 18px 14px 48px;border-radius:12px;border:1.5px solid #bbf7d0;margin-top:2px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+              <div style="flex:1;min-width:260px;">
+                <input class="form-check-input" type="checkbox" role="switch" id="autoEnrichAccountToggle" checked style="cursor:pointer;width:2.4em;height:1.25em;margin-left:-2.6em;">
+                <label class="form-check-label" for="autoEnrichAccountToggle" style="font-weight:800;font-size:0.88rem;color:#166534;cursor:pointer;display:flex;align-items:center;gap:6px;">
+                  <i class="bi bi-cpu-fill" style="color:#16a34a;"></i> Auto-Enrich &amp; Ingest (Autonomous Pipeline)
+                </label>
+                <div style="font-size:0.72rem;color:#15803d;margin-top:2px;line-height:1.4;">
+                  11-Source harvest &bull; Self-healing retry &bull; Lossless golden record DB merge
                 </div>
-                <span style="font-size:0.72rem;color:#6366f1;font-weight:700;">6 Credits Required &bull; Pre-Approved</span>
+              </div>
+              <span id="accountCreditSummaryBadge" class="badge" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:0.75rem;font-weight:700;padding:6px 12px;border-radius:8px;">
+                <i class="bi bi-shield-check"></i> 5 Billable Credits &bull; Pre-Approved
+              </span>
+            </div>
+
+            <!-- Complete 11-Source Intelligence Harvest Matrix -->
+            <div id="accountExtractionControls" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;transition:all 0.25s ease;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+                <div style="font-size:0.78rem;font-weight:800;text-transform:uppercase;color:#334155;letter-spacing:0.04em;display:flex;align-items:center;gap:6px;">
+                  <i class="bi bi-sliders text-primary"></i> Complete 11-Source Intelligence Harvest Matrix
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <button type="button" class="btn btn-xs btn-outline-secondary matrix-preset-btn" id="btnSelectAllSources" style="font-size:0.68rem;padding:2px 8px;border-radius:4px;font-weight:600;">
+                    All (11)
+                  </button>
+                  <button type="button" class="btn btn-xs btn-outline-secondary matrix-preset-btn" id="btnSelectFreeSources" style="font-size:0.68rem;padding:2px 8px;border-radius:4px;font-weight:600;">
+                    Free Only (6)
+                  </button>
+                  <button type="button" class="btn btn-xs btn-outline-secondary matrix-preset-btn" id="btnSelectRecommendedSources" style="font-size:0.68rem;padding:2px 8px;border-radius:4px;font-weight:600;">
+                    Recommended
+                  </button>
+                </div>
               </div>
 
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
-                <div class="chip-toggle active source-pill" data-source="sec">
-                  <i class="bi bi-check-circle-fill text-primary"></i>
-                  <span>SEC 10-K &amp; Ex-21 (0 cr)</span>
+              <!-- Category 1: Free Regulatory & Public Registries (6 Sources) -->
+              <div style="font-size:0.7rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+                <i class="bi bi-bank text-success"></i> Regulatory Filings &amp; Public Registries (6 Sources &bull; 0 Credits)
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-bottom:14px;">
+                <div class="chip-toggle active source-pill" data-source="sec_edgar" data-billable="false" title="SEC Form 10-K & Items 1/7/8 Regulatory Filings">
+                  <i class="bi bi-check-circle-fill text-success"></i>
+                  <span>SEC 10-K &amp; Items (0 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="gleif">
-                  <i class="bi bi-check-circle-fill text-primary"></i>
+                <div class="chip-toggle active source-pill" data-source="sec_ex21" data-billable="false" title="SEC Form 10-K Exhibit 21 Legal Subsidiaries Index">
+                  <i class="bi bi-check-circle-fill text-success"></i>
+                  <span>Exhibit 21 Subs (0 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="gleif" data-billable="false" title="G20 GLEIF Corporate Ownership Tree & LEI">
+                  <i class="bi bi-check-circle-fill text-success"></i>
                   <span>GLEIF LEI Tree (0 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="serper">
-                  <i class="bi bi-check-circle-fill text-primary"></i>
-                  <span>Google Serper Domain (1 cr)</span>
+                <div class="chip-toggle active source-pill" data-source="wikipedia" data-billable="false" title="Wikipedia & DBpedia Verified Entity Knowledge Profile">
+                  <i class="bi bi-check-circle-fill text-success"></i>
+                  <span>Wikipedia Profile (0 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="tavily">
-                  <i class="bi bi-check-circle-fill text-primary"></i>
-                  <span>Tavily Market Signals (1 cr)</span>
+                <div class="chip-toggle active source-pill" data-source="patents" data-billable="false" title="USPTO & Google Patents Innovation & IP Indexer">
+                  <i class="bi bi-check-circle-fill text-success"></i>
+                  <span>Google Patents (0 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="firecrawl">
-                  <i class="bi bi-check-circle-fill text-primary"></i>
-                  <span>Firecrawl Web Scraper (1 cr)</span>
-                </div>
-                <div class="chip-toggle active source-pill" data-source="diffbot">
-                  <i class="bi bi-check-circle-fill text-primary"></i>
-                  <span>Diffbot Knowledge Graph (1 cr)</span>
+                <div class="chip-toggle active source-pill" data-source="courtlistener" data-billable="false" title="Federal Court Dockets & Litigation RECAP">
+                  <i class="bi bi-check-circle-fill text-success"></i>
+                  <span>Court RECAP (0 cr)</span>
                 </div>
               </div>
 
-              <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px dashed #cbd5e1;padding-top:10px;font-size:0.74rem;color:#64748b;">
-                <span><i class="bi bi-shield-check text-success"></i> Pre-Flight Status: <strong class="text-success">Approved (5,000 Quota)</strong></span>
-                <span>Self-Healing Retries: <strong class="text-primary">Enabled</strong></span>
+              <!-- Category 2: Metered Commercial Intelligence APIs (5 Sources) -->
+              <div style="font-size:0.7rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+                <i class="bi bi-lightning-charge-fill text-warning"></i> Metered Commercial APIs &amp; Web Scrapers (5 Sources &bull; 5 Credits)
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-bottom:12px;">
+                <div class="chip-toggle active source-pill" data-source="serper" data-billable="true" title="Google Serper Domain & C-Suite Search (1 credit)">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>Google Serper (1 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="tavily" data-billable="true" title="Tavily Strategic Market & Competitor Search (1 credit)">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>Tavily AI Search (1 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="firecrawl" data-billable="true" title="Firecrawl v1 Deep Sitelinks & Corporate Web Scraper (1 credit)">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>Firecrawl Scraper (1 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="diffbot" data-billable="true" title="Diffbot Knowledge Graph & Organization Intelligence (1 credit)">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>Diffbot Graph (1 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="finnhub" data-billable="true" title="Finnhub & FMP Market Watchlist Intelligence (1 credit)">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>Finnhub &amp; FMP (1 cr)</span>
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px dashed #cbd5e1;padding-top:10px;font-size:0.74rem;color:#64748b;flex-wrap:wrap;gap:8px;">
+                <span><i class="bi bi-shield-check text-success"></i> Gatekeeper Status: <strong class="text-success">Approved (5,000 Quota)</strong></span>
+                <span><i class="bi bi-arrow-repeat text-primary"></i> Self-Healing Micro-Retries: <strong class="text-primary">Enabled (2.5s backoff)</strong></span>
               </div>
             </div>
           </div>
@@ -623,17 +663,20 @@
       <div class="modal-footer"
            style="border-top:1px solid #e2e8f0;padding:16px 28px;gap:10px;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;">
         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"
-                style="border-radius:8px;padding:8px 18px;font-weight:600;">Cancel</button>
-        <div style="display:flex;gap:10px;">
-          <button type="button" id="btnModalSaveStubOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:8px 18px;font-weight:600;">
+                style="border-radius:8px;padding:9px 20px;font-weight:600;">Cancel</button>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button type="button" id="btnModalSaveStubOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:9px 20px;font-weight:600;display:inline-flex;align-items:center;gap:6px;">
             <i class="bi bi-database"></i> Save Stub Only (0 cr)
           </button>
           <button type="button" id="startNewAccountBtn"
-                  style="border-radius:8px;font-size:.85rem;padding:9px 24px;
+                  style="border-radius:8px;font-size:.86rem;padding:9px 26px;
                          background:linear-gradient(135deg,#0ea5e9,#4f46e5);color:#fff;
                          border:none;font-weight:700;display:inline-flex;align-items:center;gap:8px;cursor:pointer;
                          box-shadow:0 4px 14px rgba(14,165,233,0.35);">
-            <i class="bi bi-play-fill" style="font-size:1.1rem;"></i> Start Autonomous Pipeline
+            <i class="bi bi-play-fill" style="font-size:1.1rem;"></i>
+            <span id="startAccountBtnText">Start Autonomous Pipeline</span>
+            <span class="badge bg-white text-primary" id="modalBtnCreditBadge" style="font-size:0.75rem;padding:3px 7px;border-radius:6px;">5 cr</span>
+            <i class="bi bi-arrow-right" style="font-size:0.85rem;"></i>
           </button>
         </div>
       </div>
@@ -643,16 +686,16 @@
 
 <!-- Credit Gatekeeper Alert Modal -->
 <div class="modal fade" id="creditAlertModal" tabindex="-1" aria-labelledby="creditAlertModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered" style="max-width:540px;">
-    <div class="modal-content" style="border-radius:16px;border:1px solid #fecaca;box-shadow:0 20px 40px rgba(0,0,0,0.18);overflow:hidden;">
-      <div class="modal-header" style="background:#fef2f2;border-bottom:1px solid #fee2e2;padding:18px 24px;">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:580px;">
+    <div class="modal-content" style="border-radius:16px;border:1px solid #fecaca;box-shadow:0 20px 45px rgba(0,0,0,0.18);overflow:hidden;">
+      <div class="modal-header" style="background:linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);border-bottom:1px solid #fca5a5;padding:18px 24px;">
         <div style="display:flex;align-items:center;gap:12px;">
-          <div style="width:40px;height:40px;border-radius:12px;background:#fee2e2;color:#dc2626;display:flex;align-items:center;justify-content:center;font-size:1.25rem;">
-            <i class="bi bi-shield-exclamation"></i>
+          <div style="width:42px;height:42px;border-radius:12px;background:#fee2e2;color:#dc2626;border:1px solid #fecaca;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">
+            <i class="bi bi-shield-slash-fill"></i>
           </div>
           <div>
             <h5 class="modal-title" id="creditAlertModalLabel" style="font-size:1.05rem;font-weight:700;color:#991b1b;margin:0;">Credit Gatekeeper Alert</h5>
-            <p style="margin:0;font-size:0.75rem;color:#b91c1c;">Pre-flight resource and credit verification halted execution</p>
+            <p style="margin:0;font-size:0.75rem;color:#b91c1c;">Pre-flight resource verification halted execution due to credit shortage</p>
           </div>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -660,50 +703,54 @@
       <div class="modal-body" style="padding:22px 24px;" id="creditAlertModalBody">
         <!-- Dynamically populated with credit shortage breakdown -->
       </div>
-      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:14px 24px;display:flex;justify-content:flex-end;gap:10px;">
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;">
         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;padding:7px 16px;">Cancel</button>
-        <button type="button" id="btnSaveStubOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:7px 18px;font-weight:600;">
-          <i class="bi bi-database"></i> Save Stub Only (No Enrichment)
-        </button>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button type="button" id="btnSaveStubOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:7px 18px;font-weight:600;">
+            <i class="bi bi-database"></i> Save Stub Only (0 cr)
+          </button>
+          <button type="button" id="btnCreditAlertAdjustSources" class="btn btn-sm btn-primary" style="border-radius:8px;padding:7px 20px;font-weight:700;background:linear-gradient(135deg,#0ea5e9,#4f46e5);border:none;">
+            <i class="bi bi-sliders"></i> Deselect Paid Sources &amp; Retry
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
-
 <!-- Account-to-LOB Autonomous Handoff Prompt Modal -->
 <div class="modal fade" id="lobHandoffPromptModal" tabindex="-1" aria-labelledby="lobHandoffPromptModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered" style="max-width:580px;">
-    <div class="modal-content" style="border-radius:16px;border:1px solid #e0e7ff;box-shadow:0 20px 45px rgba(0,0,0,0.18);overflow:hidden;">
-      <div class="modal-header" style="background:linear-gradient(135deg, #f0fdf4 0%, #e0e7ff 100%);border-bottom:1px solid #e2e8f0;padding:18px 24px;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="width:42px;height:42px;border-radius:12px;background:#dcfce7;color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:660px;">
+    <div class="modal-content" style="border-radius:18px;border:1px solid #e0e7ff;box-shadow:0 25px 55px rgba(0,0,0,0.18);overflow:hidden;">
+      <div class="modal-header" style="background:linear-gradient(135deg, #f0fdf4 0%, #e0e7ff 100%);border-bottom:1px solid #e2e8f0;padding:20px 26px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:44px;height:44px;border-radius:14px;background:#dcfce7;color:#16a34a;border:1.5px solid #86efac;display:flex;align-items:center;justify-content:center;font-size:1.35rem;">
             <i class="bi bi-diagram-3-fill"></i>
           </div>
           <div>
-            <h5 class="modal-title" id="lobHandoffPromptModalLabel" style="font-size:1.05rem;font-weight:700;color:#0f172a;margin:0;">
+            <h5 class="modal-title" id="lobHandoffPromptModalLabel" style="font-size:1.08rem;font-weight:700;color:#0f172a;margin:0;">
               Account Enriched: Ready for LOB Discovery?
             </h5>
-            <p style="margin:0;font-size:0.75rem;color:#475569;">
-              Account golden record committed. Initiate Level 2 division &amp; subsidiary discovery.
+            <p style="margin:0;font-size:0.76rem;color:#475569;">
+              Account golden record locked in DB. Initiate phased Level 2 division &amp; subsidiary discovery.
             </p>
           </div>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body" style="padding:22px 24px;" id="lobHandoffPromptModalBody">
+      <div class="modal-body" style="padding:22px 26px;" id="lobHandoffPromptModalBody">
         <!-- Dynamically rendered preview: account name, discovered stubs, rate card estimate -->
       </div>
-      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;">
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;padding:7px 16px;">
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 26px;display:flex;justify-content:space-between;align-items:center;">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;padding:8px 18px;font-weight:600;">
           Decide Later
         </button>
-        <div style="display:flex;gap:8px;">
-          <button type="button" id="btnLobDiscoverStubsOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:7px 16px;font-weight:600;">
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button type="button" id="btnLobDiscoverStubsOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:8px 18px;font-weight:600;display:inline-flex;align-items:center;gap:6px;">
             <i class="bi bi-tags"></i> Discover Names Only (0 cr)
           </button>
-          <button type="button" id="btnStartAutomatedLobPipeline" class="btn btn-sm btn-success" style="border-radius:8px;padding:7px 18px;font-weight:600;background:linear-gradient(135deg, #10b981 0%, #059669 100%);border:none;">
-            <i class="bi bi-magic"></i> Start Phased Ingestion
+          <button type="button" id="btnStartAutomatedLobPipeline" class="btn btn-sm btn-success" style="border-radius:8px;padding:8px 22px;font-weight:700;background:linear-gradient(135deg, #10b981 0%, #059669 100%);border:none;box-shadow:0 4px 14px rgba(16,185,129,0.35);display:inline-flex;align-items:center;gap:8px;">
+            <i class="bi bi-magic" style="font-size:1rem;"></i> Start Phased Ingestion (<span id="lobHandoffBtnCredits">40</span> cr) &rarr;
           </button>
         </div>
       </div>
