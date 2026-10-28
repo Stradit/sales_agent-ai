@@ -1531,6 +1531,11 @@
           <option value="success">Success Only</option>
           <option value="failed">Failed Only</option>
         </select>
+        <select id="batchHistoryActionFilter" class="batch-filter-select" style="min-width:180px;">
+          <option value="all">All Execution Steps</option>
+          <option value="enrichment">External Intelligence Only (Pulls)</option>
+          <option value="dump">Database Commits Only (0 cr)</option>
+        </select>
         <button type="button" class="batch-btn-icon" id="batchHistoryRefreshBtn" title="Refresh Recent Runs">
           <i class="bi bi-arrow-clockwise"></i>
         </button>
@@ -1542,14 +1547,16 @@
       <table class="batch-table" id="batchHistoryTable">
         <thead>
           <tr>
-            <th style="min-width: 140px;">WHEN</th>
-            <th style="min-width: 90px;">KIND</th>
-            <th style="min-width: 220px;">TARGET / ENTITY</th>
-            <th style="min-width: 180px;">SOURCES / CHANNELS</th>
-            <th style="min-width: 120px;">DB QUALITY</th>
-            <th style="min-width: 80px;">DURATION</th>
-            <th style="min-width: 90px;">STATUS</th>
-            <th style="min-width: 80px; text-align: right;">ACTION</th>
+            <th style="min-width: 125px;">WHEN</th>
+            <th style="min-width: 75px;">KIND</th>
+            <th style="min-width: 105px;">STEP</th>
+            <th style="min-width: 200px;">TARGET / ENTITY</th>
+            <th style="min-width: 160px;">SOURCES / CHANNELS</th>
+            <th style="min-width: 80px;">CREDITS</th>
+            <th style="min-width: 95px;">QUALITY</th>
+            <th style="min-width: 70px;">DURATION</th>
+            <th style="min-width: 75px;">STATUS</th>
+            <th style="min-width: 75px; text-align: right;">ACTION</th>
           </tr>
         </thead>
         <tbody id="batchHistoryTableBody">
@@ -1601,6 +1608,9 @@
 
     <!-- Modal Body -->
     <div class="batch-details-body">
+      <!-- Linked Intelligence Pull Banner (for dump runs) -->
+      <div id="batchRunDetailsLinkedPullBanner" class="d-none"></div>
+
       <!-- Error Banner (shown if failed or error_message present) -->
       <div id="batchRunDetailsErrorBanner" class="batch-details-error-banner d-none">
         <i class="bi bi-exclamation-triangle-fill" style="font-size:1.2rem;flex-shrink:0;"></i>

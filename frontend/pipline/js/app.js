@@ -12406,6 +12406,7 @@ $(function () {
     const search = ($("#batchHistorySearchInput").val() || "").trim().toLowerCase();
     const lvlFilter = $("#batchHistoryLevelFilter").val() || "all";
     const statusFilter = $("#batchHistoryStatusFilter").val() || "all";
+    const actionFilter = $("#batchHistoryActionFilter").val() || "all";
 
     const filtered = runs.filter((r) => {
       const isFailed = (r.status === "failed" || r.status === "error" || (r.error_message && String(r.error_message).trim().length > 0));
@@ -12418,6 +12419,14 @@ $(function () {
       if (statusFilter !== "all") {
         if (statusFilter === "success" && !isOk) return false;
         if (statusFilter === "failed" && !isFailed) return false;
+      }
+      if (actionFilter !== "all") {
+        const act = (r.action || "").toLowerCase();
+        if (actionFilter === "enrichment") {
+          if (act === "dump" || act === "db_dump" || act === "validate") return false;
+        } else if (actionFilter === "dump") {
+          if (act !== "dump" && act !== "db_dump") return false;
+        }
       }
       if (search) {
         const target = (r.entities_extracted?.full_name || r.entities_extracted?.lob_name || r.entities_extracted?.company || r.company_name || r.target_url || r.run_id || "").toLowerCase();
@@ -12464,6 +12473,28 @@ $(function () {
       const targetName = r.entities_extracted?.full_name || r.entities_extracted?.lob_name || r.entities_extracted?.title || r.entities_extracted?.company || r.company_name || r.run_id;
       const targetSub = r.target_url || r.action || (r.entities_extracted?.account_id ? `Account #${r.entities_extracted.account_id}` : "");
 
+      const act = (r.action || "").toLowerCase();
+      let stepBadge = `<span class="badge bg-secondary-subtle text-secondary" style="font-weight:600;font-size:0.68rem;text-transform:uppercase;">${esc(act || 'RUN')}</span>`;
+      if (act === "pull") {
+        stepBadge = '<span class="badge" style="background:rgba(99,102,241,0.15);color:#6366f1;font-weight:700;font-size:0.68rem;"><i class="bi bi-cloud-arrow-down"></i> PULL</span>';
+      } else if (act === "auto_enrich_and_ingest") {
+        stepBadge = '<span class="badge" style="background:rgba(16,185,129,0.15);color:#059669;font-weight:700;font-size:0.68rem;"><i class="bi bi-cpu-fill"></i> AUTO INGEST</span>';
+      } else if (act === "dump") {
+        stepBadge = '<span class="badge" style="background:rgba(59,130,246,0.15);color:#2563eb;font-weight:700;font-size:0.68rem;"><i class="bi bi-database-check"></i> DB DUMP</span>';
+      } else if (act === "retry_failed_sources") {
+        stepBadge = '<span class="badge" style="background:rgba(245,158,11,0.15);color:#d97706;font-weight:700;font-size:0.68rem;"><i class="bi bi-arrow-repeat"></i> RETRY</span>';
+      } else if (act === "validate") {
+        stepBadge = '<span class="badge bg-secondary-subtle text-secondary" style="font-weight:600;font-size:0.68rem;"><i class="bi bi-shield-check"></i> VALIDATE</span>';
+      }
+
+      const creditsVal = parseInt(r.total_credits_used, 10) || 0;
+      let creditsHtml = `<span class="text-muted" style="font-size:0.75rem;">0 cr</span>`;
+      if (creditsVal > 0) {
+        creditsHtml = `<span class="badge bg-primary" style="font-size:0.75rem;font-weight:700;">${creditsVal} cr</span>`;
+      } else if (act === "dump") {
+        creditsHtml = `<span class="text-muted" style="font-size:0.70rem;" title="Internal DB commit consumes 0 credits">0 cr (dump)</span>`;
+      }
+
       // Channels
       const channels = [];
       if (r.target_url && r.target_url.includes("linkedin.com")) channels.push("LinkedIn");
@@ -12493,11 +12524,13 @@ $(function () {
             </div>
           </td>
           <td>${kindBadge}</td>
+          <td>${stepBadge}</td>
           <td>
             <div style="font-weight:600;color:var(--text-primary);">${esc(targetName)}</div>
             ${targetSub ? `<div class="text-muted" style="font-size:0.70rem;overflow:hidden;text-overflow:ellipsis;max-width:240px;">${esc(targetSub)}</div>` : ""}
           </td>
           <td><div class="batch-source-chips">${chipsHtml}</div></td>
+          <td>${creditsHtml}</td>
           <td>
             ${score != null ? `<span style="font-weight:600;color:#10b981;">Score: ${score}%</span>` : `<span class="text-muted" style="font-size:0.75rem;">—</span>`}
           </td>
@@ -12523,7 +12556,7 @@ $(function () {
     }, 200);
   });
 
-  $(document).on("change", "#batchHistoryLevelFilter, #batchHistoryStatusFilter", function () {
+  $(document).on("change", "#batchHistoryLevelFilter, #batchHistoryStatusFilter, #batchHistoryActionFilter", function () {
     filterAndRenderBatchHistory();
   });
 
@@ -12584,6 +12617,27 @@ $(function () {
 
     $("#batchRunDetailsRunId").text(run.run_id);
     $("#batchRunDetailsTime").text(`${timeInfo.exact} (${timeInfo.relative})`);
+
+    // Linked Intelligence Pull Banner (for dump runs)
+    if (run.related_pull_run) {
+      const pull = run.related_pull_run;
+      const linkedHtml = `
+        <div class="d-flex align-items-center justify-content-between p-2 px-3 mb-3" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.3);border-radius:10px;">
+          <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-link-45deg text-primary" style="font-size:1.2rem;"></i>
+            <span style="font-size:0.78rem;color:var(--text-primary);">
+              This record is the final PostgreSQL database save for <strong>${esc(targetName)}</strong>. The intelligence was harvested during <strong>Pull Run</strong> which consumed <strong class="text-primary">${pull.total_credits_used || 0} credits</strong>.
+            </span>
+          </div>
+          <button type="button" class="btn btn-xs btn-primary batch-view-run-log-btn" data-run-id="${esc(pull.run_id)}" style="font-size:0.72rem;white-space:nowrap;padding:4px 10px;">
+            <i class="bi bi-eye"></i> View Pull Run (${pull.total_credits_used || 0} cr) &rarr;
+          </button>
+        </div>
+      `;
+      $("#batchRunDetailsLinkedPullBanner").html(linkedHtml).removeClass("d-none");
+    } else {
+      $("#batchRunDetailsLinkedPullBanner").empty().addClass("d-none");
+    }
 
     // Error banner
     if (isFailed && run.error_message) {

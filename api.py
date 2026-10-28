@@ -4390,6 +4390,7 @@ if FASTAPI_AVAILABLE:
                     "completed_at": r.completed_at.isoformat() if r.completed_at else None,
                     "duration_seconds": float(r.duration_seconds or 0.0),
                     "total_credits_used": r.total_credits_used,
+                    "credits_breakdown": r.credits_breakdown or {},
                     "entities_extracted": r.entities_extracted,
                     "raw_storage_dir": r.raw_storage_dir,
                     "enriched_storage_dir": r.enriched_storage_dir,
@@ -4445,6 +4446,28 @@ if FASTAPI_AVAILABLE:
             if not r:
                 raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
             lvl, act = _parse_run_level_and_action(r.run_id, r.entities_extracted)
+
+            related_pull_run = None
+            if act == "dump":
+                pull_query = session.query(PipelineRun).filter(
+                    PipelineRun.company_name == r.company_name,
+                    PipelineRun.started_at <= r.started_at,
+                    PipelineRun.id != r.id,
+                )
+                if r.target_url:
+                    pull_query = pull_query.filter(PipelineRun.target_url == r.target_url)
+                cand = pull_query.order_by(PipelineRun.started_at.desc()).first()
+                if cand and cand.total_credits_used > 0:
+                    related_pull_run = {
+                        "run_id": cand.run_id,
+                        "id": cand.id,
+                        "action": "pull",
+                        "total_credits_used": cand.total_credits_used,
+                        "quality_score": float(cand.quality_score or 0.0),
+                        "quality_grade": cand.quality_grade,
+                        "started_at": cand.started_at.isoformat() if cand.started_at else None,
+                    }
+
             return {
                 "id": r.id,
                 "run_id": r.run_id,
@@ -4465,6 +4488,7 @@ if FASTAPI_AVAILABLE:
                 "raw_storage_dir": r.raw_storage_dir,
                 "enriched_storage_dir": r.enriched_storage_dir,
                 "error_message": r.error_message,
+                "related_pull_run": related_pull_run,
             }
         finally:
             session.close()
