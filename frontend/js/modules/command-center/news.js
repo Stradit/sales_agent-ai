@@ -91,8 +91,6 @@ function setupNewsSubscriptions(accounts) {
   if (subAllBtn) {
     const isAll = !!subs.all;
     subAllBtn.classList.toggle('active', isAll);
-    const check = subAllBtn.querySelector('.cc-news-sub-check');
-    if (check) check.style.display = isAll ? 'inline-flex' : 'none';
 
     subAllBtn.onclick = (e) => {
       e.stopPropagation();
@@ -100,7 +98,6 @@ function setupNewsSubscriptions(accounts) {
       currentSubs.all = !currentSubs.all;
       saveSubscriptions(currentSubs);
       subAllBtn.classList.toggle('active', currentSubs.all);
-      if (check) check.style.display = currentSubs.all ? 'inline-flex' : 'none';
       updateSubscribeButtonUi(currentSubs);
       showToast(currentSubs.all
         ? 'Subscribed to Google News alerts for All Accounts!'
@@ -115,7 +112,6 @@ function setupNewsSubscriptions(accounts) {
       return `
         <button type="button" class="cc-news-sub-account-item ${isSubbed ? 'active' : ''}" data-acct-sub-id="${a.id}">
           <span class="cc-sub-acct-name">${esc(a.name || a.display_name)}</span>
-          <span class="cc-news-sub-check" style="display:${isSubbed ? 'inline-flex' : 'none'};"><i class="fa-solid fa-check"></i></span>
         </button>
       `;
     }).join('');
@@ -132,14 +128,10 @@ function setupNewsSubscriptions(accounts) {
         if (idx >= 0) {
           currentSubs.accounts.splice(idx, 1);
           itemBtn.classList.remove('active');
-          const check = itemBtn.querySelector('.cc-news-sub-check');
-          if (check) check.style.display = 'none';
           showToast(`Unsubscribed from ${name} news alerts.`);
         } else {
           currentSubs.accounts.push(id);
           itemBtn.classList.add('active');
-          const check = itemBtn.querySelector('.cc-news-sub-check');
-          if (check) check.style.display = 'inline-flex';
           showToast(`Subscribed to Google News alerts for ${name}!`);
         }
         saveSubscriptions(currentSubs);

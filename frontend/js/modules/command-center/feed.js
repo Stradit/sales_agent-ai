@@ -91,6 +91,11 @@ function renderAccountFilterPill() {
   }
 }
 
+function cleanFeedText(str) {
+  if (!str) return '';
+  return String(str).replace(/[\ufffd]/g, '—').trim();
+}
+
 function rowHtml(sig) {
   const isNew = sig.is_new != null
     ? Boolean(sig.is_new)
@@ -100,10 +105,12 @@ function rowHtml(sig) {
     : '';
   
   const cat = sig.meta || getCategoryMeta(sig);
+  const displayTitle = cleanFeedText(sig.title);
+  const displaySummary = cleanFeedText(sig.summary);
 
   const titleHtml = sig.url
-    ? `<a class="cc-sig-title-link" href="${esc(sig.url)}" target="_blank" rel="noopener" title="${esc(sig.title)}">${esc(sig.title)} <i class="fa-solid fa-arrow-up-right-from-square cc-sig-external-icon"></i></a>`
-    : `<span class="cc-sig-title-text" title="${esc(sig.title)}">${esc(sig.title)}</span>`;
+    ? `<a class="cc-sig-title-link" href="${esc(sig.url)}" target="_blank" rel="noopener" title="${esc(displayTitle)}">${esc(displayTitle)} <i class="fa-solid fa-arrow-up-right-from-square cc-sig-external-icon"></i></a>`
+    : `<span class="cc-sig-title-text" title="${esc(displayTitle)}">${esc(displayTitle)}</span>`;
 
   return `
     <li class="cc-signal-card ${isNew ? 'is-new' : ''}" data-signal-id="${esc(sig.id)}">
@@ -134,9 +141,9 @@ function rowHtml(sig) {
         ${titleHtml}
       </div>
 
-      ${sig.summary ? `
+      ${displaySummary ? `
       <div class="cc-sig-summary-block" role="button" tabindex="0" title="Click to view complete text">
-        <div class="cc-sig-summary-text">${esc(sig.summary)}</div>
+        <div class="cc-sig-summary-text">${esc(displaySummary)}</div>
         <div class="cc-sig-expand-toggle">
           <span class="cc-sig-toggle-label"><i class="fa-solid fa-chevron-down"></i> Expand full text</span>
         </div>
