@@ -1,13 +1,11 @@
 import { state } from './state.js';
 import {
-  navSearch, navSearchClear, filterCountAll, navDigestBtn, navTree, navFilters,
+  navSearch, navSearchClear, filterCountAll, navTree, navFilters,
   navCollapseBtn, dashNav, navCollapseIcon, navSortSelect, navToggleAllTree, navAccountCount
 } from './dom.js';
 import { esc, initials } from './utils.js';
 import { getAccountContentEntries, matchOfferings } from './alerts.js';
 import { renderSelection } from './selection.js';
-import { getCurrentUser } from './auth-client.js';
-import { showToast } from './toast.js';
 
 export function renderNavTree() {
   const q = (navSearch.value || '').trim().toLowerCase();
@@ -16,7 +14,6 @@ export function renderNavTree() {
   const visibleAccounts = state.accounts;
 
   if (filterCountAll) filterCountAll.textContent = visibleAccounts.length;
-  if (navDigestBtn) navDigestBtn.classList.toggle('active', state.activeAccountId === null);
 
   let filtered = visibleAccounts.filter(a => {
     // Search matching
@@ -169,21 +166,6 @@ if (navToggleAllTree) {
       state.accounts.forEach(a => { if ((a.lobs || []).length) state.expandedAccountIds.add(a.id); });
     }
     renderNavTree();
-  });
-}
-
-if (navDigestBtn) {
-  navDigestBtn.addEventListener('click', function () {
-    const user = getCurrentUser ? getCurrentUser() : null;
-    if (user && user.role !== 'super_admin' && user.has_dashboard_access === false) {
-      showToast("Global Executive Digest is restricted. Please select one of your assigned accounts.");
-      return;
-    }
-    state.activeView = null;
-    state.activeAccountId = null;
-    state.activeLobId = null;
-    renderNavTree();
-    renderSelection();
   });
 }
 

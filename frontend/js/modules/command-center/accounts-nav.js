@@ -171,5 +171,4 @@ export async function initAccountsNav() {
     console.error(err);
     if (tree) tree.innerHTML = '<div class="nav-empty">Error loading accounts. Ensure the API is running.</div>';
   }
-  updateDashboardLinkAccess();
 }

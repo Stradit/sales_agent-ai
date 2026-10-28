@@ -73,6 +73,36 @@ currency without a rate counts as 0 and the page warns which deals are affected.
 **Forecast page (`/forecast`)**
 - Quarter picker (2 back, current, 4 ahead), business-line filter, owner filter ("everyone I can
   see" or one person); the choice is kept in the URL so a view can be shared.
+- Summary line at the top: On track / At risk / Off track / No target, in one sentence: won vs
+  target, where Commit (or Best case) lands, coverage of the gap, and pace ("week 7 of 13: 54% of the
+  quarter gone, 41% won, behind pace"). On track = Won + Commit reaches the target; At risk = Best
+  case is needed too; Off track = short even with every Commit and Best-case deal.
+- Group by owner shows a **rep scorecard**: status chip and a progress bar per rep, sorted so reps
+  who need help come first (off track, then at risk, then largest gap).
+- **Deals that decide the quarter**: the 10 largest Commit / Best-case deals with warnings: close
+  date passed, Commit while still Intro/Discovery, no next step or next step overdue, no activity for
+  14 days, close date already pushed out (seen in an earlier weekly snapshot).
+- **Forecast trend** chart: Won, Commit forecast and Best-case forecast week by week from the
+  Monday snapshots (plus a live "today" point in the current quarter) against the target line;
+  hover for values, "Show as table" for the numbers (FC-05).
+- **Why the Commit forecast moved**: a bridge from the Commit forecast at the last snapshot to now,
+  split into new deals, pulled in, moved up to Commit, won (was not Commit), amount changes, moved
+  down, slipped out, lost, deleted; hover a step to see its deals. Steps always add up exactly.
+- **Pace**: a dark tick on the progress bar (and on each rep's bar) marks what would be won by today
+  at an even pace (target × share of the quarter gone); a line under the bar says how far ahead or
+  behind the team is, and the rep scorecard shows "$X behind pace" per rep. Current quarter only.
+- **Forecast quality** strip: counts of open deals in the quarter with each warning (no close date,
+  close date passed, Commit still in Intro/Discovery, no next step, next step overdue, no activity
+  14+ days, close date pushed before). Clicking a count filters the deals table; warning icons also
+  show next to each deal's name.
+- **ⓘ explanations** on every term (KPI cards, roll-up headers, status, pace, quality, charts) in
+  plain language, from one glossary (`TERMS` in `forecast/main.js`). "Closed" is called **Won**
+  everywhere on the page.
+- **Leadership view** button (`?view=exec`, shareable): hides deal-level detail (quality strip, What
+  moved, Deals that decide the quarter, the deals table) and shows the scorecard by business line.
+  Business lines with a target but no deals still get a row.
+- Rounded money: $1.95M / $770K (3 significant digits) in cards, tables, sentences and charts;
+  the deals table keeps exact amounts. Coverage to one decimal (0.8×), percentages whole above 10%.
 - KPI cards: Target (with % attained), Closed won (with amount to go), Commit forecast, Best-case
   forecast, Open pipeline (with coverage of the gap), Weighted pipeline.
 - Progress bar to target: closed / commit / best case stacked against the target line.
@@ -99,7 +129,7 @@ currency without a rate counts as 0 and the page warns which deals are affected.
 - Feature flag `FORECAST_ENABLED` hides the page and nav link; old links go to Deals.
 
 **API** (`/api/forecast`): `GET /meta` · `GET ?period=&business_line_id=&owner_id=&group_by=` ·
-`GET /changes` · `GET|PUT /targets` · `PUT /fx` · `POST /snapshot` · `GET /export`.
+`GET /changes` · `GET /trend` · `GET|PUT /targets` · `PUT /fx` · `POST /snapshot` · `GET /export`.
 
 **Tables:** `deals` (`forecast_category`, `probability`, `amount_usd`, `expected_close`, `closed_at`),
 `fx_rates`, `sales_targets`, `forecast_snapshots`, `crm_settings` (`fiscal_year_start_month`,
@@ -176,7 +206,7 @@ manager call vs system roll-up.
 *Acceptance:* new table (migration), submissions per rep per week; history kept; visible to the rep,
 their manager and admins only.
 
-**FC-05 — Forecast trend chart** · Story · Medium
+**FC-05 — Forecast trend chart** · Story · Medium · **Done 2026-10-20**
 *Description:* Show how the commit and best-case forecasts and closed won moved week by week through
 the quarter (from `forecast_snapshots`), against the target line.
 *Acceptance:* one chart under the KPIs; respects the same filters and scope; no new data needed.

@@ -186,6 +186,44 @@ def _finish(t: Dict[str, float], target: Optional[float]) -> Dict[str, Any]:
     return t
 
 
+KEY_DEALS = 10              # largest Commit / Best-case deals shown as "Deals that decide the quarter"
+QUIET_DAYS = 14             # no customer touch or deal-room activity for this long → flagged
+EARLY_STAGES = ("intro", "discovery")
+
+
+def add_deal_risks(s, deals: List[Dict[str, Any]], today: Optional[date] = None) -> None:
+    """Adds `flags` (and `last_touch`) to each roll-up deal row, in place: close date passed · Commit
+    while still early-stage · no next step / next step overdue · quiet for QUIET_DAYS · close date
+    pushed out before (any weekly snapshot had an earlier date). Feeds "Deals that decide the quarter"
+    and the forecast-quality counts."""
+    if not deals:
+        return
+    today = today or datetime.now(IST).date()
+    extra = {r["id"]: r for r in _q(s, """
+        SELECT d.id, d.next_step_due,
+               greatest(d.last_activity_at, (SELECT max(created_at) FROM deal_activity a WHERE a.deal_id = d.id)) AS last_touch,
+               EXISTS (SELECT 1 FROM forecast_snapshots f WHERE f.deal_id = d.id AND f.expected_close < d.expected_close) AS pushed
+        FROM deals d WHERE d.id = ANY(:ids)""", ids=[x["id"] for x in deals])}
+    for x in deals:
+        e = extra.get(x["id"], {})
+        flags = []
+        if x["close_date"] and x["close_date"] < today:
+            flags.append({"key": "close_passed", "text": f"Close date {x['close_date']:%b %d} has passed"})
+        if x["bucket"] == "commit" and x["stage"] in EARLY_STAGES:
+            flags.append({"key": "early_commit", "text": f"Commit, but still in {x['stage_label']}"})
+        if not (x["next_step"] or "").strip():
+            flags.append({"key": "no_next_step", "text": "No next step"})
+        elif e.get("next_step_due") and e["next_step_due"] < today:
+            flags.append({"key": "next_step_overdue", "text": f"Next step overdue since {e['next_step_due']:%b %d}"})
+        last = e.get("last_touch")
+        idle = (datetime.now(IST) - last).days if last else None
+        if idle is None or idle >= QUIET_DAYS:
+            flags.append({"key": "quiet", "text": f"No activity for {idle} days" if idle is not None else "No activity logged"})
+        if e.get("pushed"):
+            flags.append({"key": "pushed", "text": "Close date already pushed out"})
+        x.update(last_touch=last, flags=flags)
+
+
 def rollup(s, user, period: str, business_line_id: Optional[int] = None, owner_id: Optional[int] = None,
            group_by: str = "owner") -> Dict[str, Any]:
     if group_by not in ("owner", "business_line", "stage", "category"):
@@ -231,6 +269,8 @@ def rollup(s, user, period: str, business_line_id: Optional[int] = None, owner_i
                           "next_step": d["next_step"]})
     for t in [total] + [g["t"] for g in groups.values()]:
         t.pop("lost", None)
+    add_deal_risks(s, [x for x in deals_out if x["bucket"] in ("commit", "best_case", "pipeline")])
+    key_deals = [x for x in deals_out if x["bucket"] in ("commit", "best_case")][:KEY_DEALS]
 
     # Targets
     owners = visible_owners(s, user)
@@ -260,11 +300,14 @@ def rollup(s, user, period: str, business_line_id: Optional[int] = None, owner_i
         for o in owners:
             if o["id"] in user_t and o["id"] not in groups:
                 grid.append({"key": o["id"], "label": o["name"], **_finish(_empty_totals(), user_t[o["id"]])})
+    if group_by == "business_line" and not business_line_id and not owner_id:  # business lines with a target but no deals yet
+        for b in _q(s, "SELECT id, name FROM business_lines WHERE id = ANY(:ids)", ids=[k for k in bl_t if k not in groups]):
+            grid.append({"key": b["id"], "label": b["name"], **_finish(_empty_totals(), bl_t[b["id"]])})
     order = {"stage": OPEN_STAGES + ["won"], "category": ["closed", "commit", "best_case", "pipeline", "omitted"]}.get(group_by)
     grid.sort(key=(lambda r: order.index(r["key"]) if r["key"] in order else 99) if order
               else (lambda r: -(r["best_case_forecast"] + r["pipeline"])))
     return {"period": period, "start": start, "end": end, "group_by": group_by, "totals": _finish(total, total_target),
-            "rows": grid, "deals": deals_out,
+            "rows": grid, "deals": deals_out, "key_deals": key_deals,
             "undated": [{"id": d["id"], "name": d["name"], "account_name": d["account_name"], "owner_name": d["owner_name"],
                          "stage_label": STAGE_LABEL.get(d["stage"]),
                          "amount_usd": _f(d["amount_usd"]) if d["amount_usd"] is not None else None} for d in undated],
@@ -354,6 +397,94 @@ def changes(s, user, period: str, since: Optional[str] = None, business_line_id:
     return {"since": base, "changes": out}
 
 
+BRIDGE_STEPS = [("new", "New deals"), ("pulled_in", "Pulled into the quarter"), ("upgraded", "Moved up to Commit"),
+                ("won_uncommitted", "Won (was not Commit)"), ("amount", "Amount changes"), ("downgraded", "Moved down from Commit"),
+                ("slipped_out", "Slipped out of the quarter"), ("lost", "Lost"), ("removed", "Deleted / out of scope")]
+
+
+def _commit_part(stage: str, category: Optional[str], close: Optional[date], start: date, end: date) -> bool:
+    """Does this deal count towards the Commit forecast (Won + Commit) of the period?"""
+    if close is None or not start <= close <= end:
+        return False
+    return stage == "won" or (stage not in ("won", "lost") and category == "commit")
+
+
+def trend(s, user, period: str, business_line_id: Optional[int] = None, owner_id: Optional[int] = None,
+          since: Optional[str] = None) -> Dict[str, Any]:
+    """Week-by-week Won / Commit / Best-case forecast of the period from the weekly snapshots, and a
+    "bridge" explaining how the Commit forecast moved since the last snapshot (same base as changes()).
+    A won deal counts in the quarter of its closed_at (from the live deal; a deleted deal falls back to
+    its expected close)."""
+    owner_id = scoped_owner(user, owner_id)
+    sm = int(_setting(s, "fiscal_year_start_month", 1))
+    start, end = period_bounds(period, sm)
+    today = datetime.now(IST).date()
+    acl = auth.account_scope(s, user)
+    scope = """f.account_id = ANY(:acl) AND (CAST(:bl AS int) IS NULL OR f.business_line_id = :bl)
+               AND (CAST(:owner AS int) IS NULL OR f.owner_user_id = :owner)"""
+    close = "CASE WHEN f.stage = 'won' THEN coalesce((d.closed_at AT TIME ZONE 'Asia/Kolkata')::date, f.expected_close) ELSE f.expected_close END"
+    points = _q(s, f"""
+        SELECT f.snapshot_date AS date,
+               coalesce(sum(f.amount_usd) FILTER (WHERE f.stage = 'won'), 0) AS closed,
+               coalesce(sum(f.amount_usd) FILTER (WHERE f.stage NOT IN ('won','lost') AND f.forecast_category = 'commit'), 0) AS commit,
+               coalesce(sum(f.amount_usd) FILTER (WHERE f.stage NOT IN ('won','lost') AND f.forecast_category = 'best_case'), 0) AS best_case
+        FROM forecast_snapshots f LEFT JOIN deals d ON d.id = f.deal_id
+        WHERE f.snapshot_date BETWEEN :a AND :b AND {close} BETWEEN :ps AND :pe AND {scope}
+        GROUP BY f.snapshot_date ORDER BY f.snapshot_date""",
+        a=start - timedelta(days=6), b=min(end, today), ps=start, pe=end, acl=acl, bl=business_line_id, owner=owner_id)
+    points = [{"date": p["date"], "closed": _f(p["closed"]), "commit_forecast": _f(p["closed"]) + _f(p["commit"]),
+               "best_case_forecast": _f(p["closed"]) + _f(p["commit"]) + _f(p["best_case"])} for p in points]
+
+    base = s.execute(text("SELECT max(snapshot_date) FROM forecast_snapshots WHERE snapshot_date <= :d"),
+                     {"d": date.fromisoformat(since) if since else today - timedelta(days=1)}).scalar()
+    bridge = None
+    if base is not None:
+        old = {r["deal_id"]: r for r in _q(s, f"""
+            SELECT f.deal_id, f.name, f.stage, f.forecast_category, f.amount_usd, {close} AS close
+            FROM forecast_snapshots f LEFT JOIN deals d ON d.id = f.deal_id WHERE f.snapshot_date = :sd AND {scope}""",
+            sd=base, acl=acl, bl=business_line_id, owner=owner_id)}
+        cur = {d["id"]: d for d in _q(s, DEAL_SQL, acl=acl, bl=business_line_id, owner=owner_id)}
+        steps: Dict[str, Dict[str, Any]] = {k: {"key": k, "label": lbl, "amount": 0.0, "deals": []} for k, lbl in BRIDGE_STEPS}
+        opening = closing = 0.0
+
+        def in_period(c) -> bool:
+            return c is not None and start <= c <= end
+
+        for did in set(cur) | set(old):
+            o, n = old.get(did), cur.get(did)
+            o_in = bool(o) and _commit_part(o["stage"], o["forecast_category"], o["close"], start, end)
+            n_close = (n["closed_on"] if n["stage"] == "won" else n["expected_close"]) if n else None
+            n_in = bool(n) and _commit_part(n["stage"], n["forecast_category"], n_close, start, end)
+            o_amt = _f(o["amount_usd"]) if o_in else 0.0
+            n_amt = _f(n["amount_usd"]) if n_in else 0.0
+            opening, closing = opening + o_amt, closing + n_amt
+            if round(n_amt - o_amt, 2) == 0:
+                continue
+            if not o:
+                key = "new"
+            elif not n:
+                key = "removed"
+            elif n["stage"] == "lost":
+                key = "lost"
+            elif o_in and n_in:
+                key = "amount"
+            elif o_in:
+                key = "slipped_out" if not in_period(n_close) else "downgraded"
+            elif not in_period(o["close"]) and in_period(n_close):
+                key = "pulled_in"
+            else:
+                key = "won_uncommitted" if n["stage"] == "won" else "upgraded"
+            st = steps[key]
+            st["amount"] += n_amt - o_amt
+            st["deals"].append({"id": did, "name": (n or o)["name"], "exists": n is not None, "amount_usd": round(n_amt - o_amt, 2)})
+        for st in steps.values():
+            st["amount"] = round(st["amount"], 2)
+            st["deals"].sort(key=lambda x: -abs(x["amount_usd"]))
+        bridge = {"since": base, "opening": round(opening, 2), "closing": round(closing, 2),
+                  "steps": [st for st in steps.values() if st["amount"]]}
+    return {"period": period, "start": start, "end": end, "points": points, "bridge": bridge}
+
+
 def _snapshot_loop() -> None:
     """Weekly snapshot every Monday 06:00 IST (+ a baseline the first time)."""
     while True:
@@ -414,6 +545,12 @@ def get_forecast(period: str, business_line_id: Optional[int] = None, owner_id: 
 def get_changes(period: str, since: Optional[str] = None, business_line_id: Optional[int] = None,
                 owner_id: Optional[int] = None, user: User = Depends(permissions.require_roles(*READERS)), s=Depends(_session)):
     return changes(s, user, period, since, business_line_id, owner_id)
+
+
+@router.get("/trend")
+def get_trend(period: str, since: Optional[str] = None, business_line_id: Optional[int] = None, owner_id: Optional[int] = None,
+              user: User = Depends(permissions.require_roles(*READERS)), s=Depends(_session)):
+    return trend(s, user, period, business_line_id, owner_id, since)
 
 
 @router.get("/targets")
