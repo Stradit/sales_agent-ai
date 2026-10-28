@@ -510,6 +510,17 @@
                      autocomplete="off" data-lpignore="true">
               <div style="font-size:.68rem;color:#64748b;">Used to automatically discover ticker, SEC filings, executive directory &amp; news</div>
             </div>
+
+            <!-- Autonomous Execution & Credit Gatekeeper Toggle -->
+            <div class="form-check form-switch" style="background:#f1f5f9;padding:12px 14px 12px 42px;border-radius:10px;border:1px solid #cbd5e1;margin-top:2px;">
+              <input class="form-check-input" type="checkbox" role="switch" id="autoEnrichAccountToggle" checked style="cursor:pointer;width:2.2em;height:1.2em;">
+              <label class="form-check-label" for="autoEnrichAccountToggle" style="font-weight:700;font-size:0.83rem;color:#0f172a;cursor:pointer;display:block;">
+                <i class="bi bi-magic" style="color:#6366f1;"></i> Auto-Enrich &amp; Ingest (Automated Pipeline)
+              </label>
+              <div style="font-size:0.7rem;color:#64748b;margin-top:2px;line-height:1.35;">
+                Pre-flight credit check &bull; 11-source harvest &bull; Self-healing retry &bull; Lossless golden record DB merge
+              </div>
+            </div>
           </div>
         </form>
 
@@ -542,6 +553,35 @@
                        border:none;font-weight:600;display:inline-flex;align-items:center;gap:8px;cursor:pointer;
                        box-shadow:0 4px 14px rgba(14,165,233,0.35);">
           <i class="bi bi-play-fill" style="font-size:1.1rem;"></i> Start Pipeline
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Credit Gatekeeper Alert Modal -->
+<div class="modal fade" id="creditAlertModal" tabindex="-1" aria-labelledby="creditAlertModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:540px;">
+    <div class="modal-content" style="border-radius:16px;border:1px solid #fecaca;box-shadow:0 20px 40px rgba(0,0,0,0.18);overflow:hidden;">
+      <div class="modal-header" style="background:#fef2f2;border-bottom:1px solid #fee2e2;padding:18px 24px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:40px;height:40px;border-radius:12px;background:#fee2e2;color:#dc2626;display:flex;align-items:center;justify-content:center;font-size:1.25rem;">
+            <i class="bi bi-shield-exclamation"></i>
+          </div>
+          <div>
+            <h5 class="modal-title" id="creditAlertModalLabel" style="font-size:1.05rem;font-weight:700;color:#991b1b;margin:0;">Credit Gatekeeper Alert</h5>
+            <p style="margin:0;font-size:0.75rem;color:#b91c1c;">Pre-flight resource and credit verification halted execution</p>
+          </div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="padding:22px 24px;" id="creditAlertModalBody">
+        <!-- Dynamically populated with credit shortage breakdown -->
+      </div>
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:14px 24px;display:flex;justify-content:flex-end;gap:10px;">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;padding:7px 16px;">Cancel</button>
+        <button type="button" id="btnSaveStubOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:7px 18px;font-weight:600;">
+          <i class="bi bi-database"></i> Save Stub Only (No Enrichment)
         </button>
       </div>
     </div>

@@ -1,0 +1,573 @@
+"""
+AccountAutomationEngine — Autonomous Pre-Flight, Ingestion, Self-Healing Retry & Coalescence.
+Orchestrates hands-free account-level execution for the Pipeline Explorer.
+Pre-flight Credit Gatekeeper • Multi-Vendor Telemetry • Self-Healing Retry • Lossless MDM Coalescence
+"""
+
+import copy
+import logging
+import os
+import re
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import config
+from db.connection import get_session
+from db.models.account import Account
+from db.models.pipeline_run import PipelineRun
+from db.repositories.account_repo import AccountRepository
+from db.repositories.pipeline_run_repository import PipelineRunRepository
+from db.schemas.account_schema import AccountSchema
+from services.account_service import (
+    AccountCoalesceEngine,
+    AccountInputResolver,
+    AccountService,
+    AccountValidator,
+    RawDataLakeWriter,
+)
+from services.coalescence_engine import CoalescenceEngine
+from services.credit_accounting_engine import CreditAccountingEngine
+from services.job_registry import (
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_RUNNING,
+    TYPE_ACCOUNT,
+    create_job,
+    update_job,
+)
+from services.pipeline_run_logger import PipelineRunLogger
+
+logger = logging.getLogger("account_automation_engine")
+logger.setLevel(logging.INFO)
+
+
+class AccountAutomationEngine:
+    """Enterprise Autonomous Orchestrator for Account-Tier Pipeline Execution."""
+
+    DEFAULT_WORKSPACE_BUDGET: int = 50000
+    DEFAULT_STANDALONE_BALANCE: int = 1000
+
+    @classmethod
+    def get_workspace_credit_balance(cls) -> Dict[str, Any]:
+        """Calculates current available credit balance and lifetime consumption.
+
+        Checks environment / system configs:
+        1. WORKSPACE_CREDIT_BALANCE (direct override balance if set)
+        2. WORKSPACE_CREDIT_BUDGET (total budget minus lifetime consumed)
+        3. Fallback: default dynamic pool ensuring accurate metering.
+        """
+        direct_balance_env = os.getenv("WORKSPACE_CREDIT_BALANCE")
+        if direct_balance_env is not None:
+            try:
+                bal = int(direct_balance_env)
+                return {
+                    "available_credits": max(0, bal),
+                    "lifetime_consumed": 0,
+                    "budget_mode": "direct_balance",
+                }
+            except ValueError:
+                pass
+
+        session = get_session()
+        try:
+            repo = PipelineRunRepository(session)
+            summary = repo.get_credits_summary()
+            consumed = summary.get("total_lifetime_credits_consumed", 0)
+            budget = int(os.getenv("WORKSPACE_CREDIT_BUDGET", str(cls.DEFAULT_WORKSPACE_BUDGET)))
+            avail = max(0, budget - consumed)
+            return {
+                "available_credits": avail,
+                "lifetime_consumed": consumed,
+                "budget_total": budget,
+                "budget_mode": "budget_pool",
+            }
+        except Exception as e:
+            logger.warning(f"Failed to query credit balance from DB: {e}")
+            return {
+                "available_credits": cls.DEFAULT_STANDALONE_BALANCE,
+                "lifetime_consumed": 0,
+                "budget_mode": "fallback",
+            }
+        finally:
+            session.close()
+
+    @classmethod
+    def get_account_tier_resources(cls) -> List[Dict[str, Any]]:
+        """Inspects CreditAccountingEngine.RATE_CARD for tier == 'account' and audits active API keys."""
+        resources = []
+        for key, meta in CreditAccountingEngine.RATE_CARD.items():
+            if meta.get("tier") != "account":
+                continue
+
+            is_billable = meta.get("is_billable", False)
+            credits_per = meta.get("credits_per_unit", 0)
+            masked_key = CreditAccountingEngine.get_masked_key(key)
+
+            # Check if key is configured
+            is_configured = True
+            if "config_attr" in meta:
+                val = getattr(config, meta["config_attr"], None)
+                is_configured = bool(val and str(val).strip())
+            elif "env_var" in meta:
+                val = os.getenv(meta["env_var"])
+                is_configured = bool(val and str(val).strip())
+
+            resources.append({
+                "id": key,
+                "name": meta.get("name", key),
+                "is_billable": is_billable,
+                "credits_per_unit": credits_per,
+                "api_key_masked": masked_key,
+                "is_configured": is_configured or not is_billable,
+                "unit_name": meta.get("unit_name", "calls"),
+            })
+        return resources
+
+    @classmethod
+    def preflight_account_check(
+        cls,
+        company_name: str,
+        domain: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Pre-Flight Resource & Credit Gatekeeper for Account Level.
+
+        Audits required resources, tallies expected credits against rate cards,
+        and verifies that sufficient credit balance is available.
+        """
+        clean_name = company_name.strip() if company_name else ""
+        if not clean_name:
+            return {
+                "allowed": False,
+                "company_name": "",
+                "required_credits": 0,
+                "available_credits": 0,
+                "reason": "missing_company_name",
+                "message": "Company name is required for pre-flight audit.",
+            }
+
+        resources = cls.get_account_tier_resources()
+        active_sources = []
+        unconfigured_billable = []
+        required_credits = 0
+
+        for res in resources:
+            if not res["is_billable"]:
+                # Public / free sources are always available
+                active_sources.append(res)
+            elif res["is_configured"]:
+                active_sources.append(res)
+                required_credits += res["credits_per_unit"]
+            else:
+                unconfigured_billable.append(res)
+
+        balance_info = cls.get_workspace_credit_balance()
+        available_credits = balance_info.get("available_credits", 0)
+
+        is_sufficient = available_credits >= required_credits
+        allowed = is_sufficient
+
+        message = (
+            f"Pre-flight approved: {required_credits} credits estimated across {len(active_sources)} sources. "
+            f"Workspace balance: {available_credits} credits."
+            if is_sufficient
+            else f"Credit Gatekeeper Alert: Insufficient credits. Run requires {required_credits} credits, "
+                 f"but workspace balance is only {available_credits} credits."
+        )
+
+        return {
+            "allowed": allowed,
+            "company_name": clean_name,
+            "domain": domain,
+            "required_credits": required_credits,
+            "available_credits": available_credits,
+            "balance_status": "sufficient" if is_sufficient else "insufficient",
+            "active_sources": active_sources,
+            "unconfigured_sources": unconfigured_billable,
+            "balance_info": balance_info,
+            "message": message,
+        }
+
+    @classmethod
+    def retry_failed_sources(
+        cls,
+        account_dossier: Dict[str, Any],
+        failed_sources: List[str],
+        effective_name: str,
+        effective_domain: Optional[str] = None,
+        effective_ticker: Optional[str] = None,
+        effective_cik: Optional[str] = None,
+        run_raw_dir: Optional[Path] = None,
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Self-Healing Retry Loop.
+
+        Selectively retries only the failed/transient sources, preserves successful
+        results, logs retry telemetry, and merges recovered intelligence.
+        """
+        telemetry = account_dossier.get("_telemetry", {})
+        sources_telemetry = telemetry.setdefault("sources", {})
+
+        recovered = []
+        unrecovered = []
+
+        logger.info(f"[Self-Healing Retry] Retrying failed connectors: {failed_sources}")
+
+        for src in failed_sources:
+            t0 = time.time()
+            data = None
+            try:
+                if src == "diffbot":
+                    data = AccountService._fetch_diffbot(effective_name, effective_domain)
+                elif src == "serper":
+                    data = AccountService._fetch_serper(effective_name, effective_domain)
+                elif src == "sec_edgar":
+                    data = AccountService._fetch_sec_edgar(effective_name, effective_ticker, effective_cik)
+                elif src == "finnhub":
+                    data = AccountService._fetch_finnhub(effective_ticker)
+                elif src == "fmp":
+                    data = AccountService._fetch_fmp(effective_ticker)
+                elif src == "opencorporates":
+                    data = AccountService._fetch_opencorporates(effective_name)
+                elif src == "gleif":
+                    data = AccountService._fetch_gleif(effective_name)
+                elif src == "courtlistener":
+                    data = AccountService._fetch_courtlistener(effective_name)
+                elif src == "apify_crunchbase":
+                    data = AccountService._fetch_apify_crunchbase(effective_name, effective_domain)
+                elif src == "apify_glassdoor":
+                    data = AccountService._fetch_apify_glassdoor(effective_name)
+                elif src == "wikipedia":
+                    data = AccountService._fetch_wikipedia(effective_name)
+                elif src == "openfec":
+                    data = AccountService._fetch_openfec(effective_name)
+                elif src == "firecrawl":
+                    data = AccountService._fetch_firecrawl_account(effective_domain, effective_name)
+
+                elapsed = round((time.time() - t0) * 1000, 2)
+                has_data = bool(data and (not isinstance(data, dict) or any(data.values())))
+
+                if has_data:
+                    sources_telemetry[src] = {
+                        "status": "success",
+                        "latency_ms": elapsed,
+                        "records_or_keys": len(data) if isinstance(data, (dict, list)) else 1,
+                        "retried": True,
+                        "retry_attempts": 1,
+                        "recovered": True,
+                    }
+                    recovered.append(src)
+                    RawDataLakeWriter.save_raw(data, src, effective_name, run_raw_dir)
+
+                    # Update raw data and multi_source_intelligence in dossier
+                    raw_dict = account_dossier.setdefault("raw_data", {})
+                    raw_dict[src] = data
+
+                    msi = account_dossier.setdefault("multi_source_intelligence", {})
+                    if src == "finnhub":
+                        msi["finnhub"] = data
+                    elif src == "opencorporates":
+                        msi["opencorporates"] = data
+                    elif src == "courtlistener":
+                        msi["courtlistener"] = data
+                    elif src == "openfec":
+                        msi["fec_political"] = data
+                    elif src == "gleif":
+                        msi["gleif_ownership_tree"] = data
+
+                    logger.info(f"[+] [Self-Healing Retry] Successfully recovered connector '{src}' in {elapsed}ms")
+                else:
+                    sources_telemetry[src]["retried"] = True
+                    sources_telemetry[src]["retry_attempts"] = 1
+                    sources_telemetry[src]["recovered"] = False
+                    unrecovered.append(src)
+            except Exception as ex:
+                elapsed = round((time.time() - t0) * 1000, 2)
+                sources_telemetry[src] = {
+                    "status": "error",
+                    "latency_ms": elapsed,
+                    "error": str(ex),
+                    "retried": True,
+                    "retry_attempts": 1,
+                    "recovered": False,
+                }
+                unrecovered.append(src)
+                logger.warning(f"[!] [Self-Healing Retry] Connector '{src}' failed again on retry: {ex}")
+
+        retry_summary = {
+            "retried_sources": failed_sources,
+            "recovered_sources": recovered,
+            "unrecovered_sources": unrecovered,
+        }
+        telemetry["retry_summary"] = retry_summary
+
+        return account_dossier, retry_summary
+
+    @classmethod
+    def execute_account_automation(
+        cls,
+        company_name: str,
+        domain: Optional[str] = None,
+        stock_symbol: Optional[str] = None,
+        sec_cik: Optional[str] = None,
+        industry: Optional[str] = None,
+        headquarters_location: Optional[str] = None,
+        company_type: Optional[str] = None,
+        job_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """End-to-End Autonomous Execution for Account Level.
+
+        1. Performs Pre-Flight Resource & Credit Gatekeeper check.
+        2. Initializes/finds Account row stub in PostgreSQL.
+        3. Executes AccountService.collect() across all active vendors.
+        4. Detects failures and triggers Self-Healing Targeted Retry.
+        5. Performs Additive Coalescence via CoalescenceEngine & AccountRepository.upsert().
+        6. Persists audited Credit Telemetry into pipeline_runs table.
+        7. Returns final enriched entity and updates background job status.
+        """
+        t0 = datetime.now(timezone.utc)
+        clean_name = company_name.strip()
+        clean_dom = (
+            domain.replace("https://", "").replace("http://", "").split("/")[0].split("?")[0].strip().lower()
+            if domain
+            else None
+        )
+        if clean_dom and clean_dom.startswith("www."):
+            clean_dom = clean_dom[4:]
+
+        # Step 1: Pre-Flight Gatekeeper
+        if job_id:
+            update_job(job_id, status=STATUS_RUNNING, progress_pct=5,
+                       message="Running pre-flight resource & credit gatekeeper audit...")
+
+        preflight = cls.preflight_account_check(clean_name, clean_dom)
+        if not preflight["allowed"]:
+            err_msg = f"Credit Gatekeeper Block: {preflight['message']}"
+            if job_id:
+                update_job(job_id, status=STATUS_FAILED, progress_pct=100, error=err_msg,
+                           result={"status": "rejected", "preflight": preflight})
+            return {"status": "rejected", "error": err_msg, "preflight": preflight}
+
+        # Step 2: Initialize or fetch Account stub in PostgreSQL
+        if job_id:
+            update_job(job_id, progress_pct=15,
+                       message=f"Verifying corporate entity stub in database for '{clean_name}'...")
+
+        session = get_session()
+        account_id = None
+        account_key = None
+        try:
+            from sqlalchemy import or_
+            slug = re.sub(r"[^a-zA-Z0-9]+", "_", clean_name).strip("_").lower()
+            filters = [Account.key == slug, Account.display_name.ilike(clean_name)]
+            if clean_dom:
+                filters.extend([Account.domain == clean_dom, Account.primary_domain == clean_dom])
+
+            existing_acct = session.query(Account).filter(or_(*filters)).first()
+            if existing_acct:
+                account_id = existing_acct.id
+                account_key = existing_acct.key
+                if stock_symbol and not existing_acct.stock_symbol:
+                    existing_acct.stock_symbol = stock_symbol.strip().upper()
+                if sec_cik and not existing_acct.sec_cik:
+                    existing_acct.sec_cik = sec_cik.strip()
+                if industry and not existing_acct.industries:
+                    existing_acct.industries = [industry.strip()]
+                session.commit()
+            else:
+                new_acct = Account(
+                    key=slug,
+                    display_name=clean_name,
+                    legal_name=clean_name,
+                    domain=clean_dom,
+                    primary_domain=clean_dom,
+                    website_url=f"https://{clean_dom}" if clean_dom else None,
+                    stock_symbol=stock_symbol.strip().upper() if stock_symbol else None,
+                    sec_cik=sec_cik.strip() if sec_cik else None,
+                    company_type=company_type.strip() if company_type else "Public",
+                    headquarters_location=headquarters_location.strip() if headquarters_location else None,
+                    industries=[industry.strip()] if industry else [],
+                )
+                session.add(new_acct)
+                session.commit()
+                session.refresh(new_acct)
+                account_id = new_acct.id
+                account_key = new_acct.key
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error creating/fetching account stub: {e}")
+        finally:
+            session.close()
+
+        # Step 3: Autonomous Multi-Source Harvesting
+        if job_id:
+            update_job(
+                job_id,
+                progress_pct=25,
+                message=f"Harvesting multi-source intelligence across {len(preflight['active_sources'])} active connectors...",
+            )
+
+        account_dossier = AccountService.collect(
+            company_name=clean_name,
+            domain=clean_dom,
+            ticker=stock_symbol,
+            sec_cik=sec_cik,
+        )
+
+        # Step 4: Self-Healing Fault Detection & Micro-Retry
+        telemetry = account_dossier.get("_telemetry", {})
+        sources_stat = telemetry.get("sources", {})
+        failed_sources = [
+            src for src, stat in sources_stat.items()
+            if stat.get("status") == "error"
+        ]
+
+        if failed_sources:
+            if job_id:
+                update_job(
+                    job_id,
+                    progress_pct=55,
+                    message=f"Fault detected in {len(failed_sources)} sources ({', '.join(failed_sources)}). Triggering self-healing micro-retry with backoff...",
+                )
+            # Brief backoff before retry
+            time.sleep(1.5)
+
+            effective_ticker = account_dossier.get("stock_symbol") or stock_symbol
+            effective_cik = account_dossier.get("sec_cik") or sec_cik
+            run_raw_dir = account_dossier.get("raw_dir") or account_dossier.get("raw_storage_dir")
+
+            account_dossier, retry_summary = cls.retry_failed_sources(
+                account_dossier=account_dossier,
+                failed_sources=failed_sources,
+                effective_name=clean_name,
+                effective_domain=clean_dom,
+                effective_ticker=effective_ticker,
+                effective_cik=effective_cik,
+                run_raw_dir=run_raw_dir,
+            )
+
+        # Step 5: Additive Coalescence & Golden Record Commit to Database
+        if job_id:
+            update_job(job_id, progress_pct=75,
+                       message="Applying Master Data Management (MDM) Coalescence Engine & persisting Golden Record...")
+
+        session = get_session()
+        saved_acct = None
+        try:
+            wrapper_doc = {"account": account_dossier}
+            schema = AccountSchema.from_enriched_json(wrapper_doc)
+            repo = AccountRepository(session)
+            saved_acct = repo.upsert(schema, raw_data=account_dossier)
+            session.commit()
+            session.refresh(saved_acct)
+            account_id = saved_acct.id
+            account_key = saved_acct.key
+        except Exception as commit_err:
+            session.rollback()
+            logger.error(f"Error persisting coalesced account to DB: {commit_err}")
+            raise commit_err
+        finally:
+            session.close()
+
+        # Step 6: Meter Real Telemetry & Commit Audited Credit Ledger
+        if job_id:
+            update_job(job_id, progress_pct=90,
+                       message="Finalizing telemetry metering & recording audited credit ledger...")
+
+        now_completed = datetime.now(timezone.utc)
+        duration_sec = round((now_completed - t0).total_seconds(), 2)
+
+        final_telemetry = account_dossier.get("_telemetry", {})
+        acct_credit_tally = CreditAccountingEngine.tally_account_telemetry(final_telemetry.get("sources", {}))
+        account_dossier["_credit_accounting"] = acct_credit_tally
+
+        credits_breakdown = CreditAccountingEngine.compile_run_breakdown(
+            company_name=clean_name,
+            run_id=f"run_{account_key[:20]}_auto",
+            run_number=1,
+            started_at=t0,
+            duration_seconds=duration_sec,
+            status="completed",
+            account_tally=acct_credit_tally,
+            lob_tally={"credits": 0, "resources": []},
+            persona_tally={"credits": 0, "resources": []},
+        )
+
+        audit = account_dossier.get("_validation_audit") or {}
+        raw_dir_val = account_dossier.get("raw_dir") or account_dossier.get("raw_storage_dir")
+
+        PipelineRunLogger.log_event(
+            company_name=clean_name,
+            target_url=clean_dom,
+            level="account",
+            action="auto_enrich_and_ingest",
+            status="success",
+            quality_score=float(audit.get("score", 0.0)),
+            quality_grade=audit.get("grade", "N/A"),
+            started_at=t0,
+            completed_at=now_completed,
+            duration_seconds=duration_sec,
+            raw_storage_dir=str(raw_dir_val) if raw_dir_val else None,
+            total_credits_used=acct_credit_tally.get("credits", 0),
+            credits_breakdown=credits_breakdown,
+            entities_extracted={
+                "account_id": account_id,
+                "key": account_key,
+                "display_name": clean_name,
+                "known_lobs_count": len(account_dossier.get("known_lobs", [])),
+                "known_personas_count": len(account_dossier.get("known_personas", [])),
+                "discovered_lobs_count": len(account_dossier.get("discovered_lob_names", [])),
+                "automated": True,
+                "background_job_id": job_id,
+            },
+        )
+
+        # Wrap account response matching explorer schema
+        required_account = {k: account_dossier.get(k) for k in (
+            "key", "display_name", "sec_edgar_url", "sec_filings_rss",
+            "sec_submissions_url", "twitter_live_url", "reddit_query",
+            "reddit_rss_url", "news_query", "rss_url", "google_patents_url",
+            "google_trends_url", "youtube_search_url", "openalex_institution_url",
+            "wikidata_entity_url", "blog_url", "github_url", "glassdoor_url",
+            "youtube_channel_id",
+        )}
+        wrapped = {
+            **account_dossier,
+            "id": account_id,
+            "key": account_key,
+            "required_account": required_account,
+            "identity": account_dossier,
+            "firmographics": account_dossier,
+            "location": account_dossier,
+            "contact_and_social": account_dossier,
+            "financials_and_funding": account_dossier,
+            "market_and_ipo": account_dossier,
+            "acquisitions_and_suborgs": account_dossier,
+            "web_traffic_and_growth": account_dossier,
+            "tech_and_patents": account_dossier,
+            "key_people": account_dossier,
+        }
+
+        # Step 7: Complete Job
+        result_payload = {
+            "status": "success",
+            "account_id": account_id,
+            "key": account_key,
+            "company_name": clean_name,
+            "credits_used": acct_credit_tally.get("credits", 0),
+            "quality_score": audit.get("score"),
+            "quality_grade": audit.get("grade"),
+            "account": wrapped,
+            "telemetry": final_telemetry,
+        }
+
+        if job_id:
+            update_job(
+                job_id,
+                status=STATUS_DONE,
+                progress_pct=100,
+                message=f"Account '{clean_name}' successfully enriched, coalesced, and saved to database.",
+                result=result_payload,
+            )
+
+        return result_payload

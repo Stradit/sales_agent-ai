@@ -82,6 +82,7 @@ from db.repositories import (
 )
 from db.repositories.pipeline_run_repository import PipelineRunRepository
 from services.account_service import AccountService
+from services.account_automation_engine import AccountAutomationEngine
 from services.lob_service import LobService, LobValidator
 from services.persona_service import PersonaService, PersonaValidator
 from services.pipeline_run_logger import PipelineRunLogger
@@ -803,6 +804,10 @@ if FASTAPI_AVAILABLE:
     # ══════════════════════════════════════════════════════
     # REQUEST / RESPONSE MODELS
     # ══════════════════════════════════════════════════════
+    class AccountPreflightRequest(BaseModel):
+        company_name: str
+        domain: Optional[str] = None
+
     class AccountCreateRequest(BaseModel):
         company_name: str
         domain: Optional[str] = None
@@ -811,6 +816,7 @@ if FASTAPI_AVAILABLE:
         industry: Optional[str] = None
         headquarters_location: Optional[str] = None
         company_type: Optional[str] = None
+        auto_enrich: Optional[bool] = False
 
     class PersonaTierPurgeSelection(BaseModel):
         all: bool = False
@@ -986,6 +992,8 @@ if FASTAPI_AVAILABLE:
     @account_router.post("/create", dependencies=[Depends(auth.require_role("super_admin"))])
     def create_account_stub(req: AccountCreateRequest):
         """[Tab 1 - Add Account Modal]: Creates or fetches an Account row in PostgreSQL with an official ID."""
+        if getattr(req, "auto_enrich", False):
+            return create_and_enrich_account(req)
         session = get_session()
         try:
             clean_name = req.company_name.strip()
@@ -1076,6 +1084,74 @@ if FASTAPI_AVAILABLE:
             raise HTTPException(status_code=500, detail=f"Account creation failed: {str(e)}")
         finally:
             session.close()
+
+    @account_router.post("/preflight", dependencies=[Depends(auth.require_role("super_admin"))])
+    def preflight_account_endpoint(req: AccountPreflightRequest):
+        """[Tab 1 - Add Account Preflight]: Verifies required resources, rates, and credit balance."""
+        return AccountAutomationEngine.preflight_account_check(req.company_name, req.domain)
+
+    @account_router.post("/create-and-enrich", dependencies=[Depends(auth.require_role("super_admin"))])
+    def create_and_enrich_account(req: AccountCreateRequest):
+        """[Tab 1 - Automated Add Account Flow]:
+        Pre-flight credit check -> Account Stub -> Autonomous 11-source harvest ->
+        Self-healing retry -> Additive Coalescence -> DB Golden Record commit -> Telemetry Ledger.
+        Returns job_id immediately with background execution.
+        """
+        clean_name = req.company_name.strip()
+        clean_dom = (
+            req.domain.replace("https://", "").replace("http://", "").split("/")[0].split("?")[0].strip().lower()
+            if req.domain
+            else None
+        )
+        if clean_dom and clean_dom.startswith("www."):
+            clean_dom = clean_dom[4:]
+
+        preflight = AccountAutomationEngine.preflight_account_check(clean_name, clean_dom)
+        if not preflight["allowed"]:
+            return JSONResponse(
+                status_code=402,
+                content={
+                    "status": "rejected",
+                    "reason": "insufficient_credits",
+                    "detail": preflight["message"],
+                    "preflight": preflight,
+                },
+            )
+
+        job_id = _jreg_create(TYPE_ACCOUNT, meta={
+            "company_name": clean_name,
+            "target_url": clean_dom,
+            "mode": "autonomous_pipeline",
+        })
+
+        def _bg_auto():
+            try:
+                AccountAutomationEngine.execute_account_automation(
+                    company_name=clean_name,
+                    domain=clean_dom,
+                    stock_symbol=req.stock_symbol,
+                    sec_cik=req.sec_cik,
+                    industry=req.industry,
+                    headquarters_location=req.headquarters_location,
+                    company_type=req.company_type,
+                    job_id=job_id,
+                )
+            except Exception as exc:
+                _jreg_exc(job_id, exc)
+
+        import threading
+        threading.Thread(target=_bg_auto, daemon=False, name=f"auto-acct-{job_id}").start()
+
+        return {
+            "status": "started",
+            "job_id": job_id,
+            "company_name": clean_name,
+            "domain": clean_dom,
+            "poll_url": f"/api/pipeline/job/{job_id}",
+            "estimated_credits": preflight["required_credits"],
+            "preflight": preflight,
+            "message": f"Autonomous pipeline started for '{clean_name}'. Polling job '{job_id}'.",
+        }
 
     @account_router.post("/fetch", dependencies=[Depends(auth.require_role("super_admin"))])
     def fetch_account_data(req: AccountFetchRequest):

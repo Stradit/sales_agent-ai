@@ -9157,7 +9157,230 @@ $(function () {
     }
   });
 
-  // Start Pipeline button — persists account stub to DB, closes modal, renders pipeline view
+  // Helper: Persists manual Account Stub only (used when toggle is OFF or on credit deficit override)
+  async function createAccountStubOnly(companyName, domain, $btn) {
+    const originalBtnText = $btn ? $btn.html() : "";
+    if ($btn) {
+      $btn.html('<i class="bi bi-hourglass-split"></i> Initializing Stub in DB...').prop("disabled", true);
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/account/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_name: companyName,
+          domain: domain || null,
+          auto_enrich: false,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Failed to create account stub`);
+      }
+      const data = await res.json();
+      const realId = data.account_id;
+
+      // Close modal
+      const modalEl = document.getElementById("addAccountModal");
+      if (modalEl) {
+        const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+        bsModal.hide();
+      }
+      const alertEl = document.getElementById("creditAlertModal");
+      if (alertEl) {
+        const bsAlert = bootstrap.Modal.getInstance(alertEl) || new bootstrap.Modal(alertEl);
+        bsAlert.hide();
+      }
+
+      if ($btn) {
+        $btn.html(originalBtnText).prop("disabled", false);
+      }
+
+      showNotification(
+        `✅ Account stub <strong>${esc(companyName)}</strong> created (ID: ${realId}). Ready for manual Pull.`,
+        "success"
+      );
+
+      accountStagedData = null;
+
+      const newAccountObj = {
+        id: realId,
+        key: data.key || companyName.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+        name: companyName,
+        display_name: companyName,
+        domain: domain || null,
+        primary_domain: domain || null,
+        website_url: domain ? `https://${domain}` : null,
+        ticker: null,
+        revenue: null,
+        location: null,
+        desc: "Account stub registered in database. Use Pull → Validate → Dump to manually enrich.",
+        lobs: [],
+        personas: [],
+        _isNew: true,
+      };
+
+      actionStateStore[`account_${realId}`] = {
+        pulled: false,
+        validated: false,
+        dumped: false,
+        score: null,
+        message: "",
+      };
+
+      try { sessionStorage.removeItem("pipeline_accounts_cache"); } catch (e) {}
+      refreshAccountsCache();
+
+      MOCK_DATA.accounts = (MOCK_DATA.accounts || []).filter((a) => a.id !== realId);
+      MOCK_DATA.accounts.unshift(newAccountObj);
+
+      renderSidebar();
+      $(`#accountList .account-item[data-id="${realId}"]`).trigger("click");
+    } catch (err) {
+      console.error("Account stub creation error:", err);
+      if ($btn) $btn.html(originalBtnText).prop("disabled", false);
+      showNotification(`❌ Error creating account stub: ${esc(err.message)}`, "error");
+    }
+  }
+
+  // Polling Manager for Autonomous Account Ingestion
+  function pollAutonomousAccountJob(jobId, companyName, domain, estimatedCredits) {
+    let attempts = 0;
+    const maxAttempts = 150; // up to 5 minutes
+    const toastId = `autoJob_${jobId}`;
+
+    showNotification(
+      `<div id="${toastId}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px;">
+          <span style="font-weight:700;color:#0369a1;font-size:0.86rem;">
+            <i class="bi bi-cpu"></i> Auto-Enriching ${esc(companyName)}
+          </span>
+          <span class="badge bg-primary" id="${toastId}_pct" style="font-size:0.75rem;padding:3px 8px;">15%</span>
+        </div>
+        <div class="progress" style="height:6px;background:#e2e8f0;border-radius:4px;overflow:hidden;margin-bottom:6px;">
+          <div class="progress-bar progress-bar-striped progress-bar-animated" id="${toastId}_bar"
+               style="width:15%;background:linear-gradient(90deg,#0ea5e9,#6366f1);transition:width 0.4s ease;"></div>
+        </div>
+        <div style="font-size:0.72rem;color:#64748b;line-height:1.3;" id="${toastId}_msg">
+          Pre-flight verified (${estimatedCredits} cr reserved). Harvesting multi-source intelligence...
+        </div>
+      </div>`,
+      "info",
+      120000
+    );
+
+    const interval = setInterval(async () => {
+      attempts++;
+      if (attempts > maxAttempts) {
+        clearInterval(interval);
+        $(`#${toastId}`).closest(".toast").remove();
+        showNotification(`⚠️ Autonomous execution timed out for <strong>${esc(companyName)}</strong>. Job may still finish in background.`, "warning");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/pipeline/job/${jobId}`);
+        if (!res.ok) return;
+        const job = await res.json();
+
+        const pct = job.progress_pct || 20;
+        $(`#${toastId}_pct`).text(`${pct}%`);
+        $(`#${toastId}_bar`).css("width", `${pct}%`);
+        if (job.message) {
+          $(`#${toastId}_msg`).text(job.message);
+        }
+
+        if (job.status === "done") {
+          clearInterval(interval);
+          $(`#${toastId}`).closest(".toast").remove();
+
+          const result = job.result || {};
+          const accountData = result.account || {};
+          const realId = result.account_id || accountData.id;
+          const creditsUsed = result.credits_used !== undefined ? result.credits_used : (estimatedCredits || 0);
+          const score = result.quality_score || (accountData._validation_audit ? accountData._validation_audit.score : 85);
+          const grade = result.quality_grade || (accountData._validation_audit ? accountData._validation_audit.grade : "A");
+
+          showNotification(
+            `✅ <strong>${esc(companyName)}</strong> auto-enriched &amp; ingested successfully!<br/>
+             <span style="font-size:0.74rem;color:#059669;font-weight:600;">
+               Quality Score: ${score}% (Grade ${grade}) &bull; ${creditsUsed} Credits Deducted &bull; 0 Data Loss
+             </span>`,
+            "success",
+            7000
+          );
+
+          // Update actionStateStore so action buttons reflect full completion
+          actionStateStore[`account_${realId}`] = {
+            pulled: true,
+            validated: true,
+            dumped: true,
+            score: score,
+            grade: grade,
+            message: "Auto-Enriched & Golden Record Committed",
+          };
+
+          try { sessionStorage.removeItem("pipeline_accounts_cache"); } catch (e) {}
+          refreshAccountsCache();
+
+          const newAccountObj = {
+            id: realId,
+            key: result.key || accountData.key,
+            name: companyName,
+            display_name: companyName,
+            legal_name: accountData.legal_name || companyName,
+            domain: domain || accountData.primary_domain || accountData.domain,
+            primary_domain: domain || accountData.primary_domain || accountData.domain,
+            website_url: accountData.website_url || (domain ? `https://${domain}` : null),
+            stock_symbol: accountData.stock_symbol,
+            ticker: accountData.stock_symbol,
+            sec_cik: accountData.sec_cik,
+            revenue: accountData.revenue,
+            headquarters_location: accountData.headquarters_location,
+            location: accountData.headquarters_location,
+            desc: accountData.short_description || accountData.full_description || "Enterprise entity enriched via automated pipeline.",
+            lobs: accountData.known_lobs || [],
+            personas: accountData.known_personas || [],
+            _credit_accounting: accountData._credit_accounting,
+            _telemetry: accountData._telemetry,
+            _validation_audit: accountData._validation_audit,
+            _isNew: true,
+          };
+
+          MOCK_DATA.accounts = (MOCK_DATA.accounts || []).filter((a) => a.id !== realId);
+          MOCK_DATA.accounts.unshift(newAccountObj);
+
+          renderSidebar();
+          setTimeout(() => {
+            $(`#accountList .account-item[data-id="${realId}"]`).trigger("click");
+          }, 200);
+        } else if (job.status === "failed") {
+          clearInterval(interval);
+          $(`#${toastId}`).closest(".toast").remove();
+          showNotification(`❌ Autonomous enrichment error for <strong>${esc(companyName)}</strong>: ${esc(job.error || "Execution failed")}`, "error", 9000);
+        }
+      } catch (err) {
+        console.warn("Polling error for job", jobId, err);
+      }
+    }, 2000);
+  }
+
+  // Hook up Save Stub Only button in Credit Alert Modal
+  $(document).on("click", "#btnSaveStubOnly", function () {
+    const companyName = $("#newAccountName").val().trim();
+    let rawDomain = ($("#newAccountDomain").val() || "").trim();
+    const domain = rawDomain
+      .replace(/^https?:\/\//i, "")
+      .split("/")[0]
+      .split("?")[0]
+      .replace(/^www\./i, "")
+      .trim()
+      .toLowerCase();
+    createAccountStubOnly(companyName, domain, $(this));
+  });
+
+  // Start Pipeline button — Handles both Automated Pipeline (with Pre-Flight) and Manual Stub Mode
   $("#startNewAccountBtn").on("click", async function () {
     const $btn = $(this);
     const companyName = $("#newAccountName").val().trim();
@@ -9175,11 +9398,21 @@ $(function () {
       .trim()
       .toLowerCase();
 
+    const isAutoEnrich = $("#autoEnrichAccountToggle").is(":checked");
+
+    // Option A: Manual Stub Creation (when user unchecks auto-enrich)
+    if (!isAutoEnrich) {
+      await createAccountStubOnly(companyName, domain, $btn);
+      return;
+    }
+
+    // Option B: Autonomous Pre-Flight & Multi-Tier Execution
     const originalBtnText = $btn.html();
-    $btn.html('<i class="bi bi-hourglass-split"></i> Initializing in DB...').prop("disabled", true);
+    $btn.html('<i class="bi bi-shield-check"></i> Pre-flight Checking Credits...').prop("disabled", true);
 
     try {
-      const res = await fetch(`${API_BASE}/api/account/create`, {
+      // Step 1: Pre-Flight Resource & Credit Gatekeeper
+      const preflightRes = await fetch(`${API_BASE}/api/account/preflight`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -9188,69 +9421,110 @@ $(function () {
         }),
       });
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: Failed to create account`);
+      const preflight = await preflightRes.json();
+
+      // Step 2: Check if Insufficient Credits or Blocked
+      if (!preflightRes.ok || !preflight.allowed) {
+        $btn.html(originalBtnText).prop("disabled", false);
+
+        // Hide add account modal
+        const modalEl = document.getElementById("addAccountModal");
+        if (modalEl) {
+          const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+          bsModal.hide();
+        }
+
+        // Render detailed credit gatekeeper alert modal
+        const reqCr = preflight.required_credits || 6;
+        const availCr = preflight.available_credits || 0;
+        const deficit = Math.max(0, reqCr - availCr);
+
+        const activeListHtml = (preflight.active_sources || []).map(s =>
+          `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:0.75rem;border-bottom:1px dashed #f1f5f9;">
+            <span>${esc(s.name)}</span>
+            <span class="badge ${s.is_billable ? 'bg-indigo' : 'bg-secondary'}" style="${s.is_billable ? 'background:#6366f1;' : ''}">${s.is_billable ? s.credits_per_unit + ' cr' : 'Free / Public'}</span>
+          </div>`
+        ).join("");
+
+        const unconfigListHtml = (preflight.unconfigured_sources && preflight.unconfigured_sources.length > 0)
+          ? `<div style="margin-top:10px;padding:8px 12px;background:#fffbeb;border-radius:8px;border:1px solid #fef3c7;font-size:0.72rem;color:#92400e;">
+               <strong>Unconfigured Optional Connectors:</strong> ${preflight.unconfigured_sources.map(u => esc(u.name)).join(", ")}
+             </div>`
+          : "";
+
+        $("#creditAlertModalBody").html(`
+          <div style="background:#fef2f2;border:1px solid #fee2e2;border-radius:12px;padding:14px 16px;margin-bottom:16px;">
+            <div style="font-weight:700;color:#991b1b;font-size:0.9rem;margin-bottom:4px;">
+              <i class="bi bi-x-circle-fill"></i> Insufficient Workspace Credits
+            </div>
+            <div style="font-size:0.78rem;color:#b91c1c;line-height:1.4;">
+              ${esc(preflight.message || 'Execution halted because available credits are lower than required rate card tally.')}
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
+            <div style="background:#f8fafc;padding:10px 12px;border-radius:10px;border:1px solid #e2e8f0;text-align:center;">
+              <div style="font-size:0.68rem;font-weight:600;color:#64748b;text-transform:uppercase;">Required</div>
+              <div style="font-size:1.25rem;font-weight:800;color:#0f172a;">${reqCr} <span style="font-size:0.75rem;font-weight:500;">cr</span></div>
+            </div>
+            <div style="background:#f8fafc;padding:10px 12px;border-radius:10px;border:1px solid #e2e8f0;text-align:center;">
+              <div style="font-size:0.68rem;font-weight:600;color:#64748b;text-transform:uppercase;">Available</div>
+              <div style="font-size:1.25rem;font-weight:800;color:#dc2626;">${availCr} <span style="font-size:0.75rem;font-weight:500;">cr</span></div>
+            </div>
+            <div style="background:#fef2f2;padding:10px 12px;border-radius:10px;border:1px solid #fecaca;text-align:center;">
+              <div style="font-size:0.68rem;font-weight:600;color:#dc2626;text-transform:uppercase;">Shortage</div>
+              <div style="font-size:1.25rem;font-weight:800;color:#dc2626;">-${deficit} <span style="font-size:0.75rem;font-weight:500;">cr</span></div>
+            </div>
+          </div>
+
+          <div style="font-size:0.72rem;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">
+            Resource Ingestion Plan (${(preflight.active_sources || []).length} Sources)
+          </div>
+          <div style="max-height:160px;overflow-y:auto;padding-right:4px;">
+            ${activeListHtml}
+          </div>
+          ${unconfigListHtml}
+        `);
+
+        const alertModal = new bootstrap.Modal(document.getElementById("creditAlertModal"));
+        alertModal.show();
+        return;
       }
-      const data = await res.json();
-      const realId = data.account_id;
 
-      // Close modal
+      // Step 3: Quota Approved — Dispatch Autonomous Execution
+      $btn.html('<i class="bi bi-cpu"></i> Spawning Worker Job...').prop("disabled", true);
+
+      const autoRes = await fetch(`${API_BASE}/api/account/create-and-enrich`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_name: companyName,
+          domain: domain || null,
+        }),
+      });
+
+      if (!autoRes.ok) {
+        throw new Error(`HTTP ${autoRes.status}: Failed to start autonomous pipeline`);
+      }
+
+      const autoData = await autoRes.json();
+      const jobId = autoData.job_id;
+
+      // Close modal and restore button
       const modalEl = document.getElementById("addAccountModal");
-      const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
-      bsModal.hide();
+      if (modalEl) {
+        const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+        bsModal.hide();
+      }
       $btn.html(originalBtnText).prop("disabled", false);
 
-      // Show top-right floating success toast
-      showNotification(
-        `✅ Account <strong>${esc(companyName)}</strong> initialized successfully (ID: ${realId})`,
-        "success",
-      );
+      // Launch autonomous job poller
+      pollAutonomousAccountJob(jobId, companyName, domain, preflight.required_credits);
 
-      // Reset staged data for fresh start
-      accountStagedData = null;
-
-      // Build account object with official database ID
-      const newAccountObj = {
-        id: realId,
-        key: data.key || companyName.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
-        name: companyName,
-        display_name: companyName,
-        domain: domain || null,
-        primary_domain: domain || null,
-        website_url: domain ? `https://${domain}` : null,
-        ticker: null,
-        revenue: null,
-        location: null,
-        desc: "Account registered in database. Run Pull → Validate → Dump to enrich with 11 sources.",
-        lobs: [],
-        personas: [],
-        _isNew: true,
-      };
-
-      // Reset action state keyed to this official DB id
-      actionStateStore[`account_${realId}`] = {
-        pulled: false,
-        validated: false,
-        dumped: false,
-        score: null,
-        message: "",
-      };
-
-      // Clear cache so newly added account is fetched fresh
-      try { sessionStorage.removeItem("pipeline_accounts_cache"); } catch (e) {}
-      refreshAccountsCache();
-
-      // Add to MOCK_DATA.accounts (replacing any duplicate if present)
-      MOCK_DATA.accounts = (MOCK_DATA.accounts || []).filter((a) => a.id !== realId);
-      MOCK_DATA.accounts.unshift(newAccountObj);
-
-      // Re-render sidebar and activate the newly created account
-      renderSidebar();
-      $(`#accountList .account-item[data-id="${realId}"]`).trigger("click");
     } catch (err) {
-      console.error("Account creation error:", err);
+      console.error("Autonomous execution launch error:", err);
       $btn.html(originalBtnText).prop("disabled", false);
-      showNotification(`❌ Error creating account: ${esc(err.message)}`, "error");
+      showNotification(`❌ Error launching autonomous pipeline: ${esc(err.message)}`, "error");
     }
   });
 
