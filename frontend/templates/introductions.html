@@ -9,8 +9,8 @@
   <link rel="stylesheet" href="css/tokens.css?v=3.0">
   <link rel="stylesheet" href="css/base.css?v=4.1">
   <link rel="stylesheet" href="css/shell.css?v=3.0">
-  <link rel="stylesheet" href="css/deals.css?v=2.2">
-  <link rel="stylesheet" href="css/introductions.css?v=1.5">
+  <link rel="stylesheet" href="css/deals.css?v=3.3">
+  <link rel="stylesheet" href="css/introductions.css?v=1.6">
   <link rel="stylesheet" href="css/activity-timeline.css?v=1.0">
 </head>
 <body>
@@ -23,7 +23,7 @@
     <main class="dl-main" aria-label="Introductions">
       <header class="dl-header">
         <div>
-          <a href="/deals" class="dl-back" id="inBack"><i class="fa-solid fa-arrow-left"></i> Back</a>
+          <a href="/accounts" class="dl-back" id="inBack"><i class="fa-solid fa-arrow-left"></i> Back</a>
           <h1 class="dl-title"><i class="fa-solid fa-handshake"></i> Introductions</h1>
           <p class="dl-sub" id="inSummary">Loading…</p>
         </div>
@@ -33,6 +33,7 @@
           <select id="inBusinessLine" class="dl-select" aria-label="Filter by business line"><option value="">All business lines</option></select>
           <label class="dl-toggle"><input type="checkbox" id="inMine"> Mine</label>
           <button type="button" class="dl-btn" id="inExport"><i class="fa-regular fa-file-excel"></i> Export</button>
+          <button type="button" class="dl-btn dl-btn-workflow" id="inWorkflowBtn"><i class="fa-solid fa-diagram-project"></i> How it works</button>
           <button type="button" class="dl-btn dl-btn-primary" id="inNew"><i class="fa-solid fa-plus"></i> New introduction</button>
         </div>
       </header>
@@ -41,7 +42,7 @@
         <button type="button" class="in-tab active" role="tab" aria-selected="true" data-view="board"><i class="fa-solid fa-table-columns"></i> Board</button>
         <button type="button" class="in-tab" role="tab" aria-selected="false" data-view="attribution"><i class="fa-solid fa-chart-column"></i> Attribution</button>
         <button type="button" class="in-tab" role="tab" aria-selected="false" data-view="connectors"><i class="fa-solid fa-address-book"></i> Connectors</button>
-        <button type="button" class="in-tab" role="tab" aria-selected="false" data-view="wanted"><i class="fa-solid fa-bullseye"></i> Wanted</button>
+        <button type="button" class="in-tab" role="tab" aria-selected="false" data-view="wanted"><i class="fa-solid fa-bullseye"></i> Wishlist</button>
       </nav>
 
       <section id="inViewBoard" class="in-view active">
@@ -51,7 +52,7 @@
       </section>
       <section id="inViewAttribution" class="in-view" hidden></section>
       <section id="inViewConnectors" class="in-view" hidden></section>
-      <section id="inViewWanted" class="in-view" hidden aria-label="Wanted introductions"></section>
+      <section id="inViewWanted" class="in-view" hidden aria-label="Introduction wishlist"></section>
     </main>
   </div>
 </div>
@@ -94,9 +95,162 @@
   </form>
 </div>
 
+<!-- Workflow Guide modal -->
+<!-- Workflow Guide modal -->
+<div class="dl-modal-wrap" id="inWorkflowModal" hidden>
+  <div class="dl-modal wf-modal" role="dialog" aria-modal="true" aria-labelledby="inWorkflowTitle">
+
+    <!-- ── HEADER ── -->
+    <header class="wf-header">
+      <div class="wf-header-left">
+        <div class="wf-header-icon"><i class="fa-solid fa-handshake"></i></div>
+        <div>
+          <h2 id="inWorkflowTitle">Introduction Workflow</h2>
+          <p>How an introduction progresses from referral idea to a live deal</p>
+        </div>
+      </div>
+      <div class="wf-header-meta">
+        <span class="wf-meta-pill"><i class="fa-solid fa-layer-group"></i> 6 Stages</span>
+        <span class="wf-meta-pill wf-meta-pill--brand"><i class="fa-solid fa-rocket"></i> Spawns Deal</span>
+        <button type="button" class="dl-icon wf-close-btn" id="inWorkflowClose" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </header>
+
+    <div class="wf-body">
+
+      <!-- ── STAGE PIPELINE BAR ── -->
+      <div class="wf-section-bar">
+        <span><i class="fa-solid fa-route"></i> Introduction Stages</span>
+        <span class="wf-section-hint"><i class="fa-solid fa-clock-rotate-left"></i> Notes, calls &amp; repeated meetings can be logged at any stage</span>
+      </div>
+
+      <!-- ── HORIZONTAL PIPELINE (ALL 6 STAGES) ── -->
+      <div class="wf-pipeline">
+
+        <!-- Stage 1: Proposed -->
+        <div class="wf-stage wf-stage-1">
+          <div class="wf-stage-head">
+            <span class="wf-stage-num">01</span>
+            <div class="wf-stage-icon-circle"><i class="fa-solid fa-lightbulb"></i></div>
+          </div>
+          <div class="wf-stage-name">Proposed</div>
+          <span class="wf-stage-tag">Lead Idea</span>
+          <div class="wf-stage-desc">Target contact suggested for referral. Review connector strength before making the ask.</div>
+        </div>
+
+        <div class="wf-connector"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Stage 2: Requested -->
+        <div class="wf-stage wf-stage-2">
+          <div class="wf-stage-head">
+            <span class="wf-stage-num">02</span>
+            <div class="wf-stage-icon-circle"><i class="fa-solid fa-paper-plane"></i></div>
+          </div>
+          <div class="wf-stage-name">Requested</div>
+          <span class="wf-stage-tag">Awaiting Reply</span>
+          <div class="wf-stage-desc">Formal ask sent to connector with context, bio blurbs and targeted value proposition.</div>
+        </div>
+
+        <div class="wf-connector"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Stage 3: Accepted -->
+        <div class="wf-stage wf-stage-3">
+          <div class="wf-stage-head">
+            <span class="wf-stage-num">03</span>
+            <div class="wf-stage-icon-circle"><i class="fa-solid fa-circle-check"></i></div>
+          </div>
+          <div class="wf-stage-name">Accepted</div>
+          <span class="wf-stage-tag">Intro Agreed</span>
+          <div class="wf-stage-desc">Connector agreed to make the intro. Waiting for 3-way email or message outreach.</div>
+        </div>
+
+        <div class="wf-connector"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Stage 4: Intro Made -->
+        <div class="wf-stage wf-stage-4">
+          <div class="wf-stage-head">
+            <span class="wf-stage-num">04</span>
+            <div class="wf-stage-icon-circle"><i class="fa-solid fa-envelope-open-text"></i></div>
+          </div>
+          <div class="wf-stage-name">Intro Made</div>
+          <span class="wf-stage-tag">Thread Active</span>
+          <div class="wf-stage-desc">Email thread started by connector. Respond promptly and coordinate initial call.</div>
+        </div>
+
+        <div class="wf-connector"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Stage 5: Meeting Held -->
+        <div class="wf-stage wf-stage-5">
+          <div class="wf-stage-head">
+            <span class="wf-stage-num">05</span>
+            <div class="wf-stage-icon-circle"><i class="fa-solid fa-calendar-check"></i></div>
+          </div>
+          <div class="wf-stage-name">Meeting Held</div>
+          <span class="wf-stage-tag">Interest Verified</span>
+          <div class="wf-stage-desc">Conversation took place. Genuine mutual interest confirmed — ready for conversion.</div>
+        </div>
+
+        <div class="wf-connector wf-connector-hot"><i class="fa-solid fa-chevron-right"></i></div>
+
+        <!-- Target: Convert -->
+        <div class="wf-stage wf-stage-convert">
+          <div class="wf-stage-head">
+            <span class="wf-stage-num wf-stage-num--convert">★</span>
+            <div class="wf-stage-icon-circle"><i class="fa-solid fa-rocket"></i></div>
+          </div>
+          <div class="wf-stage-name">Convert to Deal</div>
+          <span class="wf-stage-tag wf-stage-tag--convert">★ Spawns Deal</span>
+          <div class="wf-stage-desc">Spawns an active deal in Deals Pipeline with full connector attribution retained.</div>
+        </div>
+
+      </div><!-- /wf-pipeline -->
+
+      <!-- ── COMPACT BOTTOM SECTION (ONE VIEW) ── -->
+      <div class="wf-footer-grid">
+
+        <!-- Exit paths -->
+        <div class="wf-card-pane">
+          <div class="wf-card-title"><i class="fa-solid fa-door-open"></i> Exit paths — can happen at any stage</div>
+          <div class="wf-exit-row">
+            <div class="wf-exit wf-exit-declined">
+              <div class="wf-exit-icon"><i class="fa-solid fa-ban"></i></div>
+              <div>
+                <div class="wf-exit-name">Declined</div>
+                <div class="wf-exit-desc">Connector or contact explicitly said no. Introduction is closed &amp; archived.</div>
+              </div>
+            </div>
+            <div class="wf-exit wf-exit-stale">
+              <div class="wf-exit-icon"><i class="fa-solid fa-clock-rotate-left"></i></div>
+              <div>
+                <div class="wf-exit-name">Stale</div>
+                <div class="wf-exit-desc">No response after multiple follow-ups. Can be re-opened if re-engaged.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bridge to Deals Pipeline -->
+        <div class="wf-card-pane">
+          <div class="wf-card-title"><i class="fa-solid fa-diagram-next"></i> Graduation into Deals Pipeline</div>
+          <div class="wf-bridge-compact">
+            <div class="wf-bridge-src"><i class="fa-solid fa-rocket"></i> Convert to Deal</div>
+            <div class="wf-bridge-arr"><i class="fa-solid fa-arrow-right"></i> Spawns Deal</div>
+            <div class="wf-bridge-dst">
+              <i class="fa-solid fa-diagram-next"></i>
+              <span>Intro → Discovery → Proposal → Pilot → Contract → WON</span>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /wf-footer-grid -->
+
+    </div><!-- /wf-body -->
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 {% include "partials/copilot-dock.html" %}
-<script type="module" src="js/modules/introductions/main.js?v=1.6"></script>
+<script type="module" src="js/modules/introductions/main.js?v=1.7"></script>
 </body>
 </html>

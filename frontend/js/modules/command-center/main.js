@@ -3,6 +3,7 @@ import { initThemeToggle } from '../theme.js';
 import { initTopbarAuth } from '../topbar-auth.js';
 import { showToast } from '../toast.js';
 import { ccState } from './state.js';
+import { syncTaskedItemsFromApi } from './actions.js';
 import { renderKpiStrip, bindKpiListeners } from './kpi.js';
 import { renderMatrix } from './matrix.js';
 import { renderFeed } from './feed.js';
@@ -120,6 +121,7 @@ async function init() {
     renderAll();
     renderMatrix();
   });
+  await syncTaskedItemsFromApi();
   renderAll();
   renderMatrix();
   initWidgetGuides();

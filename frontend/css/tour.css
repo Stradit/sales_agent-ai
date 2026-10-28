@@ -63,6 +63,9 @@
   z-index: 99999;
   width: 360px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+  box-sizing: border-box;
   background: var(--panel-bg, #FFFFFF);
   border: 1px solid var(--border-mid, #DCE1E9);
   border-radius: 12px;

@@ -93,6 +93,16 @@ function markCurrentPage() {
   if (here) here.classList.add('active');
 }
 
+// The Global Accounts Dashboard is admin-granted, not default access.
+// If the user has global dashboard access, point to / (Global Overview).
+// If the user lacks global dashboard access but HAS assigned accounts,
+// point to their assigned accounts directly (e.g. /?account_key=...).
+// Only hide the link if they have neither.
+function updateDashboardLinkAccess() {
+  const dashBtn = el('navDigestBtn');
+  if (dashBtn) dashBtn.style.display = 'none';
+}
+
 // Sales Command Center is open by default, but a super_admin can revoke it per user
 function updateCommandCenterLinkAccess() {
   const ccLink = document.querySelector('.nav-digest-wrap a[href="/command-center"]');

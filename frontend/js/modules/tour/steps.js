@@ -184,6 +184,15 @@ export const TOUR_PAGES = {
         preferredPlacement: 'bottom'
       },
       {
+        target: '.nav-digest-wrap a[href="/command-center"]',
+        targetFallback: '.nav-digest-wrap',
+        title: 'Sales Command Center Quick Jump',
+        icon: 'fa-solid fa-arrow-trend-up',
+        desc: 'Quickly access the Sales Command Center for priority action items, capital events, and market telemetry.',
+        tip: 'Click here anytime to return to the executive command center.',
+        preferredPlacement: 'right'
+      },
+      {
         target: '#dashNav',
         targetFallback: '#navAccountList',
         title: 'Account Navigator Tree',

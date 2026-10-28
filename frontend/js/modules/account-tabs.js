@@ -1,4 +1,4 @@
-﻿// Per-account render module ΓÇö the tab-based "on-demand" detail view (only the active
+// Per-account render module ΓÇö the tab-based "on-demand" detail view (only the active
 // tab's content is computed; this already satisfies on-demand loading for this view,
 // distinct from the digest's new IntersectionObserver-based lazy render).
 import { state } from './state.js';
@@ -19,7 +19,6 @@ import { openSignalModal, closeSignalModal } from './signal-modal.js';
 import { renderSelection } from './selection.js';
 import { renderNavTree } from './nav-tree.js';
 import { mountTimeline } from './activity-timeline.js';
-import { mountAccountCrm } from './crm-extras.js';
 
 export function renderScoreRing(account) {
   const score = account.heat_score;
@@ -40,7 +39,7 @@ export function renderTrendPill(account) {
   if (account.trend_score_90d == null) return '';
   const t = account.trend_score_90d;
   const up = t >= 0;
-  return `<div style="margin-top:10px;"><span class="pill ${up ? 'pill-success' : 'pill-danger'}"><i class="bi ${up ? 'bi-graph-up-arrow' : 'bi-graph-down-arrow'}"></i> 90-Day Trend: ${up ? '+' : ''}${t}</span></div>`;
+  return `<span class="pill ${up ? 'pill-success' : 'pill-danger'}" title="90-Day momentum trend score"><i class="bi ${up ? 'bi-graph-up-arrow' : 'bi-graph-down-arrow'}"></i> 90-Day Trend: ${up ? '+' : ''}${t}</span>`;
 }
 
 // Account-only Sales Alerts wrapper ΓÇö shares its engine with the digest's
@@ -323,7 +322,6 @@ export function renderCenter(account, lob) {
   const targetKey = resolveAccountTargetKey(account);
   const postCount = targetKey ? (state.contentStore.posts[targetKey] || []).length : 0;
 
-  queueMicrotask(() => mountAccountCrm(document.getElementById('acctCrmRow'), account.id));
   let tabContent = '';
   if (state.activeSalesTab === 'committee') {
     tabContent = renderBuyingCommitteeTab(account, lob);
@@ -354,19 +352,18 @@ export function renderCenter(account, lob) {
       <div class="acct-header">
         <div class="acct-avatar-lg">${esc(initials(account.name))}</div>
         <div class="acct-header-body">
-          <h2 class="acct-name">${esc(account.name)}${lob ? ' ┬╖ ' + esc(lob.name) : ''}</h2>
+          <h2 class="acct-name">${esc(account.name)}${lob ? ' · ' + esc(lob.name) : ''}</h2>
           <div class="acct-pills">
             <span class="pill pill-brand" title="Public / Private stock ticker classification"><i class="bi bi-tag"></i> ${esc(account.ticker || 'Private')}</span>
             <span class="pill" title="Annual reported revenue"><i class="bi bi-currency-dollar"></i> ${esc((account.revenue || 'Revenue N/A').replace(/^\$/, ''))}</span>
             <span class="pill pill-success" title="Corporate headquarters location"><i class="bi bi-geo-alt"></i> ${esc(account.location || 'Location N/A')}</span>
             ${account.operating_status ? `<span class="pill" title="Current operational status"><i class="bi bi-activity"></i> ${esc(account.operating_status)}</span>` : ''}
+            ${renderTrendPill(account)}
           </div>
           <p class="acct-desc">${esc(lob ? (lob.desc || 'No description available.') : (account.desc || 'No description available.'))}</p>
-          <div class="acct-crm-row" id="acctCrmRow"></div>
         </div>
         ${renderScoreRing(account)}
       </div>
-      ${renderTrendPill(account)}
     </div>
 
     <!-- Workflow Navigation Tabs -->

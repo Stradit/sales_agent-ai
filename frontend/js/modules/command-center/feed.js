@@ -1,7 +1,7 @@
 import { getCommandCenter, isGenerated } from './generator.js';
 import { esc, relativeTime, ageInDays } from './utils.js';
 import { ccState, matchesCurrentAccount } from './state.js';
-import { createTask } from './actions.js';
+import { createTask, isTasked, markAsTasked } from './actions.js';
 import { clearGlobalAccountFilter } from './account-filter.js';
 
 function matchesAccount(sig) {
@@ -91,6 +91,11 @@ function renderAccountFilterPill() {
   }
 }
 
+function cleanFeedText(str) {
+  if (!str) return '';
+  return String(str).replace(/[\ufffd]/g, '—').trim();
+}
+
 function rowHtml(sig) {
   const isNew = sig.is_new != null
     ? Boolean(sig.is_new)
@@ -100,10 +105,12 @@ function rowHtml(sig) {
     : '';
   
   const cat = sig.meta || getCategoryMeta(sig);
+  const displayTitle = cleanFeedText(sig.title);
+  const displaySummary = cleanFeedText(sig.summary);
 
   const titleHtml = sig.url
-    ? `<a class="cc-sig-title-link" href="${esc(sig.url)}" target="_blank" rel="noopener" title="${esc(sig.title)}">${esc(sig.title)} <i class="fa-solid fa-arrow-up-right-from-square cc-sig-external-icon"></i></a>`
-    : `<span class="cc-sig-title-text" title="${esc(sig.title)}">${esc(sig.title)}</span>`;
+    ? `<a class="cc-sig-title-link" href="${esc(sig.url)}" target="_blank" rel="noopener" title="${esc(displayTitle)}">${esc(displayTitle)} <i class="fa-solid fa-arrow-up-right-from-square cc-sig-external-icon"></i></a>`
+    : `<span class="cc-sig-title-text" title="${esc(displayTitle)}">${esc(displayTitle)}</span>`;
 
   return `
     <li class="cc-signal-card ${isNew ? 'is-new' : ''}" data-signal-id="${esc(sig.id)}">
@@ -121,9 +128,12 @@ function rowHtml(sig) {
           ${newBadge}
         </div>
         <div class="cc-sig-action-wrap">
-          <button type="button" class="cc-btn cc-btn-primary cc-btn-xs cc-sig-task-btn" data-act="task" title="Create assigned task for ${esc(sig.account_name)}">
-            <i class="fa-solid fa-plus"></i> Create task
-          </button>
+          ${(() => {
+            const tasked = isTasked(sig.account_name, sig.title, sig.account_id);
+            const btnCls = tasked ? 'cc-btn-done' : 'cc-btn-primary';
+            const btnHtml = tasked ? '<i class="fa-solid fa-check"></i> Tasked' : '<i class="fa-solid fa-plus"></i> Create task';
+            return `<button type="button" class="cc-btn ${btnCls} cc-btn-xs cc-sig-task-btn" data-act="task" title="${tasked ? 'Task already created' : `Create assigned task for ${esc(sig.account_name)}`}" ${tasked ? 'disabled' : ''}>${btnHtml}</button>`;
+          })()}
         </div>
       </div>
 
@@ -131,9 +141,9 @@ function rowHtml(sig) {
         ${titleHtml}
       </div>
 
-      ${sig.summary ? `
+      ${displaySummary ? `
       <div class="cc-sig-summary-block" role="button" tabindex="0" title="Click to view complete text">
-        <div class="cc-sig-summary-text">${esc(sig.summary)}</div>
+        <div class="cc-sig-summary-text">${esc(displaySummary)}</div>
         <div class="cc-sig-expand-toggle">
           <span class="cc-sig-toggle-label"><i class="fa-solid fa-chevron-down"></i> Expand full text</span>
         </div>
@@ -203,9 +213,11 @@ export function renderFeed() {
           source: 'signal_feed',
         });
         if (ok) {
+          markAsTasked(sig.account_name, sig.title, sig.account_id);
           btn.innerHTML = '<i class="fa-solid fa-check"></i> Tasked';
           btn.classList.remove('cc-btn-primary');
           btn.classList.add('cc-btn-done');
+          btn.disabled = true;
         } else {
           btn.innerHTML = origHtml;
           btn.disabled = false;

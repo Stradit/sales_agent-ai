@@ -8,6 +8,7 @@ draft_prompt() builds the LLM prompt for that one action from a deliberately sma
 deal: names, titles, stage, pain/metrics and the plan — never the deal value or contact details.
 """
 from datetime import date
+import re
 from typing import Any, Dict, List, Optional
 
 LATE_STAGES = ("proposal", "pilot", "contract")
@@ -111,10 +112,12 @@ def draft_prompt(d: Dict[str, Any], action: Dict[str, Any], sender: str) -> Dict
     qual = d.get("qualification") or {}
     plan = [f"- {p['title']} ({p.get('side')}, due {p.get('due_date') or 'no date'}, {p.get('status')})"
             for p in (d.get("close_plan") or [])[:8]]
+    raw_step = d.get("next_step") or ""
+    clean_step = re.sub(r"^(?:(?:Our\s+)?Next\s+step(?:\s+is)?\s*[:\-–—]\s*)", "", raw_step, flags=re.IGNORECASE).strip() or raw_step
     facts = [f"Customer company: {d.get('account_name')}",
              f"Recipient: {t.get('name')}{', ' + t['title'] if t.get('title') else ''} (their role in the deal: {(t.get('role') or '').replace('_', ' ')})",
              f"Deal: {d.get('name')} — stage {STAGE_NAMES.get(d.get('stage'), d.get('stage'))}",
-             f"Our next step: {d.get('next_step') or 'none set'}" + (f" (due {d.get('next_step_due')})" if d.get("next_step_due") else "")]
+             f"Our next step: {clean_step or 'none set'}" + (f" (due {d.get('next_step_due')})" if d.get("next_step_due") else "")]
     for k, label in (("identify_pain", "Their pain"), ("metrics", "Success metrics"), ("decision_process", "Decision process")):
         if qual.get(k):
             facts.append(f"{label}: {str(qual[k])[:300]}")
@@ -122,7 +125,9 @@ def draft_prompt(d: Dict[str, Any], action: Dict[str, Any], sender: str) -> Dict
         facts.append("Close plan:\n" + "\n".join(plan))
     system = ("You write short, warm, specific B2B sales emails for StradIT (an IT services firm). Plain text, no "
               "placeholders in square brackets, no invented facts, no prices. 60-140 words. Reply ONLY with JSON: "
-              '{"subject": "...", "body": "..."}')
+              '{"subject": "...", "body": "..."}. '
+              'The subject line must be a natural, compelling customer-facing email subject line for the recipient. '
+              'Never include internal CRM labels or prefixes like "Next step:", "Our next step:", "Do or reschedule", or "Action:" in the subject.')
     user = (f"Goal of this email: {action['title']}.\nWhy now: {action['why']}\n\nWhat we know:\n" + "\n".join(facts)
             + f"\n\nSign it from {sender}. Write the email.")
     return {"system": system, "user": user}

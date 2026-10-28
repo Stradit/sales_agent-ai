@@ -64,8 +64,13 @@ async function loadDueSoon() {
   const data = await res.json();
   const cutoff = Date.now() + 7 * 86400000;
   return (data.action_items || [])
-    .filter(i => (i.status === 'open' || i.status === 'in_progress') && i.due_date && new Date(i.due_date).getTime() <= cutoff)
-    .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
+    .filter(i => (i.status === 'open' || i.status === 'in_progress') && (!i.due_date || new Date(i.due_date).getTime() <= cutoff))
+    .sort((a, b) => {
+      if (!a.due_date && !b.due_date) return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return new Date(a.due_date) - new Date(b.due_date);
+    })
     .slice(0, 10);
 }
 
@@ -95,6 +100,9 @@ function rowHtml(item) {
       <!-- Footer Row: Quick Micro-Actions -->
       <div class="cc-due-card-footer">
         <div class="cc-due-actions-group">
+          <button type="button" class="cc-due-btn cc-due-btn-edit" data-action="edit" title="Edit task details & due date">
+            <i class="fa-solid fa-pen-to-square"></i> <span>Edit</span>
+          </button>
           <button type="button" class="cc-due-btn cc-due-btn-remind" data-action="remind" title="Send email reminder to assignee">
             <i class="fa-regular fa-bell"></i> <span>Remind</span>
           </button>
@@ -241,6 +249,15 @@ export async function renderDueSoon() {
         btn.disabled = false;
         btn.innerHTML = originalHtml;
       }
+    });
+  });
+
+  // Edit listener
+  list.querySelectorAll('[data-action="edit"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.cc-due-card');
+      const itemId = card ? card.dataset.itemId : null;
+      if (itemId) window.location.href = `/tasks?edit=${itemId}`;
     });
   });
 }

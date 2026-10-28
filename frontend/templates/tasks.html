@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="css/action-items.css?v=1.0">
   <link rel="stylesheet" href="css/profile-page.css?v=3.1">
   <link rel="stylesheet" href="css/responsive.css?v=3.0">
-  <link rel="stylesheet" href="css/tasks-page.css?v=2.0">
+  <link rel="stylesheet" href="css/tasks-page.css?v=2.3">
   <link rel="stylesheet" href="css/elitehost.css?v=1.0">
 </head>
 <body>
@@ -52,30 +52,30 @@
         </div>
       </header>
 
-      <!-- Clean KPI Summary Metrics -->
-      <div class="tp-kpi-grid">
-        <div class="tp-kpi-card">
+      <!-- Enterprise KPI Summary Metrics -->
+      <div class="tp-kpi-grid" id="tpKpiGrid">
+        <div class="tp-kpi-card" data-kpi-action="open" title="Click to view open tasks">
           <div class="tp-kpi-icon icon-blue"><i class="fa-solid fa-list-check"></i></div>
           <div class="tp-kpi-info">
             <span class="tp-kpi-label">Open Tasks</span>
             <span class="tp-kpi-val" id="tpKpiOpen">0</span>
           </div>
         </div>
-        <div class="tp-kpi-card">
+        <div class="tp-kpi-card" data-kpi-action="overdue" title="Click to filter overdue tasks">
           <div class="tp-kpi-icon icon-red"><i class="fa-solid fa-triangle-exclamation"></i></div>
           <div class="tp-kpi-info">
             <span class="tp-kpi-label">Overdue</span>
             <span class="tp-kpi-val text-red" id="tpKpiOverdue">0</span>
           </div>
         </div>
-        <div class="tp-kpi-card">
+        <div class="tp-kpi-card" data-kpi-action="high" title="Click to filter high priority tasks">
           <div class="tp-kpi-icon icon-amber"><i class="fa-solid fa-bolt"></i></div>
           <div class="tp-kpi-info">
             <span class="tp-kpi-label">High Priority</span>
             <span class="tp-kpi-val text-amber" id="tpKpiHigh">0</span>
           </div>
         </div>
-        <div class="tp-kpi-card">
+        <div class="tp-kpi-card" data-kpi-action="accounts" title="Click to filter by accounts">
           <div class="tp-kpi-icon icon-purple"><i class="fa-solid fa-building"></i></div>
           <div class="tp-kpi-info">
             <span class="tp-kpi-label">Accounts Active</span>
@@ -84,30 +84,107 @@
         </div>
       </div>
 
-      <div class="panel">
-        <div class="tp-filter-row">
+      <!-- Main Enterprise Panel -->
+      <div class="panel tp-main-panel">
+        <!-- Single Unified Toolbar: Status Tabs & Filter Controls in the Same Line -->
+        <div class="tp-single-toolbar" id="tpSingleToolbar">
           <div id="tpStatusFilters" class="tp-status-tabs"></div>
-          <div class="tp-filter-controls">
+
+          <div class="tp-toolbar-filters">
             <div class="tp-search-wrap">
               <i class="fa-solid fa-magnifying-glass tp-search-icon"></i>
-              <input type="text" id="tpSearchInput" class="tp-input tp-search-input" placeholder="Search tasks, accounts, contacts...">
+              <input type="text" id="tpSearchInput" class="tp-search-input" placeholder="Search tasks..." autocomplete="off">
+              <button type="button" class="tp-search-clear" id="tpSearchClear" style="display:none;" title="Clear search">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
             </div>
-            <select id="tpAccountFilter" class="tp-select" title="Filter by account">
-              <option value="">All Accounts</option>
-            </select>
-            <select id="tpPriorityFilter" class="tp-select" title="Filter by priority">
-              <option value="">All Priorities</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-            <select id="tpSort" class="tp-select" title="Sort">
-              <option value="due">Sort: Due Date</option>
-              <option value="priority">Sort: Priority</option>
-              <option value="account">Sort: Account (A-Z)</option>
-              <option value="newest">Sort: Newest</option>
-            </select>
+
+            <!-- Multi-Account Filter Dropdown -->
+            <div class="tp-acct-filter-wrap" id="tpAcctFilterWrap">
+              <button type="button" class="tp-filter-btn" id="tpAcctFilterBtn" title="Filter tasks by accounts" aria-haspopup="true" aria-expanded="false">
+                <i class="fa-solid fa-building tp-filter-btn-icon"></i>
+                <span id="tpAcctFilterBtnText">All Accounts</span>
+                <span class="tp-acct-badge" id="tpAcctFilterCount" style="display:none;">0</span>
+                <i class="fa-solid fa-chevron-down tp-filter-btn-chevron"></i>
+              </button>
+
+              <div class="tp-acct-filter-menu" id="tpAcctFilterMenu" style="display:none;">
+                <div class="tp-acct-filter-menu-header">
+                  <span class="tp-af-header-title"><i class="fa-solid fa-building"></i> Filter by Accounts</span>
+                  <button type="button" class="tp-af-clear-btn" id="tpAcctFilterClearBtn" style="display:none;">Clear all</button>
+                </div>
+                <div class="tp-acct-filter-search-wrap">
+                  <i class="fa-solid fa-magnifying-glass tp-af-search-icon"></i>
+                  <input type="text" id="tpAcctFilterSearch" class="tp-acct-filter-search" placeholder="Search accounts..." autocomplete="off">
+                </div>
+                <div class="tp-acct-filter-menu-body">
+                  <button type="button" class="tp-acct-filter-option active" id="tpAcctFilterAllBtn">
+                    <div class="tp-acct-filter-opt-left">
+                      <span class="tp-acct-filter-check"><i class="fa-solid fa-check"></i></span>
+                      <span class="tp-acct-filter-opt-title">All Accounts</span>
+                    </div>
+                    <span class="tp-acct-filter-total-count" id="tpAcctFilterAllCount">0</span>
+                  </button>
+                  <div class="tp-acct-filter-divider"></div>
+                  <div class="tp-acct-filter-accounts-list" id="tpAcctFilterList">
+                    <!-- Populated dynamically -->
+                  </div>
+                </div>
+              </div>
+
+              <!-- Hidden select kept for backward compatibility -->
+              <select id="tpAccountFilter" class="tp-select" style="display:none;" title="Filter by account">
+                <option value="">All Accounts</option>
+              </select>
+            </div>
+
+            <!-- Priority Filter -->
+            <div class="tp-select-wrap">
+              <i class="fa-solid fa-flag tp-select-icon"></i>
+              <select id="tpPriorityFilter" class="tp-filter-select" title="Filter by priority">
+                <option value="">All Priorities</option>
+                <option value="high">High Priority</option>
+                <option value="medium">Medium Priority</option>
+                <option value="low">Low Priority</option>
+              </select>
+              <i class="fa-solid fa-chevron-down tp-select-chevron"></i>
+            </div>
+
+            <!-- Sort By -->
+            <div class="tp-select-wrap">
+              <i class="fa-solid fa-arrow-down-wide-short tp-select-icon"></i>
+              <select id="tpSort" class="tp-filter-select" title="Sort tasks">
+                <option value="due">Sort: Due</option>
+                <option value="priority">Sort: Priority</option>
+                <option value="account">Sort: Account</option>
+                <option value="newest">Sort: Newest</option>
+              </select>
+              <i class="fa-solid fa-chevron-down tp-select-chevron"></i>
+            </div>
+
+            <!-- Reset Filters -->
+            <button type="button" class="tp-reset-filters-btn" id="tpResetFiltersBtn" style="display:none;" title="Reset all active filters">
+              <i class="fa-solid fa-arrow-rotate-left"></i> Reset
+            </button>
+
+            <!-- Enterprise Layout View Switcher -->
+            <div class="tp-view-toggle" role="group" aria-label="Task layout view">
+              <button type="button" class="tp-view-btn active" data-view-mode="table" title="Enterprise Table View">
+                <i class="fa-solid fa-table-list"></i> Table
+              </button>
+              <button type="button" class="tp-view-btn" data-view-mode="cards" title="Compact Cards View">
+                <i class="fa-solid fa-border-all"></i> Cards
+              </button>
+            </div>
           </div>
+        </div>
+
+        <!-- Active Multi-Account Filter Tags -->
+        <div class="tp-selected-account-tags" id="tpSelectedAccountTags" style="display:none;"></div>
+
+        <!-- Enterprise Table Summary Counter Bar -->
+        <div class="tp-table-meta-bar" id="tpTableMetaBar">
+          <span class="tp-results-count" id="tpResultsCount"></span>
         </div>
 
         <div id="tpListBody">
@@ -147,9 +224,10 @@
         </div>
         <div class="tp-form-group">
           <label for="tpFormPersona" class="tp-label">Contact / Persona (Optional)</label>
-          <select id="tpFormPersona" class="tp-select tp-select-full">
-            <option value="">Select account first...</option>
+          <select id="tpFormPersona" class="tp-select tp-select-full" disabled title="Please select a target account first">
+            <option value="">Select an account first...</option>
           </select>
+          <span class="tp-form-hint" id="tpFormPersonaHint" style="font-size:0.73rem; color:var(--text-muted); margin-top:2px;">Select an account first to choose a contact</span>
         </div>
       </div>
 
@@ -176,10 +254,11 @@
       </div>
 
       <div class="tp-form-group">
-        <label for="tpFormAssignee" class="tp-label">Assignee</label>
+        <label for="tpFormAssignee" class="tp-label">Assignee (Sales Team Only)</label>
         <select id="tpFormAssignee" class="tp-select tp-select-full">
-          <option value="">Assign to me (default)</option>
+          <option value="">Select sales rep / assignee...</option>
         </select>
+        <span class="tp-form-hint" style="font-size:0.73rem; color:var(--text-muted); margin-top:2px;">Tasks can only be assigned to sales team users, not high-authority roles.</span>
       </div>
 
       <div class="tp-form-group">
@@ -199,11 +278,77 @@
   </div>
 </div>
 
+<!-- Clean & Focused "Close Ticket" Modal -->
+<div class="tp-modal-backdrop" id="tpCloseModalBackdrop" style="display:none;">
+  <div class="tp-modal-card" style="max-width: 480px;" role="dialog" aria-modal="true" aria-labelledby="tpCloseModalTitle">
+    <div class="tp-modal-header">
+      <div class="tp-modal-title-wrap">
+        <div class="tp-modal-icon" style="background: rgba(16, 185, 129, 0.12); color: #10b981;">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div>
+          <h2 class="tp-modal-title" id="tpCloseModalTitle">Close Ticket</h2>
+          <p class="tp-modal-subtitle">Add a closing comment or resolution reason for this ticket</p>
+        </div>
+      </div>
+      <button type="button" class="tp-modal-close" id="tpCloseModalCloseBtn" aria-label="Close modal">&times;</button>
+    </div>
+
+    <form id="tpCloseTaskForm" class="tp-modal-form">
+      <input type="hidden" id="tpCloseTaskId" value="">
+      <div class="tp-form-group">
+        <label for="tpCloseComment" class="tp-label">Closing Reason / Resolution Comment <span class="tp-req">*</span></label>
+        <textarea id="tpCloseComment" class="tp-textarea" rows="3" placeholder="e.g. Completed client presentation; proposal sent and agreed..." required></textarea>
+      </div>
+
+      <div class="tp-modal-footer">
+        <button type="button" class="tp-btn-secondary" id="tpCloseModalCancelBtn">Cancel</button>
+        <button type="submit" class="tp-btn-primary" id="tpCloseSubmitBtn" style="background:#10b981; border-color:#10b981;">
+          <i class="fa-solid fa-check"></i> Confirm & Close Ticket
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Clean & Focused "Reopen Ticket" Modal -->
+<div class="tp-modal-backdrop" id="tpReopenModalBackdrop" style="display:none;">
+  <div class="tp-modal-card" style="max-width: 480px;" role="dialog" aria-modal="true" aria-labelledby="tpReopenModalTitle">
+    <div class="tp-modal-header">
+      <div class="tp-modal-title-wrap">
+        <div class="tp-modal-icon" style="background: rgba(14, 165, 233, 0.12); color: #0284c7;">
+          <i class="fa-solid fa-rotate-left"></i>
+        </div>
+        <div>
+          <h2 class="tp-modal-title" id="tpReopenModalTitle">Reopen Ticket</h2>
+          <p class="tp-modal-subtitle">Provide a reason or context for reopening this ticket</p>
+        </div>
+      </div>
+      <button type="button" class="tp-modal-close" id="tpReopenModalCloseBtn" aria-label="Close modal">&times;</button>
+    </div>
+
+    <form id="tpReopenTaskForm" class="tp-modal-form">
+      <input type="hidden" id="tpReopenTaskId" value="">
+      <div class="tp-form-group">
+        <label for="tpReopenComment" class="tp-label">Reopen Reason <span class="tp-req">*</span></label>
+        <textarea id="tpReopenComment" class="tp-textarea" rows="3" placeholder="e.g. Client requested contract scope amendments or additional deliverables..." required></textarea>
+      </div>
+
+      <div class="tp-modal-footer">
+        <button type="button" class="tp-btn-secondary" id="tpReopenModalCancelBtn">Cancel</button>
+        <button type="submit" class="tp-btn-primary" id="tpReopenSubmitBtn" style="background:#0284c7; border-color:#0284c7;">
+          <i class="fa-solid fa-rotate-left"></i> Confirm & Reopen Ticket
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 {% include "partials/drawer.html" %}
 
-<script type="module" src="js/modules/tasks-page/main.js?v=5.0"></script>
+<script type="module" src="js/modules/tasks-page/main.js?v=5.2"></script>
 {% include "partials/copilot-dock.html" %}
 </body>
 </html>

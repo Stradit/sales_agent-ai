@@ -80,7 +80,7 @@ function sortValue(d, key) {
 }
 
 function listRows() {
-  const attn = c.$('dlAttention').checked;
+  const attn = !!(c.$('dlAttention') && c.$('dlAttention').checked);
   const now = new Date();
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
@@ -224,7 +224,7 @@ async function loadInsights() {
   const box = c.$('dlInsights');
   const p = new URLSearchParams({ days: String(v.days) });
   if (c.$('dlBusinessLine').value) p.set('business_line_id', c.$('dlBusinessLine').value);
-  if (c.$('dlMine').checked) p.set('mine', 'true');
+  if (c.$('dlMine') && c.$('dlMine').checked) p.set('mine', 'true');
   if (!v.insights) box.innerHTML = '<p class="dl-muted">Loading insights…</p>';
   try { v.insights = await c.api(`/analytics?${p}`); renderInsights(); }
   catch (err) { box.innerHTML = `<p class="dl-warn">${c.esc(err.message)}</p>`; }
@@ -236,7 +236,7 @@ const bar = (n, max, cls = '') => `<span class="dl-bar ${cls}"><span style="widt
 function renderInsights() {
   const a = v.insights;
   const t = a.totals;
-  const scope = [c.$('dlMine').checked ? 'your deals' : 'deals you can see',
+  const scope = [(c.$('dlMine') && c.$('dlMine').checked) ? 'your deals' : 'deals you can see',
     c.$('dlBusinessLine').value ? c.$('dlBusinessLine').selectedOptions[0].textContent : ''].filter(Boolean).join(' · ');
   const periods = [[90, 'Last 90 days'], [180, 'Last 6 months'], [365, 'Last 12 months'], [730, 'Last 2 years']];
   const closedN = t.won + t.lost;
@@ -316,14 +316,15 @@ async function loadSaved() {
 
 function currentState() {
   return { view: v.view, status: v.status, close: v.close, sort: v.sort, dir: v.dir, days: v.days,
-    mine: c.$('dlMine').checked, attention: c.$('dlAttention').checked,
+    mine: !!(c.$('dlMine') && c.$('dlMine').checked), attention: !!(c.$('dlAttention') && c.$('dlAttention').checked),
     account: c.$('dlAccount').value || '', business_line: c.$('dlBusinessLine').value || '', q: c.$('dlSearch').value.trim() };
 }
 
 async function applyState(s, id) {
   v.status = s.status || 'open'; v.close = s.close || ''; v.sort = s.sort || 'updated_at'; v.dir = s.dir || 'desc';
   v.days = s.days || v.days;
-  c.$('dlMine').checked = !!s.mine; c.$('dlAttention').checked = !!s.attention;
+  if (c.$('dlMine')) c.$('dlMine').checked = !!s.mine;
+  if (c.$('dlAttention')) c.$('dlAttention').checked = !!s.attention;
   c.$('dlAccount').value = s.account || ''; c.$('dlBusinessLine').value = s.business_line || ''; c.$('dlSearch').value = s.q || '';
   v.activeView = id;
   setView(s.view || 'list');
@@ -361,7 +362,14 @@ function wireSaved() {
       catch (err) { c.showToast(err.message); }
       return;
     }
-    if (t.closest('[data-save-view]')) { c.$('dlSaveForm').hidden = false; t.closest('[data-save-view]').hidden = true; c.$('dlSaveName').focus(); return; }
+    const saveTrigger = t.closest('[data-save-view]');
+    if (saveTrigger) {
+      c.$('dlSaveForm').hidden = false;
+      saveTrigger.hidden = true;
+      c.$('dlSaveName').value = '';
+      c.$('dlSaveName').focus();
+      return;
+    }
     if (t.closest('[data-save-cancel]')) { renderSaved(); return; }
     if (t.closest('[data-save-go]')) { await saveCurrent(); }
   });

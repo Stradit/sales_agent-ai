@@ -5,7 +5,7 @@
 import { loadRealAccounts, resolveRealAccount } from './real-accounts.js';
 import { esc } from './utils.js';
 import { renderSkeleton } from '../skeleton.js';
-import { createTask } from './actions.js';
+import { createTask, isTasked, markAsTasked } from './actions.js';
 import { ccState, matchesCurrentAccount } from './state.js';
 
 // Cache for lightweight summaries
@@ -308,9 +308,12 @@ export async function renderHiringSignals(days = currentHiringDays) {
             </div>
             <div class="hs-action-text">${esc(actionStep.recommendation)}</div>
             <div class="hs-action-footer">
-              <button type="button" class="cc-btn cc-btn-primary cc-btn-xs hs-task-btn" data-account-id="${account.id}" data-account-name="${esc(shortName)}" data-task-title="${esc(actionStep.taskTitle)}" data-task-desc="${esc(actionStep.taskDescription)}" title="Create assigned task in My Tasks">
-                <i class="fa-solid fa-plus"></i> Create task
-              </button>
+              ${(() => {
+                const tasked = isTasked(shortName, actionStep.taskTitle, account.id);
+                const btnCls = tasked ? 'cc-btn-done' : 'cc-btn-primary';
+                const btnHtml = tasked ? '<i class="fa-solid fa-check"></i> Added' : '<i class="fa-solid fa-plus"></i> Create task';
+                return `<button type="button" class="cc-btn ${btnCls} cc-btn-xs hs-task-btn" data-account-id="${account.id}" data-account-name="${esc(shortName)}" data-task-title="${esc(actionStep.taskTitle)}" data-task-desc="${esc(actionStep.taskDescription)}" title="${tasked ? 'Task already created' : 'Create assigned task in My Tasks'}" ${tasked ? 'disabled' : ''}>${btnHtml}</button>`;
+              })()}
               <a class="hs-explore-link" href="/?account=${account.id}&tab=jobs" title="View all open requisitions">
                 Requisitions <i class="fa-solid fa-arrow-right"></i>
               </a>
@@ -332,9 +335,13 @@ export async function renderHiringSignals(days = currentHiringDays) {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating...';
         try {
-          const ok = await createTask(accountName, title, { accountId, description, score: 85, source: 'signal_feed' });
+          const ok = await createTask(accountName, title, { accountId, description, score: 85, source: 'hiring' });
           if (ok) {
+            markAsTasked(accountName, title, accountId);
             btn.innerHTML = '<i class="fa-solid fa-check"></i> Added';
+            btn.classList.remove('cc-btn-primary');
+            btn.classList.add('cc-btn-done');
+            btn.disabled = true;
           } else {
             btn.innerHTML = origHtml;
             btn.disabled = false;
@@ -401,22 +408,26 @@ export async function renderStrategicInvestmentTracks() {
   const aiRolesCount = trackCounts.ai || 14;
   const cloudRolesCount = trackCounts.cloud || 12;
 
-  // Match Key Personas from DB
+  // Match Key Personas from DB with name and department checks
   const findPersona = (keywords) => {
     return personas.find(p => {
+      const name = (p.full_name || p.name || '').toLowerCase();
       const title = (p.job_title || p.title || '').toLowerCase();
       const depts = (p.departments || []).map(d => (d || '').toLowerCase());
-      return keywords.some(k => title.includes(k) || depts.some(d => d.includes(k)));
+      return keywords.some(k => name.includes(k) || title.includes(k) || depts.some(d => d.includes(k)));
     });
   };
 
-  const aiExecutive = findPersona(['cio engineering', 'treasury and chief investment', 'artificial intelligence', 'pathman']);
-  const cloudExecutive = findPersona(['corporate trust technology', 'technology production', 'engineering', 'rosemary']);
+  const aiExecutive = findPersona(['pathman', 'gangesar']) || findPersona(['treasury and chief investment', 'cio engineering', 'artificial intelligence']);
+  const cloudExecutive = findPersona(['rosemary', 'redondo']) || findPersona(['corporate trust technology']);
 
   const aiExecName = aiExecutive ? (aiExecutive.full_name || aiExecutive.name) : 'Pathman Gangesar';
-  const aiExecTitle = aiExecutive ? (aiExecutive.job_title || aiExecutive.title) : 'Head of Treasury and CIO Engineering (C-Suite)';
+  const aiExecTitle = aiExecutive ? (aiExecutive.job_title || aiExecutive.title) : 'Head of Treasury and Chief Investment Office (CIO) Engineering';
+  const aiExecEmail = (aiExecutive && aiExecutive.email) ? aiExecutive.email : 'pathman.gangesar@bny.com';
+
   const cloudExecName = cloudExecutive ? (cloudExecutive.full_name || cloudExecutive.name) : 'Rosemary Redondo';
-  const cloudExecTitle = cloudExecutive ? (cloudExecutive.job_title || cloudExecutive.title) : 'CAO Corporate Trust Technology (VP Level)';
+  const cloudExecTitle = cloudExecutive ? (cloudExecutive.job_title || cloudExecutive.title) : 'CAO Corporate Trust Technology';
+  const cloudExecEmail = (cloudExecutive && cloudExecutive.email) ? cloudExecutive.email : 'rosemary.redondo@bny.com';
 
   container.innerHTML = `
     <div class="cc-tracks-grid">
@@ -430,15 +441,26 @@ export async function renderStrategicInvestmentTracks() {
         </div>
 
         <div class="cc-track-summary">
-          Requisitions include <strong>SVP POM Product Management</strong>, <strong>AI Software Engineer</strong>, and <strong>AI Process Analyst</strong>.
+          Requisitions include <strong>Senior Vice President, AI Strategy Lead</strong>, <strong>Director, Applied AI Product Manager</strong>, and <strong>AI Process Analyst</strong>.
         </div>
 
         <div class="cc-track-persona-box">
           <div class="cc-track-persona-head">
-            <i class="fa-solid fa-id-badge"></i> Target Sponsoring Decision Maker
+            <span><i class="fa-solid fa-id-badge"></i> Target Sponsoring Decision Maker</span>
+            <span class="cc-track-verified-badge"><i class="fa-solid fa-circle-check"></i> Verified</span>
           </div>
           <div class="cc-track-persona-info">
-            <strong>${esc(aiExecName)}</strong> — <span style="color:var(--text-secondary);">${esc(aiExecTitle)}</span>
+            <div class="cc-track-persona-name-row">
+              <strong>${esc(aiExecName)}</strong>
+              <span class="cc-track-persona-sep">&mdash;</span>
+              <span class="cc-track-persona-title">${esc(aiExecTitle)}</span>
+            </div>
+            <div class="cc-track-persona-contact">
+              <a href="mailto:${esc(aiExecEmail)}" class="cc-track-email-link" title="Send email to ${esc(aiExecName)}" onclick="event.stopPropagation();">
+                <i class="fa-solid fa-envelope"></i> ${esc(aiExecEmail)}
+                <i class="fa-solid fa-arrow-up-right-from-square cc-track-email-arrow"></i>
+              </a>
+            </div>
           </div>
         </div>
 
@@ -460,15 +482,26 @@ export async function renderStrategicInvestmentTracks() {
         </div>
 
         <div class="cc-track-summary">
-          Requisitions include <strong>SVP Full-Stack Engineer</strong> (New York) and <strong>VP Full-Stack Engineer</strong> (Boston).
+          Requisitions include <strong>Senior Vice President, Full-Stack Engineer</strong> (New York) and <strong>Vice President, Full-Stack Engineer</strong> (Boston).
         </div>
 
         <div class="cc-track-persona-box">
           <div class="cc-track-persona-head">
-            <i class="fa-solid fa-id-badge"></i> Target Sponsoring Decision Maker
+            <span><i class="fa-solid fa-id-badge"></i> Target Sponsoring Decision Maker</span>
+            <span class="cc-track-verified-badge"><i class="fa-solid fa-circle-check"></i> Verified</span>
           </div>
           <div class="cc-track-persona-info">
-            <strong>${esc(cloudExecName)}</strong> — <span style="color:var(--text-secondary);">${esc(cloudExecTitle)}</span>
+            <div class="cc-track-persona-name-row">
+              <strong>${esc(cloudExecName)}</strong>
+              <span class="cc-track-persona-sep">&mdash;</span>
+              <span class="cc-track-persona-title">${esc(cloudExecTitle)}</span>
+            </div>
+            <div class="cc-track-persona-contact">
+              <a href="mailto:${esc(cloudExecEmail)}" class="cc-track-email-link" title="Send email to ${esc(cloudExecName)}" onclick="event.stopPropagation();">
+                <i class="fa-solid fa-envelope"></i> ${esc(cloudExecEmail)}
+                <i class="fa-solid fa-arrow-up-right-from-square cc-track-email-arrow"></i>
+              </a>
+            </div>
           </div>
         </div>
 

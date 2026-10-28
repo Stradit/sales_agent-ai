@@ -60,8 +60,9 @@ export function mountTimeline(el, ctx) {
   function linkChips(a) {
     return a.links.filter(l => `${l.object_type}:${l.object_id}` !== selfKey && !(l.object_type === 'account' && ctx.objectType !== 'account' && l.matched_by === 'derived'))
       .map(l => {
+        const fromPath = encodeURIComponent(window.location.pathname + window.location.search);
         const href = l.object_type === 'deal' ? `/deals?deal=${l.object_id}` : l.object_type === 'introduction' ? `/introductions?intro=${l.object_id}`
-          : l.object_type === 'persona' ? `/profile?account=${l.persona_account_id}&persona_id=${l.object_id}` : `/?account=${l.object_id}`;
+          : l.object_type === 'persona' ? `/profile?account=${l.persona_account_id}&persona_id=${l.object_id}&from=${fromPath}` : `/?account=${l.object_id}`;
         return `<a class="at-chip" href="${href}"><i class="fa-solid ${OBJ_ICON[l.object_type]}"></i> ${esc(l.name || l.object_type)}</a>`;
       }).join('');
   }
@@ -104,6 +105,7 @@ export function mountTimeline(el, ctx) {
 
   function render() {
     const types = Object.keys(st.counts);
+    const canMarkMeetingHeld = (ctx.objectType === 'introduction' || ctx.introductionId) && !['meeting_held', 'converted', 'declined', 'stale'].includes(ctx.introStatus);
     el.innerHTML = `<div class="at">
       <div class="at-bar">
         <div class="at-filters" role="group" aria-label="Filter by type">
@@ -128,6 +130,7 @@ export function mountTimeline(el, ctx) {
         ${accountId && ctx.objectType !== 'persona' ? `<div class="at-people"><input name="peopleSearch" placeholder="Who was involved? Search contacts…" aria-label="Search contacts">
           <div class="at-picked" data-picked></div><div class="at-suggest" data-suggest hidden></div></div>` : ''}
         <div class="at-row at-foot"><label class="at-check"><input type="checkbox" name="private"> Private (only me)</label>
+          ${canMarkMeetingHeld ? `<label class="at-check" title="Advance introduction status to Meeting held"><input type="checkbox" name="markIntroMeetingHeld"> Mark introduction as &ldquo;Meeting held&rdquo;</label>` : ''}
           <span class="at-spacer"></span><button type="button" class="at-btn" data-cancel>Cancel</button><button type="submit" class="at-btn primary">Save</button></div>
       </form>
       <form class="at-form" data-form="transcript" hidden>
@@ -140,6 +143,7 @@ export function mountTimeline(el, ctx) {
         </div>
         <input name="subject" maxlength="300" placeholder="Subject (optional)" aria-label="Subject">
         <div class="at-row at-foot"><label class="at-check"><input type="checkbox" name="private"> Private (only me)</label>
+          ${canMarkMeetingHeld ? `<label class="at-check" title="Advance introduction status to Meeting held"><input type="checkbox" name="markIntroMeetingHeld"> Mark introduction as &ldquo;Meeting held&rdquo;</label>` : ''}
           <span class="at-spacer"></span><button type="button" class="at-btn" data-cancel>Cancel</button><button type="submit" class="at-btn primary">Upload</button></div>
       </form>
       <div class="at-list-wrap">${listHtml()}</div>
@@ -251,11 +255,14 @@ export function mountTimeline(el, ctx) {
       const when = form.when.value ? new Date(form.when.value).toISOString() : null;
       const duration = form.duration.value === '' ? null : Number(form.duration.value);
       const visibility = form.private.checked ? 'private' : 'team';
+      const canMarkMeetingHeld = (ctx.objectType === 'introduction' || ctx.introductionId) && !['meeting_held', 'converted', 'declined', 'stale'].includes(ctx.introStatus);
+      const markIntro = form.elements.markIntroMeetingHeld ? form.elements.markIntroMeetingHeld.checked : (canMarkMeetingHeld ? false : null);
       if (form.dataset.form === 'log') {
         const res = await api('/api/crm/activities', { method: 'POST', body: {
           type: form.querySelector('input[name="atType"]:checked').value, direction: form.direction.value || null,
           subject: form.subject.value.trim() || null, summary: form.summary.value.trim() || null, occurred_at: when,
           duration_min: duration, visibility, links: baseLinks(), participant_persona_ids: [...st.picked.keys()],
+          mark_intro_meeting_held: markIntro,
         } });
         st.picked.clear();
         showToast(`${res.type_label} logged`);
@@ -268,6 +275,7 @@ export function mountTimeline(el, ctx) {
           deal_id: ctx.dealId || (ctx.objectType === 'deal' ? ctx.objectId : null),
           introduction_id: ctx.introductionId || (ctx.objectType === 'introduction' ? ctx.objectId : null),
           subject: form.subject.value.trim() || null, occurred_at: when, duration_min: duration, visibility,
+          mark_intro_meeting_held: markIntro,
         } });
         showToast(`Transcript added — ${res.matched_contacts} contact${res.matched_contacts === 1 ? '' : 's'} matched, ${res.action_items.length} action item${res.action_items.length === 1 ? '' : 's'}`
           + (res.unmatched_speakers.length ? `; not matched: ${res.unmatched_speakers.slice(0, 3).join(', ')}` : ''));

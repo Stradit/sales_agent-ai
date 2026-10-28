@@ -51,7 +51,9 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _base_url() -> str:
+def _base_url(req: Optional[Request] = None) -> str:
+    if req is not None:
+        return str(req.base_url).rstrip("/")
     return os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
@@ -105,11 +107,11 @@ def _deal(s, deal_id: int, user) -> Dict[str, Any]:
     return _get_deal_row(s, deal_id, user)
 
 
-def _room_out(s, row) -> Dict[str, Any]:
+def _room_out(s, row, req: Optional[Request] = None) -> Dict[str, Any]:
     if not row:
         return {"room": None}
     try:
-        link = f"{_base_url()}/room/{crypto.unseal(row['token_enc'])['t']}"
+        link = f"{_base_url(req)}/room/{crypto.unseal(row['token_enc'])['t']}"
     except Exception:                                    # key rotated: the link can't be shown any more
         link = None
     now = datetime.now(timezone.utc)
@@ -126,13 +128,13 @@ def _active(s, deal_id: int):
 
 
 @router.get("/{deal_id}/room")
-def get_room(deal_id: int, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+def get_room(deal_id: int, request: Request, user: User = Depends(auth.get_current_user), s=Depends(_session)):
     _deal(s, deal_id, user)
-    return _room_out(s, _active(s, deal_id))
+    return _room_out(s, _active(s, deal_id), req=request)
 
 
 @router.post("/{deal_id}/room")
-def create_room(deal_id: int, body: RoomIn, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+def create_room(deal_id: int, body: RoomIn, request: Request, user: User = Depends(auth.get_current_user), s=Depends(_session)):
     """Creates the buyer room — or replaces its link: the old link stops working immediately."""
     from apps.sales_deals.api import _log
     deal = _deal(s, deal_id, user)
@@ -151,11 +153,11 @@ def create_room(deal_id: int, body: RoomIn, user: User = Depends(auth.get_curren
                "n": (note or "").strip() or None, "r": json.dumps(resources), "u": user.id, "days": body.days})
     _log(s, deal_id, user.id, "field", "Buyer room: new link created" + (" (the old link no longer works)" if old else ""))
     s.commit()
-    return _room_out(s, _active(s, deal_id))
+    return _room_out(s, _active(s, deal_id), req=request)
 
 
 @router.patch("/{deal_id}/room")
-def update_room(deal_id: int, body: RoomIn, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+def update_room(deal_id: int, body: RoomIn, request: Request, user: User = Depends(auth.get_current_user), s=Depends(_session)):
     """Changes what the room shows; the link stays the same."""
     _deal(s, deal_id, user)
     room = _active(s, deal_id)
@@ -174,7 +176,7 @@ def update_room(deal_id: int, body: RoomIn, user: User = Depends(auth.get_curren
     if sets:
         s.execute(text(f"UPDATE deal_buyer_rooms SET {', '.join(sets)} WHERE id = :i"), params)
         s.commit()
-    return _room_out(s, _active(s, deal_id))
+    return _room_out(s, _active(s, deal_id), req=request)
 
 
 @router.delete("/{deal_id}/room")

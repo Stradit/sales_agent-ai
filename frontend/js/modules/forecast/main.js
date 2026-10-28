@@ -399,48 +399,31 @@ async function saveFx(currency, rate) {
   } catch (err) { showToast(err.message); }
 }
 
-// One floating tooltip for every ⓘ button: fixed-position, so table scroll boxes never clip it.
-function wireTips() {
-  const tip = document.createElement('div');
-  tip.className = 'fc-tooltip';
-  tip.setAttribute('role', 'tooltip');
-  tip.hidden = true;
-  document.body.appendChild(tip);
-  const show = (b) => {
-    tip.textContent = TERMS[b.dataset.term] || '';
-    tip.hidden = false;
-    const r = b.getBoundingClientRect();
-    const left = Math.max(8, Math.min(r.left + r.width / 2 - tip.offsetWidth / 2, window.innerWidth - tip.offsetWidth - 8));
-    const top = r.bottom + 6 + tip.offsetHeight > window.innerHeight ? r.top - tip.offsetHeight - 6 : r.bottom + 6;
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
-  };
-  const hide = () => { tip.hidden = true; };
-  ['mouseover', 'focusin'].forEach(ev => document.addEventListener(ev, (e) => { const b = e.target.closest('.fc-info'); if (b) show(b); }));
-  ['mouseout', 'focusout'].forEach(ev => document.addEventListener(ev, (e) => { if (e.target.closest('.fc-info')) hide(); }));
-  document.addEventListener('click', (e) => { const b = e.target.closest('.fc-info'); if (b) { e.stopPropagation(); show(b); } }, true);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
-  window.addEventListener('scroll', hide, { passive: true });
-}
-
-// Leadership view: hides deal-level detail and groups by business line; kept in the URL (?view=exec) to share.
-function setGroupBy(g) {
-  st.groupBy = g;
-  document.querySelectorAll('.fc-seg button').forEach(x => x.classList.toggle('active', x.dataset.group === g));
-}
-
-function setExec(on) {
-  st.exec = on;
-  document.body.classList.toggle('fc-exec', on);
-  $('fcExecBtn').setAttribute('aria-pressed', String(on));
-  $('fcExecBtn').classList.toggle('active', on);
-  if (on) { st.prevGroupBy = st.groupBy; setGroupBy('business_line'); } else setGroupBy(st.prevGroupBy || 'owner');
-  st.dealFilter = null;
+function wireBack() {
+  const btn = $('fcBack');
+  if (!btn) return;
+  btn.addEventListener('click', (e) => {
+    let internal = false;
+    let isCrmSibling = false;
+    try {
+      const ref = document.referrer ? new URL(document.referrer) : null;
+      internal = !!ref && ref.origin === location.origin && ref.pathname !== location.pathname && !ref.pathname.startsWith('/login');
+      if (ref && ['/deals', '/email-sync', '/introductions'].includes(ref.pathname)) {
+        isCrmSibling = true;
+      }
+    } catch { /* ignore */ }
+    if (internal && !isCrmSibling && history.length > 1) {
+      e.preventDefault();
+      history.back();
+    } else {
+      e.preventDefault();
+      location.assign('/accounts');
+    }
+  });
 }
 
 function wire() {
-  wireTips();
-  $('fcExecBtn').addEventListener('click', () => { setExec(!st.exec); load(); });
+  wireBack();
   ['fcPeriod', 'fcBusinessLine', 'fcOwner'].forEach(id => $(id).addEventListener('change', () => { st.dealFilter = null; load(); }));
   document.querySelector('.fc-seg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-group]');

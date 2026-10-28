@@ -240,9 +240,10 @@ if FASTAPI_AVAILABLE:
 
     def _user_public(u: User) -> Dict[str, Any]:
         is_sa = u.role == "super_admin"
+        role_label = auth.ROLE_LABELS.get(u.role, u.role.replace("_", " ").title() if u.role else "Sales Rep")
         return {
             "id": u.id, "email": u.email, "full_name": u.full_name,
-            "role": u.role, "is_active": u.is_active,
+            "role": u.role, "role_label": role_label, "is_active": u.is_active,
             "has_dashboard_access": is_sa or (u.has_dashboard_access if u.has_dashboard_access is not None else True),
             "has_command_center_access": is_sa or (u.has_command_center_access if u.has_command_center_access is not None else True),
             "has_tasks_access": is_sa or (u.has_tasks_access if u.has_tasks_access is not None else True),
@@ -446,48 +447,40 @@ if FASTAPI_AVAILABLE:
                 "grant access to specific accounts shortly; ask them if you need "
                 "one urgently."
             )
+            # One invitation email whose only button sets the password: an
+            # admin-set temp password is a worse first-run experience than the
+            # user picking their own, and never having to see the temp password
+            # anywhere (audit log, admin's clipboard) is a small but real
+            # security win. Setting it is also what lets them sign in, so a
+            # separate "Sign In" welcome email only adds noise.
+            reset_token = auth.issue_password_reset_token(
+                session, new_user, expire_minutes=auth.INVITE_TOKEN_EXPIRE_HOURS * 60)
+            reset_link = f"{base_url}/reset-password?token={reset_token}"
+            invited_by = current.full_name or current.email
+            expiry_note = (
+                f"This link expires in {auth.INVITE_TOKEN_EXPIRE_HOURS} hours. If it has expired, "
+                f"use \"Forgot password\" on the sign-in page ({base_url}/login) to get a new one."
+            )
             background_tasks.add_task(
                 email_sender.send_email,
                 new_user.email,
-                "Welcome to Doshin",
+                "You're invited to Doshin - set your password",
                 (
                     f"Hi {new_user.full_name or new_user.email},\n\n"
-                    f"An account has been created for you on Doshin by "
-                    f"{current.full_name or current.email}.\n\n"
+                    f"{invited_by} has invited you to Doshin.\n\n"
                     f"Email: {new_user.email}\nRole: {new_user.role}\n\n"
                     f"Access: {access_note}\n\n"
-                    f"Sign in here: {base_url}/login\n"
-                    "You'll receive a separate email shortly to set your own password.\n"
+                    f"Set your password to activate your account:\n{reset_link}\n\n"
+                    f"{expiry_note}\n"
                 ),
                 html_body=email_sender.render_html(
                     "Welcome to Doshin",
                     [f"Hi {new_user.full_name or new_user.email},",
-                     f"An account has been created for you by {current.full_name or current.email}.",
+                     f"{invited_by} has invited you to Doshin. Set your password to activate your account.",
                      f"Email: {new_user.email}  •  Role: {new_user.role}",
                      access_note],
-                    cta_label="Sign In", cta_url=f"{base_url}/login",
-                    footnote="You'll receive a separate email shortly to set your own password.",
-                ),
-            )
-
-            # An admin-set temp password is a worse first-run experience
-            # than the user picking their own — and never having to see the
-            # temp password anywhere (audit log, admin's clipboard) is a
-            # small but real security win.
-            reset_token = auth.issue_password_reset_token(session, new_user)
-            reset_link = f"{base_url}/reset-password?token={reset_token}"
-            background_tasks.add_task(
-                email_sender.send_email,
-                new_user.email, "Set your Doshin password",
-                f"Hi {new_user.full_name or new_user.email},\n\n"
-                "Set your password to finish setting up your account "
-                f"(expires in {auth.RESET_TOKEN_EXPIRE_MINUTES} minutes):\n{reset_link}\n",
-                html_body=email_sender.render_html(
-                    "Set your password",
-                    [f"Hi {new_user.full_name or new_user.email},",
-                     "One last step to finish setting up your account — choose your own password."],
                     cta_label="Set Password", cta_url=reset_link,
-                    footnote=f"This link expires in {auth.RESET_TOKEN_EXPIRE_MINUTES} minutes.",
+                    footnote=expiry_note,
                 ),
             )
             return _user_public(new_user)
@@ -981,6 +974,9 @@ if FASTAPI_AVAILABLE:
         priority: Optional[str] = None
         due_date: Optional[str] = None
         assigned_to_id: Optional[int] = None
+
+    class ActionItemCompleteRequest(BaseModel):
+        comment: Optional[str] = None
 
     # ══════════════════════════════════════════════════════
     # TAB 1: ACCOUNT LEVEL ENDPOINTS
@@ -6138,20 +6134,29 @@ if FASTAPI_AVAILABLE:
                 assignee = session.query(User).filter_by(id=body.assigned_to_id).first()
                 if not assignee:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
-                if assignee.role in ("super_admin", "admin"):
-                    raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in ("super_admin", "admin", "sales_manager"):
+                    raise HTTPException(status_code=400, detail="Tasks can only be assigned to sales team members, not high-authority roles (administrators or managers).")
                 if assignee.role in auth.READ_ONLY_ROLES:
                     raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
-            item = ActionItem(
-                account_id=account_id, persona_id=body.persona_id, title=body.title,
-                description=body.description, priority=body.priority,
-                status=body.status if body.status in ("open", "in_progress", "done") else "open",
-                due_date=_parse_due_date(body.due_date), assigned_to_id=body.assigned_to_id,
-                created_by_id=user.id, source=body.source,
-            )
-            session.add(item)
-            session.commit()
-            session.refresh(item)
+            # Avoid creating duplicates if an identical open action item already exists
+            existing = (session.query(ActionItem)
+                        .filter(ActionItem.account_id == account_id,
+                                ActionItem.title == body.title,
+                                ActionItem.status.in_(("open", "in_progress", "pending_review")))
+                        .first())
+            if existing:
+                item = existing
+            else:
+                item = ActionItem(
+                    account_id=account_id, persona_id=body.persona_id, title=body.title,
+                    description=body.description, priority=body.priority,
+                    status=body.status if body.status in ("open", "in_progress", "done") else "open",
+                    due_date=_parse_due_date(body.due_date), assigned_to_id=body.assigned_to_id,
+                    created_by_id=user.id, source=body.source,
+                )
+                session.add(item)
+                session.commit()
+                session.refresh(item)
             item = (session.query(ActionItem)
                     .options(selectinload(ActionItem.persona), selectinload(ActionItem.assigned_to),
                              selectinload(ActionItem.created_by))
@@ -6191,8 +6196,8 @@ if FASTAPI_AVAILABLE:
                 assignee = session.query(User).filter_by(id=assigned_id).first()
                 if not assignee:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
-                if assignee.role in ("super_admin", "admin"):
-                    raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in ("super_admin", "admin", "sales_manager"):
+                    raise HTTPException(status_code=400, detail="Tasks can only be assigned to sales team members, not high-authority roles (administrators or managers).")
                 if assignee.role in auth.READ_ONLY_ROLES:
                     raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
             elif user.role == "user":
@@ -6272,8 +6277,8 @@ if FASTAPI_AVAILABLE:
                 assignee = session.query(User).filter_by(id=body.assigned_to_id).first()
                 if not assignee:
                     raise HTTPException(status_code=400, detail="Assigned user not found")
-                if assignee.role in ("super_admin", "admin"):
-                    raise HTTPException(status_code=400, detail="Administrators cannot be assigned tasks. Please assign to a sales team member.")
+                if assignee.role in ("super_admin", "admin", "sales_manager"):
+                    raise HTTPException(status_code=400, detail="Tasks can only be assigned to sales team members, not high-authority roles (administrators or managers).")
                 if assignee.role in auth.READ_ONLY_ROLES:
                     raise HTTPException(status_code=400, detail="Viewers and partners are read-only and can't be assigned tasks. Please assign to a sales team member.")
 
@@ -6384,7 +6389,11 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @app.post("/api/action-items/{item_id}/complete", tags=["8. Action Items"])
-    def complete_action_item(item_id: int, user: User = Depends(auth.require_action_item_account_access)):
+    def complete_action_item(
+        item_id: int,
+        body: Optional[ActionItemCompleteRequest] = None,
+        user: User = Depends(auth.require_action_item_account_access)
+    ):
         session = get_session()
         try:
             item = (session.query(ActionItem)
@@ -6395,6 +6404,12 @@ if FASTAPI_AVAILABLE:
                 raise HTTPException(status_code=404, detail="Action item not found")
             item.status = "done"
             item.completed_at = datetime.now(timezone.utc)
+            if body and body.comment and body.comment.strip():
+                clean_comment = body.comment.strip()
+                if item.description:
+                    item.description = f"{item.description}\n\nClosing Note: {clean_comment}"
+                else:
+                    item.description = f"Closing Note: {clean_comment}"
             session.commit()
             session.refresh(item)
             return _serialize_action_item(item)
@@ -6402,7 +6417,11 @@ if FASTAPI_AVAILABLE:
             session.close()
 
     @app.post("/api/action-items/{item_id}/reopen", tags=["8. Action Items"])
-    def reopen_action_item(item_id: int, user: User = Depends(auth.require_action_item_account_access)):
+    def reopen_action_item(
+        item_id: int,
+        body: Optional[ActionItemCompleteRequest] = None,
+        user: User = Depends(auth.require_action_item_account_access)
+    ):
         """Reopens a closed action item, resetting its completed status and restoring due evaluation."""
         session = get_session()
         try:
@@ -6414,6 +6433,12 @@ if FASTAPI_AVAILABLE:
                 raise HTTPException(status_code=404, detail="Action item not found")
             item.status = "open"
             item.completed_at = None
+            if body and body.comment and body.comment.strip():
+                clean_comment = body.comment.strip()
+                if item.description:
+                    item.description = f"{item.description}\n\nReopen Note: {clean_comment}"
+                else:
+                    item.description = f"Reopen Note: {clean_comment}"
             session.commit()
             session.refresh(item)
             return _serialize_action_item(item)
@@ -6498,6 +6523,7 @@ if FASTAPI_AVAILABLE:
         status: Optional[str] = None,
         priority: Optional[str] = None,
         account_id: Optional[int] = None,
+        account_ids: Optional[str] = None,
         assigned_to_id: Optional[int] = None,
         search: Optional[str] = None,
         user: User = Depends(auth.get_current_user),
@@ -6521,7 +6547,14 @@ if FASTAPI_AVAILABLE:
             elif assigned_to_id is not None:
                 query = query.filter(ActionItem.assigned_to_id == assigned_to_id)
 
-            if account_id is not None:
+            if account_ids:
+                try:
+                    parsed_ids = [int(x.strip()) for x in account_ids.split(",") if x.strip()]
+                    if parsed_ids:
+                        query = query.filter(ActionItem.account_id.in_(parsed_ids))
+                except ValueError:
+                    pass
+            elif account_id is not None:
                 query = query.filter(ActionItem.account_id == account_id)
             if priority:
                 query = query.filter(ActionItem.priority == priority)
@@ -6656,17 +6689,19 @@ if FASTAPI_AVAILABLE:
 
     @app.get("/api/me/action-items/export", tags=["8. Action Items"])
     def export_my_action_items(status: Optional[str] = None, account_id: Optional[int] = None,
+                               account_ids: Optional[str] = None,
                                priority: Optional[str] = None, user: User = Depends(auth.get_current_user)):
         """My Tasks as Excel — same access rules and filters as the /tasks page."""
         from apps.sales_copilot import exports
-        items = list_my_action_items(status=status, account_id=account_id, priority=priority, user=user)["action_items"]
+        items = list_my_action_items(status=status, account_id=account_id, account_ids=account_ids, priority=priority, user=user)["action_items"]
         headers = ["Title", "Status", "Priority", "Due", "Account", "Contact", "Description", "Created"]
         rows = [[i.get("title"), i.get("status"), i.get("priority"), (i.get("due_date") or "")[:10],
                  i.get("account_name"), (i.get("persona") or {}).get("name") if isinstance(i.get("persona"), dict) else i.get("persona_name"),
                  i.get("description"), (i.get("created_at") or "")[:10]] for i in items]
+        filter_acct_str = account_ids or (str(account_id) if account_id else 'all')
         content = exports.rows_xlsx("My tasks", headers, rows, [48, 12, 10, 12, 22, 24, 60, 12],
                                     about=[["Exported for", user.full_name or user.email], ["Exported at", exports._now()],
-                                           ["Filters", f"status={status or 'all'}, priority={priority or 'all'}, account={account_id or 'all'}"],
+                                           ["Filters", f"status={status or 'all'}, priority={priority or 'all'}, account={filter_acct_str}"],
                                            ["Rows", len(rows)]])
         return _xlsx_response(content, "my-tasks.xlsx")
 

@@ -276,6 +276,8 @@ function renderRoom() {
   };
   const blOptions = `<option value="">— Not set —</option>${(st.meta.business_lines || []).filter(b => b.active).map(b =>
     `<option value="${b.id}"${b.id === i.business_line_id ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}`;
+  const room = $('inRoom');
+  const prevScroll = room ? room.scrollTop : 0;
   $('inRoom').innerHTML = `
     <div class="dl-room-head">
       <div class="dl-room-head-row">
@@ -313,7 +315,8 @@ function renderRoom() {
           <span class="in-suggest-wrap"><input id="inPersonSearch" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="inPersonList"
             aria-label="${i.persona_name ? 'Change contact' : 'Choose contact'}" placeholder="${i.persona_name ? 'Change contact — type a name…' : 'Search people at this account…'}" ${ro || converted ? 'disabled' : ''}>
             <ul class="in-suggest" id="inPersonList" role="listbox" aria-label="Matching contacts" hidden></ul></span>
-          <div class="in-chosen">${i.persona_name ? `Current: <strong>${esc(i.persona_name)}</strong>${i.persona_title ? ` — ${esc(i.persona_title)}` : ''}` : 'No contact chosen yet'}</div></div>` : ''}
+          <div class="in-chosen">${i.persona_name ? `Current: <strong>${esc(i.persona_name)}</strong>${i.persona_title ? ` — ${esc(i.persona_title)}` : ''}` : 'No contact chosen yet'}</div>
+          <div class="in-stage-actions" id="inContactReason" hidden></div></div>` : '<div id="inContactReason" hidden></div>'}
         ${field('Business line', `<select data-f="business_line_id" ${ro ? 'disabled' : ''}>${blOptions}</select>`)}
         ${['meeting_held', 'converted'].includes(i.status) ? field('Attribution %', `<input type="number" min="0" max="100" step="5" data-f="attribution_pct" value="${i.attribution_pct ?? ''}"
             placeholder="${esc(String(i.connector.default_attribution_pct ?? st.defaultPct))} (default)" ${ro ? 'disabled' : ''}>`) : ''}
@@ -322,7 +325,6 @@ function renderRoom() {
           ${ro || (st.meta.me && i.owner_user_id === st.meta.me.id) ? '' : '<button type="button" class="in-link" data-assign-me>Assign to me</button>'}</div></div>
         ${field('Context', `<textarea data-f="context" maxlength="4000" rows="3" ${ro ? 'disabled' : ''}>${esc(i.context || '')}</textarea>`, true)}
       </div>
-      <div class="in-stage-actions" id="inContactReason" hidden></div>
 
       ${i.account_id ? '<div class="dl-section"><h3 class="dl-h3">Customer activity</h3><div id="inActivity"></div></div>' : ''}
 
@@ -341,9 +343,10 @@ function renderRoom() {
   }
   if (i.account_id && $('inActivity')) {
     mountTimeline($('inActivity'), { objectType: 'introduction', objectId: i.id, accountId: i.account_id, personaId: i.persona_id || null,
-      dealId: i.deal ? i.deal.id : null,
+      introStatus: i.status, dealId: i.deal ? i.deal.id : null,
       onChange: () => { api(`/api/crm/introductions/${i.id}`).then(fresh => { if (st.intro && st.intro.id === fresh.id && fresh.status !== st.intro.status) { st.intro = fresh; renderRoom(); } loadIntros(); }).catch(() => {}); } });
   }
+  if (room && prevScroll > 0) room.scrollTop = prevScroll;
 }
 
 async function openIntro(id) {
@@ -747,7 +750,7 @@ async function renderAttribution() {
   } catch (err) { box.innerHTML = `<p class="in-muted">${esc(err.message)}</p>`; }
 }
 
-// ── Wanted introductions (#8): the team's wishlist, shown to every partner in their portal ──
+// ── Wishlist introductions (#8): the team's wishlist, shown to every partner in their portal ──
 async function loadWanted() {
   const box = $('inViewWanted');
   try {
@@ -762,19 +765,37 @@ function renderWanted() {
   const items = st.wanted || [];
   const bls = (st.meta.business_lines || []).filter(b => b.active);
   $('inViewWanted').innerHTML = `
-    <p class="in-muted in-wanted-intro"><i class="fa-solid fa-circle-info"></i> Tell partners which introductions you want. Every
-      partner sees the open items in their portal — the company, the role and your note, nothing else — and can answer with one click.</p>
+    <p class="in-muted in-wanted-intro"><i class="fa-solid fa-circle-info"></i> Tell partners which introductions you are looking for. Every
+      partner sees the open items on your wishlist in their portal — the company, persona or role, and your note — and can answer with one click.</p>
     ${ro ? '' : `<form class="in-wanted-form" id="inWantedForm" autocomplete="off">
-      <label>Account<select id="inWAccount" required><option value="">Choose an account…</option>${st.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></label>
-      <label>Who you want to meet<input id="inWRole" required minlength="2" maxlength="200" placeholder="e.g. CIO or Head of Data"></label>
-      <label>Business line<select id="inWBl"><option value="">— Any —</option>${bls.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></label>
-      <label class="in-wanted-note">Note for partners <span class="in-muted">(partners see this)</span><input id="inWNote" maxlength="1000" placeholder="Why now — e.g. they're modernising their data platform"></label>
-      <button type="submit" class="dl-btn dl-btn-primary"><i class="fa-solid fa-plus"></i> Add to wishlist</button>
+      <label><span>Account<span class="in-req" aria-hidden="true">*</span></span>
+        <select id="inWAccount" required>
+          <option value="">Choose an account…</option>
+          ${st.accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')}
+        </select>
+      </label>
+      <label><span>Persona <span class="in-muted">(from account)</span><span class="in-req" aria-hidden="true">*</span></span>
+        <select id="inWPersona" required disabled>
+          <option value="">Choose an account first…</option>
+        </select>
+      </label>
+      <label><span>Business line</span>
+        <select id="inWBl">
+          <option value="">— Any —</option>
+          ${bls.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('')}
+        </select>
+      </label>
+      <div class="in-wanted-bottom">
+        <label class="in-wanted-note"><span>Note for partners <span class="in-muted">(partners see this)</span></span>
+          <input id="inWNote" maxlength="1000" placeholder="Why now — e.g. they're modernising their data platform">
+        </label>
+        <button type="submit" class="dl-btn dl-btn-primary"><i class="fa-solid fa-plus"></i> Add to wishlist</button>
+      </div>
     </form>`}
     <div class="in-wanted-bar"><label class="dl-toggle"><input type="checkbox" id="inWAll"${st.wantedAll ? ' checked' : ''}> Show closed too</label>
-      <span class="in-muted">${items.filter(w => w.status === 'open').length} open</span></div>
+      <span class="in-muted">${items.filter(w => w.status === 'open').length} open on wishlist</span></div>
     ${items.length ? `<div class="dl-table-wrap"><table class="dl-table in-wanted-table">
-      <thead><tr><th scope="col">Account</th><th scope="col">Wanted</th><th scope="col">Note for partners</th>
+      <thead><tr><th scope="col">Account</th><th scope="col">Persona / Role</th><th scope="col">Note for partners</th>
         <th scope="col">Answers</th><th scope="col">Added</th><th scope="col" aria-label="Actions"></th></tr></thead>
       <tbody>${items.map(w => `<tr class="${w.status === 'closed' ? 'in-wanted-closed' : ''}">
         <td><strong>${esc(w.account_name)}</strong>${w.business_line_name ? `<div class="dl-list-sub">${esc(w.business_line_name)}</div>` : ''}</td>
@@ -792,16 +813,23 @@ function wireWanted() {
   box.addEventListener('submit', async (e) => {
     if (e.target.id !== 'inWantedForm') return;
     e.preventDefault();
+    const acctId = Number($('inWAccount').value);
+    const role = $('inWPersona').value.trim();
+
+    if (!acctId) { showToast('Choose an account'); $('inWAccount').focus(); return; }
+    if (!role) { showToast('Choose a persona'); $('inWPersona').focus(); return; }
+
     try {
       await api('/api/crm/wanted', { method: 'POST', body: {
-        account_id: Number($('inWAccount').value), role_wanted: $('inWRole').value.trim(),
+        account_id: acctId, role_wanted: role,
         note: $('inWNote').value.trim() || null, business_line_id: Number($('inWBl').value) || null,
       } });
-      showToast('Added — partners can see it now');
+      showToast('Added to wishlist — partners can see it now');
       await loadWanted();
       $('inWAccount').focus();
     } catch (err) { showToast(err.message); }
   });
+
   box.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-wanted-status]');
     if (!b) return;
@@ -811,8 +839,38 @@ function wireWanted() {
       loadWanted();
     } catch (err) { showToast(err.message); }
   });
-  box.addEventListener('change', (e) => {
+
+  box.addEventListener('change', async (e) => {
     if (e.target.id === 'inWAll') { st.wantedAll = e.target.checked; loadWanted(); }
+    if (e.target.id === 'inWAccount') {
+      const acctId = e.target.value;
+      const personaSelect = $('inWPersona');
+      if (!personaSelect) return;
+
+      if (!acctId) {
+        personaSelect.disabled = true;
+        personaSelect.innerHTML = '<option value="">Choose an account first…</option>';
+        return;
+      }
+      personaSelect.disabled = true;
+      personaSelect.innerHTML = '<option value="">Loading personas for this account…</option>';
+      try {
+        const people = await api(`/api/crm/people?account_id=${acctId}&limit=100`);
+        if (!people || !people.length) {
+          personaSelect.innerHTML = '<option value="">No personas saved for this account</option>';
+          personaSelect.disabled = true;
+        } else {
+          personaSelect.disabled = false;
+          personaSelect.innerHTML = '<option value="">Choose a persona…</option>' +
+            people.map(p => {
+              const fullDesc = p.title ? `${p.name} (${p.title})` : p.name;
+              return `<option value="${esc(fullDesc)}">${esc(p.name)}${p.title ? ` — ${esc(p.title)}` : ''}</option>`;
+            }).join('');
+        }
+      } catch {
+        personaSelect.innerHTML = '<option value="">Could not load personas</option>';
+      }
+    }
   });
 }
 
@@ -951,14 +1009,24 @@ async function loadPartnerUsers() {
 }
 
 function wireBack() {
-  // Return to wherever the user came from in this app; a direct visit falls back to the deals pipeline.
+  // Return to wherever the user came from in this app; a direct visit or sibling CRM jump falls back to Accounts.
   $('inBack').addEventListener('click', (e) => {
     let internal = false;
+    let isCrmSibling = false;
     try {
       const ref = document.referrer ? new URL(document.referrer) : null;
       internal = !!ref && ref.origin === location.origin && ref.pathname !== location.pathname && !ref.pathname.startsWith('/login');
+      if (ref && ['/deals', '/email-sync', '/forecast'].includes(ref.pathname)) {
+        isCrmSibling = true;
+      }
     } catch { /* ignore */ }
-    if (internal && history.length > 1) { e.preventDefault(); history.back(); }
+    if (internal && !isCrmSibling && history.length > 1) {
+      e.preventDefault();
+      history.back();
+    } else {
+      e.preventDefault();
+      location.assign('/accounts');
+    }
   });
 }
 
@@ -1002,6 +1070,8 @@ async function init() {
     if (!$('inModal').hidden) {
       if (st.newDirty) showToast('Unsaved introduction — use Cancel to discard it');
       else closeNew();
+    } else if (!$('inWorkflowModal').hidden) {
+      $('inWorkflowModal').hidden = true;
     } else if (!$('inRoom').hidden) closeRoom();
   });
   wireBack();
@@ -1010,6 +1080,10 @@ async function init() {
   wireRoom();
   wireNew();
   wireViews();
+  // Workflow guide
+  $('inWorkflowBtn').addEventListener('click', () => { $('inWorkflowModal').hidden = false; });
+  $('inWorkflowClose').addEventListener('click', () => { $('inWorkflowModal').hidden = true; });
+  $('inWorkflowModal').addEventListener('click', (e) => { if (e.target === $('inWorkflowModal')) $('inWorkflowModal').hidden = true; });
   await loadIntros();
   if (p.get('intro')) openIntro(Number(p.get('intro')));
   if (p.get('new') === '1') openNew({ account_id: p.get('account_id'), persona_id: p.get('persona_id') });

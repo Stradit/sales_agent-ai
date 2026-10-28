@@ -38,6 +38,9 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "14"))
 RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_RESET_TOKEN_EXPIRE_MINUTES", "45"))
+# A new user's invitation link is the same set-password token, but an invite
+# may sit unopened until the next working day, so it lives longer.
+INVITE_TOKEN_EXPIRE_HOURS = int(os.getenv("JWT_INVITE_TOKEN_EXPIRE_HOURS", "72"))
 MAX_FAILED_LOGINS = int(os.getenv("AUTH_MAX_FAILED_LOGINS", "5"))
 LOCKOUT_MINUTES = int(os.getenv("AUTH_LOCKOUT_MINUTES", "15"))
 
@@ -166,12 +169,12 @@ def revoke_all_refresh_tokens_for_user(session, user_id: int) -> None:
 
 # ── Password reset tokens ─────────────────────────────────────────
 
-def issue_password_reset_token(session, user: User) -> str:
+def issue_password_reset_token(session, user: User, expire_minutes: int = None) -> str:
     raw = _new_raw_token()
     row = PasswordResetToken(
         user_id=user.id,
         token_hash=_hash_token(raw),
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=expire_minutes or RESET_TOKEN_EXPIRE_MINUTES),
     )
     session.add(row)
     session.commit()

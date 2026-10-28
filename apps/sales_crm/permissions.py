@@ -89,12 +89,12 @@ async def role_guard(request, call_next):
 
 
 def is_admin(user) -> bool:
-    return not auth.AUTH_ENFORCED or getattr(user, "role", None) == "super_admin"
+    return not auth.AUTH_ENFORCED or getattr(user, "role", None) in ("super_admin", "admin")
 
 
 def require_roles(*roles: str):
     def dep(user: User = Depends(auth.get_current_user)) -> User:
-        if auth.AUTH_ENFORCED and user.role != "super_admin" and user.role not in roles:
+        if auth.AUTH_ENFORCED and user.role not in ("super_admin", "admin") and user.role not in roles:
             raise HTTPException(403, "Not authorized")
         return user
     return dep

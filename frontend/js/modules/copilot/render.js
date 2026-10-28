@@ -102,7 +102,8 @@ export function renderMarkdown(text, nCites = 0) {
 
 function profileLink(row) {
   const pid = row.persona_id || row.id;
-  return (row.account_id && pid) ? `/profile?account=${encodeURIComponent(row.account_id)}&persona_id=${encodeURIComponent(pid)}` : null;
+  const fromPath = encodeURIComponent(window.location.pathname + window.location.search);
+  return (row.account_id && pid) ? `/profile?account=${encodeURIComponent(row.account_id)}&persona_id=${encodeURIComponent(pid)}&from=${fromPath}` : null;
 }
 
 function renderTable(table) {
