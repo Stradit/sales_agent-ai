@@ -48,6 +48,10 @@ const tp = {
   searchQuery: '',
   overdueOnly: false,
   sort: 'due',
+  sortDir: 'asc',
+  viewMode: (function() {
+    try { return localStorage.getItem('tp_view_mode') || 'table'; } catch (_) { return 'table'; }
+  })(),
   accountsCache: [],
   usersCache: [],
 };
@@ -111,15 +115,28 @@ function visibleItems() {
     filtered = scoped.filter(i => i.status === tp.activeStatus);
   }
   const priorityRank = { high: 0, medium: 1, low: 2 };
+  const dir = tp.sortDir === 'desc' ? -1 : 1;
+
   return [...filtered].sort((a, b) => {
-    if (tp.sort === 'priority') return (priorityRank[a.priority] ?? 3) - (priorityRank[b.priority] ?? 3);
-    if (tp.sort === 'account') return (a.account_name || '').localeCompare(b.account_name || '');
-    if (tp.sort === 'newest') return new Date(b.created_at || 0) - new Date(a.created_at || 0);
-    // 'due' (default) — soonest first, no due date last
-    if (!a.due_date && !b.due_date) return 0;
-    if (!a.due_date) return 1;
-    if (!b.due_date) return -1;
-    return new Date(a.due_date) - new Date(b.due_date);
+    let diff = 0;
+    if (tp.sort === 'priority') {
+      diff = (priorityRank[a.priority] ?? 3) - (priorityRank[b.priority] ?? 3);
+    } else if (tp.sort === 'account') {
+      diff = (a.account_name || '').localeCompare(b.account_name || '');
+    } else if (tp.sort === 'newest') {
+      diff = new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    } else if (tp.sort === 'title') {
+      diff = (a.title || '').localeCompare(b.title || '');
+    } else if (tp.sort === 'id') {
+      diff = Number(a.id || 0) - Number(b.id || 0);
+    } else {
+      // 'due' (default) — soonest first, no due date last
+      if (!a.due_date && !b.due_date) diff = 0;
+      else if (!a.due_date) diff = 1;
+      else if (!b.due_date) diff = -1;
+      else diff = new Date(a.due_date) - new Date(b.due_date);
+    }
+    return diff * dir;
   });
 }
 
@@ -305,33 +322,93 @@ function populateAccountFilter() {
   }
 }
 
+function cleanText(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/[\ufffd]/g, '—')
+    .trim();
+}
+
+function cleanTitle(str) {
+  if (!str) return '';
+  let s = cleanText(str);
+  if (s && s[0] === s[0].toLowerCase() && s.length > 1) {
+    s = s[0].toUpperCase() + s.slice(1);
+  }
+  return s;
+}
+
 function formatDueDate(dueStr, isOverdue) {
-  if (!dueStr) return '<span class="tp-tag"><i class="fa-regular fa-calendar"></i> No due date</span>';
+  if (!dueStr) {
+    return '<span class="tp-due-empty" title="No due date set">—</span>';
+  }
   const d = new Date(dueStr);
   if (isNaN(d.getTime())) return `<span class="tp-tag">${esc(dueStr)}</span>`;
   const formatted = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   const cls = isOverdue ? 'overdue' : '';
-  const icon = isOverdue ? 'fa-solid fa-circle-exclamation text-red' : 'fa-regular fa-calendar';
-  return `<span class="tp-tag tp-tag-due ${cls}"><i class="${icon}"></i> Due ${formatted}${isOverdue ? ' (Overdue)' : ''}</span>`;
+  const icon = isOverdue ? 'fa-solid fa-triangle-exclamation' : 'fa-regular fa-calendar';
+  return `<span class="tp-tag tp-tag-due ${cls}" title="${isOverdue ? 'Overdue: ' : 'Due '}${formatted}"><i class="${icon}"></i> ${formatted}</span>`;
 }
 
 function formatDescriptionHtml(text) {
   if (!text) return '';
-  const escaped = esc(text);
-  const urlRegex = /(https?:\/\/[^\s<]+)/g;
-  return escaped.replace(urlRegex, (url) => {
-    let displayUrl = url;
-    try {
-      const u = new URL(url);
-      const path = u.pathname.length > 25 ? u.pathname.slice(0, 22) + '…' : u.pathname;
-      displayUrl = u.hostname + (path !== '/' ? path : '');
-    } catch {
-      if (url.length > 40) {
-        displayUrl = url.slice(0, 37) + '…';
-      }
+  let str = String(text).replace(/[\ufffd]/g, '•');
+
+  const lines = str.split('\n');
+  const formattedLines = [];
+
+  for (let line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      formattedLines.push('');
+      continue;
     }
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="tp-link" title="${url}"><i class="fa-solid fa-arrow-up-right-from-square"></i> ${displayUrl}</a>`;
-  });
+
+    // Check if line contains "Why: ..."
+    if (/^Why:\s*/i.test(trimmed)) {
+      const whyBody = trimmed.replace(/^Why:\s*/i, '');
+      const srcMatch = whyBody.match(/(?:•|\s*)\s*Source:\s*(https?:\/\/[^\s<]+)/i);
+      if (srcMatch) {
+        const cleanWhy = whyBody.slice(0, srcMatch.index).trim();
+        const url = srcMatch[1];
+        let domain = 'Source Article';
+        try { domain = new URL(url).hostname.replace(/^www\./, ''); } catch (_) {}
+        formattedLines.push(
+          `<div class="tp-desc-why"><i class="fa-solid fa-lightbulb"></i> <strong>Why:</strong> ${esc(cleanWhy)}</div>` +
+          `<div class="tp-desc-source"><i class="fa-solid fa-arrow-up-right-from-square"></i> <a href="${url}" target="_blank" rel="noopener noreferrer" class="tp-desc-source-link">Source: ${esc(domain)}</a></div>`
+        );
+        continue;
+      }
+      formattedLines.push(`<div class="tp-desc-why"><i class="fa-solid fa-lightbulb"></i> <strong>Why:</strong> ${esc(whyBody)}</div>`);
+      continue;
+    }
+
+    // Check if line is standalone "Source: http..."
+    const loneSrcMatch = trimmed.match(/^(?:•\s*)?Source:\s*(https?:\/\/[^\s<]+)$/i);
+    if (loneSrcMatch) {
+      const url = loneSrcMatch[1];
+      let domain = 'Source Article';
+      try { domain = new URL(url).hostname.replace(/^www\./, ''); } catch (_) {}
+      formattedLines.push(`<div class="tp-desc-source"><i class="fa-solid fa-arrow-up-right-from-square"></i> <a href="${url}" target="_blank" rel="noopener noreferrer" class="tp-desc-source-link">Source: ${esc(domain)}</a></div>`);
+      continue;
+    }
+
+    // Regular line: escape and linkify URLs
+    const escaped = esc(trimmed);
+    const linkified = escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+      let displayUrl = url;
+      try {
+        const u = new URL(url);
+        displayUrl = u.hostname.replace(/^www\./, '');
+      } catch {
+        displayUrl = 'Link';
+      }
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="tp-link" title="${url}"><i class="fa-solid fa-arrow-up-right-from-square"></i> ${displayUrl}</a>`;
+    });
+    formattedLines.push(linkified);
+  }
+
+  return formattedLines.join('<br>');
 }
 
 function extractNotes(desc) {
@@ -374,12 +451,18 @@ function extractNotes(desc) {
 }
 
 function formatSourceTag(source) {
-  if (!source) return '';
+  if (!source || source === 'manual') return '';
   const s = String(source).toLowerCase().trim();
-  if (s === 'signal_feed' || s === 'priority_signal' || s === 'llm_suggested') {
+  if (s === 'signal_feed' || s === 'priority_signal') {
     return `
-      <span class="tp-tag tp-tag-signal" title="Created from Priority Signal Feed">
+      <span class="tp-tag tp-tag-signal" title="Generated from Priority Signal Feed">
         <i class="fa-solid fa-bolt"></i> Signal Feed
+      </span>`;
+  }
+  if (s === 'llm_suggested') {
+    return `
+      <span class="tp-tag tp-tag-ai" title="AI Copilot Recommended Action">
+        <i class="fa-solid fa-wand-magic-sparkles"></i> AI Suggested
       </span>`;
   }
   if (s === 'playbook') {
@@ -406,7 +489,7 @@ function formatSourceTag(source) {
         <i class="fa-regular fa-folder-open"></i> Dossier
       </span>`;
   }
-  return '';
+  return `<span class="tp-tag tp-tag-source"><i class="fa-solid fa-rss"></i> ${esc(source)}</span>`;
 }
 
 function renderTaskCard(item) {
@@ -534,6 +617,189 @@ function renderTaskCard(item) {
   `;
 }
 
+function getInitials(name) {
+  if (!name) return 'U';
+  const parts = String(name).trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function renderTaskRow(item) {
+  const isDone = item.status === 'done';
+  const isPending = item.status === 'pending_review';
+  const isOverdue = Boolean(item.is_overdue && (item.status === 'open' || item.status === 'in_progress'));
+  const isHigh = item.priority === 'high' && !isDone;
+  const personaName = item.persona_name || (item.persona && item.persona.name) || '';
+  const priorityClass = item.priority === 'high' ? 'tp-tag-priority-high' : item.priority === 'low' ? 'tp-tag-priority-low' : 'tp-tag-priority-med';
+  const priorityLabel = item.priority === 'high' ? 'High' : item.priority === 'low' ? 'Low' : 'Medium';
+  const priorityIcon = item.priority === 'high' ? 'fa-solid fa-bolt' : item.priority === 'low' ? 'fa-solid fa-arrow-down' : 'fa-solid fa-minus';
+
+  const { mainDesc, closingNote, reopenNote } = extractNotes(item.description);
+  const hasLongDesc = Boolean(mainDesc && mainDesc.length > 90);
+
+  return `
+    <tr class="tp-table-row ${isDone ? 'is-done' : ''} ${isOverdue ? 'is-overdue' : ''} ${isHigh ? 'is-high' : ''} ${isPending ? 'is-pending' : ''}" data-task-id="${item.id}">
+      <td class="tp-td-id">
+        <span class="tp-task-id-badge" title="Task ID #${item.id}">#${item.id}</span>
+      </td>
+      <td class="tp-td-task">
+        <div class="tp-table-title-wrap">
+          <div class="tp-task-row-title-line">
+            <button type="button" class="tp-table-task-link ${isDone ? 'text-muted' : ''}" data-action="edit" data-item-id="${item.id}" title="Click to view & edit task details">
+              ${esc(cleanTitle(item.title))}
+            </button>
+            ${formatSourceTag(item.source)}
+            ${isPending ? `
+              <span class="tp-tag tp-tag-pending" title="AI Suggested task awaiting approval">
+                <i class="fa-solid fa-lightbulb"></i> Suggested
+              </span>
+            ` : ''}
+          </div>
+          ${mainDesc ? `
+            <div class="tp-task-desc-wrap">
+              <div class="tp-table-desc ${isDone ? 'text-muted' : ''} ${hasLongDesc ? 'is-clamped' : ''}">
+                ${formatDescriptionHtml(mainDesc)}
+              </div>
+              ${hasLongDesc ? `
+                <button type="button" class="tp-desc-toggle-btn" data-action="toggle-desc" title="Expand or collapse full details">
+                  <span>Show details</span> <i class="fa-solid fa-chevron-down"></i>
+                </button>
+              ` : ''}
+            </div>
+          ` : ''}
+          ${isDone && closingNote ? `
+            <div class="tp-closing-comment" title="Resolution comment entered when closing ticket">
+              <i class="fa-solid fa-clipboard-check"></i>
+              <div class="tp-closing-comment-body">
+                <span class="tp-closing-comment-label">Closing Reason / Comment</span>
+                <span class="tp-closing-comment-text">${formatDescriptionHtml(closingNote)}</span>
+              </div>
+            </div>
+          ` : ''}
+          ${!isDone && reopenNote ? `
+            <div class="tp-reopen-comment" title="Reason entered when ticket was reopened">
+              <i class="fa-solid fa-rotate-left"></i>
+              <div class="tp-reopen-comment-body">
+                <span class="tp-reopen-comment-label">Reopen Reason</span>
+                <span class="tp-reopen-comment-text">${formatDescriptionHtml(reopenNote)}</span>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      </td>
+      <td class="tp-td-account">
+        <div class="tp-table-account-cell">
+          ${item.account_id ? `
+            <a href="/?account=${item.account_id}" class="tp-table-account-link" title="Open ${esc(item.account_name || 'Account')} in Dossier">
+              <i class="fa-solid fa-building"></i>
+              <span class="tp-table-account-name">${esc(item.account_name || `Account #${item.account_id}`)}</span>
+            </a>
+          ` : `<span class="tp-table-muted">—</span>`}
+          ${personaName ? `
+            <div class="tp-table-persona-badge" title="Associated contact: ${esc(personaName)}">
+              <i class="fa-solid fa-user-tie"></i>
+              <span>${esc(personaName)}</span>
+            </div>
+          ` : ''}
+        </div>
+      </td>
+      <td class="tp-td-priority">
+        <span class="tp-tag ${priorityClass}">
+          <i class="${priorityIcon}"></i> ${priorityLabel}
+        </span>
+      </td>
+      <td class="tp-td-due">
+        ${formatDueDate(item.due_date, isOverdue)}
+      </td>
+      <td class="tp-td-status">
+        ${isPending ? `
+          <span class="tp-tag tp-tag-pending">
+            <i class="fa-solid fa-lightbulb"></i> Suggested
+          </span>
+        ` : `
+          <select class="tp-select tp-table-status-select ${isDone ? 'is-done-select' : ''}" data-action="set-status" data-item-id="${item.id}" ${isDone ? 'disabled' : ''} title="${isDone ? 'Ticket is closed. Click Reopen to activate.' : 'Change status'}">
+            <option value="open" ${item.status === 'open' ? 'selected' : ''}>Open</option>
+            <option value="in_progress" ${item.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
+            <option value="done" ${item.status === 'done' ? 'selected' : ''}>Closed / Done</option>
+            <option value="cancelled" ${item.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+          </select>
+        `}
+      </td>
+      <td class="tp-td-assignee">
+        ${item.assigned_to_name ? `
+          <div class="tp-table-assignee" title="Assigned to ${esc(item.assigned_to_name)}">
+            <span class="tp-table-avatar">${esc(getInitials(item.assigned_to_name))}</span>
+            <span class="tp-table-assignee-name">${esc(item.assigned_to_name)}</span>
+          </div>
+        ` : (!isPending && !(getCurrentUser() && (getCurrentUser().role === 'super_admin' || getCurrentUser().role === 'admin' || getCurrentUser().role === 'sales_manager')) ? `
+          <button type="button" class="tp-btn-secondary tp-table-take-btn" data-action="take" data-item-id="${item.id}" title="Assign this task to myself">
+            <i class="fa-solid fa-hand-pointer"></i> Take Task
+          </button>
+        ` : `<span class="tp-table-muted">Unassigned</span>`)}
+      </td>
+      <td class="tp-td-actions">
+        <div class="tp-table-actions-group">
+          ${isPending ? `
+            <button type="button" class="tp-btn-approve tp-table-action-btn" data-action="approve" data-item-id="${item.id}" title="Approve signal task">
+              <i class="fa-solid fa-check"></i> Accept
+            </button>
+            <button type="button" class="tp-btn-dismiss tp-table-action-btn" data-action="reject" data-item-id="${item.id}" title="Dismiss signal task">
+              <i class="fa-solid fa-xmark"></i> Dismiss
+            </button>
+          ` : `
+            ${!isDone ? `
+              <button type="button" class="tp-btn-close-ticket tp-table-action-btn" data-action="complete" data-item-id="${item.id}" title="Close this ticket">
+                <i class="fa-solid fa-circle-check"></i> Close
+              </button>
+              <button type="button" class="tp-btn-edit tp-table-action-btn" data-action="edit" data-item-id="${item.id}" title="Edit task details">
+                <i class="fa-solid fa-pen-to-square"></i> Edit
+              </button>
+            ` : `
+              <button type="button" class="tp-btn-reopen tp-table-action-btn" data-action="reopen" data-item-id="${item.id}" title="Reopen ticket">
+                <i class="fa-solid fa-rotate-left"></i> Reopen
+              </button>
+            `}
+            <button type="button" class="tp-btn-delete tp-table-action-btn" data-action="delete" data-item-id="${item.id}" title="Delete task">
+              <i class="fa-regular fa-trash-can"></i>
+            </button>
+          `}
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function renderTaskTable(items) {
+  const getSortIcon = (key) => {
+    if (tp.sort !== key) return '<i class="fa-solid fa-sort tp-sort-inactive"></i>';
+    return tp.sortDir === 'desc'
+      ? '<i class="fa-solid fa-arrow-down-short-wide tp-sort-active"></i>'
+      : '<i class="fa-solid fa-arrow-up-wide-short tp-sort-active"></i>';
+  };
+
+  return `
+    <div class="tp-table-wrap">
+      <table class="tp-table" aria-label="Tasks table">
+        <thead>
+          <tr>
+            <th scope="col" class="tp-th-id"><button type="button" class="tp-th-btn" data-sort-key="id">ID ${getSortIcon('id')}</button></th>
+            <th scope="col" class="tp-th-task"><button type="button" class="tp-th-btn" data-sort-key="title">Task &amp; Details ${getSortIcon('title')}</button></th>
+            <th scope="col" class="tp-th-account"><button type="button" class="tp-th-btn" data-sort-key="account">Account ${getSortIcon('account')}</button></th>
+            <th scope="col" class="tp-th-priority"><button type="button" class="tp-th-btn" data-sort-key="priority">Priority ${getSortIcon('priority')}</button></th>
+            <th scope="col" class="tp-th-due"><button type="button" class="tp-th-btn" data-sort-key="due">Due Date ${getSortIcon('due')}</button></th>
+            <th scope="col" class="tp-th-status">Status</th>
+            <th scope="col" class="tp-th-assignee">Assignee</th>
+            <th scope="col" class="tp-th-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map(renderTaskRow).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function renderListBody(items) {
   if (!items || !items.length) {
     return `
@@ -548,7 +814,10 @@ function renderListBody(items) {
       </div>
     `;
   }
-  return items.map(renderTaskCard).join('');
+  if (tp.viewMode === 'cards') {
+    return `<div class="tp-cards-list">${items.map(renderTaskCard).join('')}</div>`;
+  }
+  return renderTaskTable(items);
 }
 
 function render() {
@@ -557,6 +826,11 @@ function render() {
   const visible = visibleItems();
   el('tpStatusFilters').innerHTML = renderFilterChips(scoped, tp.activeStatus);
   el('tpListBody').innerHTML = renderListBody(visible);
+
+  // Sync view mode buttons
+  document.querySelectorAll('[data-view-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.viewMode === tp.viewMode);
+  });
 
   // Update results count indicator
   const resultsCountEl = el('tpResultsCount');
@@ -704,8 +978,27 @@ function initFilterControls() {
 
   el('tpAccountFilter')?.addEventListener('change', (e) => { tp.accountFilter = e.target.value; render(); });
   el('tpPriorityFilter')?.addEventListener('change', (e) => { tp.priorityFilter = e.target.value; render(); });
-  el('tpSort')?.addEventListener('change', (e) => { tp.sort = e.target.value; render(); });
+  el('tpSort')?.addEventListener('change', (e) => {
+    tp.sort = e.target.value;
+    tp.sortDir = (tp.sort === 'newest' ? 'desc' : 'asc');
+    render();
+  });
   el('tpSearchInput')?.addEventListener('input', (e) => { tp.searchQuery = (e.target.value || '').trim(); render(); });
+
+  // View mode switcher (Enterprise Table vs Cards)
+  document.querySelectorAll('[data-view-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.viewMode;
+      if (mode && mode !== tp.viewMode) {
+        tp.viewMode = mode;
+        try { localStorage.setItem('tp_view_mode', mode); } catch (_) {}
+        document.querySelectorAll('[data-view-mode]').forEach(b => {
+          b.classList.toggle('active', b.dataset.viewMode === mode);
+        });
+        render();
+      }
+    });
+  });
 
   // Search clear button
   el('tpSearchClear')?.addEventListener('click', () => {
@@ -726,6 +1019,8 @@ function initFilterControls() {
     tp.priorityFilter = '';
     tp.overdueOnly = false;
     tp.activeStatus = 'open';
+    tp.sort = 'due';
+    tp.sortDir = 'asc';
     if (el('tpSearchInput')) el('tpSearchInput').value = '';
     if (el('tpPriorityFilter')) el('tpPriorityFilter').value = '';
     if (el('tpSort')) el('tpSort').value = 'due';
@@ -796,6 +1091,24 @@ function initListDelegation() {
   });
 
   list?.addEventListener('click', async (e) => {
+    const sortBtn = e.target.closest('[data-sort-key]');
+    if (sortBtn) {
+      const key = sortBtn.dataset.sortKey;
+      if (tp.sort === key) {
+        tp.sortDir = (tp.sortDir === 'asc' ? 'desc' : 'asc');
+      } else {
+        tp.sort = key;
+        tp.sortDir = (key === 'newest') ? 'desc' : 'asc';
+      }
+      if (el('tpSort')) {
+        if (['due', 'priority', 'account', 'newest'].includes(key)) {
+          el('tpSort').value = key;
+        }
+      }
+      render();
+      return;
+    }
+
     const toggleBtn = e.target.closest('[data-action="toggle-desc"]');
     if (toggleBtn) {
       const wrap = toggleBtn.closest('.tp-task-desc-wrap');

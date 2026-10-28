@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="css/action-items.css?v=1.0">
   <link rel="stylesheet" href="css/profile-page.css?v=3.1">
   <link rel="stylesheet" href="css/responsive.css?v=3.0">
-  <link rel="stylesheet" href="css/tasks-page.css?v=2.0">
+  <link rel="stylesheet" href="css/tasks-page.css?v=2.3">
   <link rel="stylesheet" href="css/elitehost.css?v=1.0">
 </head>
 <body>
@@ -166,11 +166,26 @@
             <button type="button" class="tp-reset-filters-btn" id="tpResetFiltersBtn" style="display:none;" title="Reset all active filters">
               <i class="fa-solid fa-arrow-rotate-left"></i> Reset
             </button>
+
+            <!-- Enterprise Layout View Switcher -->
+            <div class="tp-view-toggle" role="group" aria-label="Task layout view">
+              <button type="button" class="tp-view-btn active" data-view-mode="table" title="Enterprise Table View">
+                <i class="fa-solid fa-table-list"></i> Table
+              </button>
+              <button type="button" class="tp-view-btn" data-view-mode="cards" title="Compact Cards View">
+                <i class="fa-solid fa-border-all"></i> Cards
+              </button>
+            </div>
           </div>
         </div>
 
         <!-- Active Multi-Account Filter Tags -->
         <div class="tp-selected-account-tags" id="tpSelectedAccountTags" style="display:none;"></div>
+
+        <!-- Enterprise Table Summary Counter Bar -->
+        <div class="tp-table-meta-bar" id="tpTableMetaBar">
+          <span class="tp-results-count" id="tpResultsCount"></span>
+        </div>
 
         <div id="tpListBody">
           <div class="main-loading"><div class="spinner-md"></div> Loading your tasks…</div>
@@ -333,7 +348,7 @@
 
 {% include "partials/drawer.html" %}
 
-<script type="module" src="js/modules/tasks-page/main.js?v=5.0"></script>
+<script type="module" src="js/modules/tasks-page/main.js?v=5.2"></script>
 {% include "partials/copilot-dock.html" %}
 </body>
 </html>
