@@ -9391,6 +9391,10 @@ $(function () {
           renderSidebar();
           setTimeout(() => {
             $(`#accountList .account-item[data-id="${realId}"]`).trigger("click");
+            // Automatic handoff to LOB discovery & phased ingestion
+            setTimeout(() => {
+              promptLobAutomationHandoff(realId, companyName, domain, accountData.sec_cik);
+            }, 1200);
           }, 200);
         } else if (job.status === "failed") {
           clearInterval(interval);
@@ -12909,3 +12913,263 @@ $(function () {
 });
 
 
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // LOB AUTOMATION CLIENT ENGINE — PHASED INGESTION & HANDOFF
+  // ══════════════════════════════════════════════════════════════════
+  window._activeLobHandoffContext = null;
+
+  async function promptLobAutomationHandoff(accountId, companyName, domain, secCik) {
+    window._activeLobHandoffContext = { accountId, companyName, domain, secCik };
+    const $modal = $("#lobHandoffPromptModal");
+    const $body = $("#lobHandoffPromptModalBody");
+
+    $body.html(`
+      <div style="text-align:center;padding:24px 0;">
+        <div class="spinner-border text-primary" role="status" style="width:2rem;height:2rem;"></div>
+        <p style="margin-top:12px;font-size:0.85rem;color:#64748b;">Checking pre-flight credit quota &amp; LOB discovery manifest...</p>
+      </div>
+    `);
+
+    $modal.modal("show");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/lobs/preflight`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          account_id: accountId,
+          company_name: companyName,
+          batch_size: 10,
+        }),
+      });
+
+      const preflight = res.ok ? await res.json() : null;
+      const count = preflight ? preflight.estimated_lob_count : 15;
+      const reqCr = preflight ? preflight.required_credits : count * 4;
+      const availCr = preflight ? preflight.available_credits : 5000;
+      const isAllowed = preflight ? preflight.allowed : true;
+      const phases = Math.ceil(count / 10);
+
+      $body.html(`
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <div style="font-size:0.95rem;font-weight:700;color:#0f172a;">${esc(companyName)}</div>
+            <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:0.75rem;padding:5px 10px;border-radius:6px;">
+              ~${count} LOB Divisions Detected
+            </span>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+              <div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;font-weight:700;">Required Credits</div>
+              <div style="font-size:1.15rem;font-weight:800;color:${isAllowed ? '#059669' : '#dc2626'};">${reqCr} cr</div>
+              <div style="font-size:0.68rem;color:#64748b;">${phases} batch phases (10/batch)</div>
+            </div>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+              <div style="font-size:0.7rem;color:#64748b;text-transform:uppercase;font-weight:700;">Workspace Balance</div>
+              <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">${availCr.toLocaleString()} cr</div>
+              <div style="font-size:0.68rem;color:#059669;font-weight:600;">
+                ${isAllowed ? '✓ Sufficient Balance' : '⚠ Insufficient Balance'}
+              </div>
+            </div>
+          </div>
+
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;font-size:0.78rem;color:#1e3a8a;line-height:1.5;">
+            <strong>Autonomous Phased Architecture:</strong><br/>
+            &bull; <strong>Phase 1:</strong> Fast Name Discovery &amp; Stub Ingestion into DB.<br/>
+            &bull; <strong>Phase 2:</strong> Chunks into ${phases} batch phases (commercial divisions first).<br/>
+            &bull; <strong>Phase 3:</strong> 3-thread concurrent enrichment with immediate DB commit per batch.<br/>
+            &bull; <strong>Phase 4:</strong> Post-batch consolidated retry ONLY on failed connector logs.
+          </div>
+        </div>
+      `);
+
+      if (!isAllowed) {
+        $("#btnStartAutomatedLobPipeline").prop("disabled", true).addClass("opacity-50");
+      } else {
+        $("#btnStartAutomatedLobPipeline").prop("disabled", false).removeClass("opacity-50");
+      }
+    } catch (err) {
+      console.warn("Preflight error", err);
+      $body.html(`
+        <div class="alert alert-warning" style="font-size:0.85rem;">
+          Could not load live rate card preflight (${esc(err.message)}). You may still proceed with automated ingestion or free stub discovery.
+        </div>
+      `);
+    }
+  }
+
+  async function startAutomatedLobPipeline(accountId, companyName, domain, secCik) {
+    $("#lobSection").removeClass("d-none");
+    const $progress = $("#lobBatchProgress").removeClass("d-none");
+    const $fill = $("#lobProgressFill").css("width", "10%").removeClass("dump");
+    const $status = $("#lobBatchStatus").html(`<strong>Starting Phased LOB Pipeline:</strong> Pre-flight gatekeeper verifying credits...`);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/lobs/auto-pipeline`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          account_id: accountId,
+          company_name: companyName,
+          domain: domain,
+          sec_cik: secCik,
+          batch_size: 10,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        if (res.status === 402 || (errData.detail && errData.detail.reason === "insufficient_credits")) {
+          showNotification("Credit Gatekeeper Alert: Insufficient credits for full LOB batch run.", "error");
+          $status.html(`<span class="text-danger">Execution Halted: Insufficient credits.</span>`);
+          return;
+        }
+        throw new Error(errData.detail || "Failed to start LOB pipeline");
+      }
+
+      const data = await res.json();
+      const jobId = data.job_id;
+      showNotification(`🚀 Autonomous LOB pipeline launched for <strong>${esc(companyName)}</strong>`, "info", 5000);
+      pollAutonomousLobJob(jobId, accountId, companyName);
+
+    } catch (err) {
+      console.error("LOB pipeline launch error", err);
+      $status.html(`<span class="text-danger">Failed to start LOB pipeline: ${esc(err.message)}</span>`);
+      showNotification(`Error: ${esc(err.message)}`, "error");
+    }
+  }
+
+  function pollAutonomousLobJob(jobId, accountId, companyName) {
+    const $fill = $("#lobProgressFill");
+    const $status = $("#lobBatchStatus");
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/pipeline/job/${jobId}`, {
+          headers: authHeaders(),
+        });
+        if (!res.ok) return;
+
+        const job = await res.json();
+        const pct = job.progress_pct || 15;
+        $fill.css("width", `${pct}%`);
+        $status.html(`<strong>Running:</strong> ${esc(job.message || 'Processing LOBs...')}`);
+
+        if (job.status === "done") {
+          clearInterval(interval);
+          $fill.css("width", "100%").addClass("dump");
+          const resObj = job.result || {};
+          const totalLobs = resObj.total_lobs || 0;
+          const credits = resObj.total_credits_used || 0;
+          const phases = resObj.total_phases || 1;
+
+          $status.html(
+            `<strong>✓ Complete:</strong> Ingested <span class="batch-success">${totalLobs} LOBs across ${phases} batch phases</span> (${credits} credits deducted).`
+          );
+
+          showNotification(
+            `✅ <strong>${esc(companyName)}</strong> LOBs successfully ingested!<br/>
+             <span style="font-size:0.74rem;color:#059669;font-weight:600;">
+               ${totalLobs} Divisions Ingested &bull; ${credits} Credits Deducted &bull; DB Committed
+             </span>`,
+            "success",
+            8000
+          );
+
+          // Reload fresh LOBs from DB
+          reloadAccountLobs(accountId);
+          refreshBatchHistoryTable();
+          refreshTelemetryStrip();
+
+        } else if (job.status === "failed") {
+          clearInterval(interval);
+          $fill.css("width", "100%").css("background", "#dc2626");
+          $status.html(`<span class="text-danger">❌ LOB Ingestion Failed: ${esc(job.error || 'Execution halted')}</span>`);
+          showNotification(`❌ LOB Ingestion Error: ${esc(job.error || 'Execution failed')}`, "error", 8000);
+        }
+      } catch (pollErr) {
+        console.warn("Polling error for LOB job", jobId, pollErr);
+      }
+    }, 2500);
+  }
+
+  async function discoverLobStubsOnly(accountId, companyName, domain, secCik) {
+    showNotification(`🔍 Discovering LOB names &amp; stubs for <strong>${esc(companyName)}</strong>...`, "info", 4000);
+    try {
+      const res = await fetch(`${API_BASE}/api/lobs/discover-stubs`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          account_id: accountId,
+          company_name: companyName,
+          domain: domain,
+          sec_cik: secCik,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to discover stubs");
+      const data = await res.json();
+      showNotification(
+        `✅ Discovered and committed <strong>${data.discovered_count} LOB stubs</strong> to DB (0 billable credits).`,
+        "success",
+        6000
+      );
+      reloadAccountLobs(accountId);
+    } catch (err) {
+      showNotification(`Failed to discover LOB stubs: ${esc(err.message)}`, "error");
+    }
+  }
+
+  async function reloadAccountLobs(accountId) {
+    try {
+      const res = await fetch(`${API_BASE}/api/accounts/${accountId}/lobs`, {
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (activeAccount && activeAccount.id === accountId) {
+          activeAccount.lobs = data.lobs || [];
+          activeAccount._isNew = false;
+          $("#lobSection").removeClass("d-none");
+          renderLobCardsList($("#lobCardsContainer"), activeAccount.lobs);
+          $("#topbarLobsCount").text(activeAccount.lobs.length);
+          $("#lobCountBadge").text(`${activeAccount.lobs.length} Divisions / Sub-Organizations`);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to reload LOBs for account", accountId, err);
+    }
+  }
+
+  // Hook up LOB modal action buttons
+  $(document).on("click", "#btnStartAutomatedLobPipeline", function () {
+    $("#lobHandoffPromptModal").modal("hide");
+    if (window._activeLobHandoffContext) {
+      const { accountId, companyName, domain, secCik } = window._activeLobHandoffContext;
+      startAutomatedLobPipeline(accountId, companyName, domain, secCik);
+    }
+  });
+
+  $(document).on("click", "#btnLobDiscoverStubsOnly", function () {
+    $("#lobHandoffPromptModal").modal("hide");
+    if (window._activeLobHandoffContext) {
+      const { accountId, companyName, domain, secCik } = window._activeLobHandoffContext;
+      discoverLobStubsOnly(accountId, companyName, domain, secCik);
+    }
+  });
+
+  // Header Auto-Ingest button in LOB section
+  $(document).on("click", "#lobAutoPipelineBtn", function () {
+    if (!activeAccount) {
+      showNotification("Please select an active account first.", "warning");
+      return;
+    }
+    const acctId = activeAccount.id;
+    const name = activeAccount.display_name || activeAccount.name || activeAccount.key;
+    const dom = activeAccount.domain || activeAccount.primary_domain;
+    const cik = activeAccount.sec_cik;
+    promptLobAutomationHandoff(acctId, name, dom, cik);
+  });

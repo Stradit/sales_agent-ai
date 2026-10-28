@@ -83,6 +83,7 @@ from db.repositories import (
 from db.repositories.pipeline_run_repository import PipelineRunRepository
 from services.account_service import AccountService
 from services.account_automation_engine import AccountAutomationEngine
+from services.lob_automation_engine import LobAutomationEngine
 from services.lob_service import LobService, LobValidator
 from services.persona_service import PersonaService, PersonaValidator
 from services.pipeline_run_logger import PipelineRunLogger
@@ -861,6 +862,38 @@ if FASTAPI_AVAILABLE:
         account_id: Optional[int] = None
         lob_name: Optional[str] = None
         lob_domain: Optional[str] = None
+
+    class LobPreflightRequest(BaseModel):
+        account_id: Optional[int] = None
+        company_name: Optional[str] = None
+        lob_count: Optional[int] = None
+        batch_size: Optional[int] = 10
+
+    class LobDiscoverStubsRequest(BaseModel):
+        account_id: int
+        company_name: Optional[str] = None
+        domain: Optional[str] = None
+        sec_cik: Optional[str] = None
+
+    class LobAutoPipelineRequest(BaseModel):
+        account_id: int
+        company_name: Optional[str] = None
+        domain: Optional[str] = None
+        sec_cik: Optional[str] = None
+        batch_size: Optional[int] = 10
+
+    class LobBatchPhaseRequest(BaseModel):
+        account_id: int
+        company_name: str
+        batch_lobs: List[Dict[str, Any]]
+        phase_number: Optional[int] = 1
+        total_phases: Optional[int] = 1
+        sec_cik: Optional[str] = None
+
+    class LobRetryDeferredRequest(BaseModel):
+        account_id: int
+        company_name: str
+        deferred_failures: List[Dict[str, Any]]
 
     class LobsDumpRequest(BaseModel):
         account_id: int
@@ -2441,6 +2474,106 @@ if FASTAPI_AVAILABLE:
     # TAB 2 & 3: LOB & SUB-LOB LEVEL ENDPOINTS
     # ══════════════════════════════════════════════════════
     lobs_router = APIRouter(prefix="/api/lobs", tags=["2. LOB & Sub-LOB Level"])
+
+    @lobs_router.post("/preflight")
+    def preflight_lob_check(req: LobPreflightRequest):
+        """Pre-flight credit and resource gatekeeper for LOB automation."""
+        return LobAutomationEngine.preflight_lob_check(
+            account_id=req.account_id,
+            company_name=req.company_name,
+            lob_count=req.lob_count,
+            batch_size=req.batch_size or 10,
+        )
+
+    @lobs_router.post("/discover-stubs")
+    def discover_lob_stubs(req: LobDiscoverStubsRequest):
+        """Cycle 1: Lightweight Name & Stub Discovery.
+        Fast extraction of LOB names and taxonomy stubs without running
+        expensive deep web scrapers or LLMs. Commits stubs to DB.
+        """
+        return LobAutomationEngine.discover_lob_stubs(
+            account_id=req.account_id,
+            company_name=req.company_name or "",
+            domain=req.domain,
+            sec_cik=req.sec_cik,
+        )
+
+    @lobs_router.post("/auto-pipeline")
+    def auto_lob_pipeline(req: LobAutoPipelineRequest):
+        """End-to-end background phased LOB automation pipeline.
+        Pre-flight -> Stub Discovery -> Partitioning -> Phased Sequential Execution -> Deferred Self-Healing.
+        Returns job_id immediately (200ms).
+        """
+        preflight = LobAutomationEngine.preflight_lob_check(
+            account_id=req.account_id,
+            company_name=req.company_name,
+            batch_size=req.batch_size or 10,
+        )
+        if not preflight["allowed"]:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "status": "error",
+                    "reason": "insufficient_credits",
+                    "detail": preflight["message"],
+                    "preflight": preflight,
+                },
+            )
+
+        job_id = _jreg_create(TYPE_LOB, meta={
+            "account_id": req.account_id,
+            "company_name": req.company_name,
+            "domain": req.domain,
+            "mode": "autonomous_phased_lob_pipeline",
+        })
+
+        def _bg_lob_auto():
+            try:
+                LobAutomationEngine.execute_full_lob_automation(
+                    account_id=req.account_id,
+                    company_name=req.company_name or "",
+                    domain=req.domain,
+                    sec_cik=req.sec_cik,
+                    batch_size=req.batch_size or 10,
+                    job_id=job_id,
+                )
+            except Exception as exc:
+                _jreg_exc(job_id, exc)
+
+        import threading
+        threading.Thread(target=_bg_lob_auto, daemon=False, name=f"auto-lob-{job_id}").start()
+
+        return {
+            "status": "started",
+            "job_id": job_id,
+            "account_id": req.account_id,
+            "company_name": req.company_name,
+            "poll_url": f"/api/pipeline/job/{job_id}",
+            "estimated_credits": preflight["required_credits"],
+            "preflight": preflight,
+            "message": f"Autonomous phased LOB pipeline started for account {req.account_id}. Polling job '{job_id}'.",
+        }
+
+    @lobs_router.post("/enrich-phased-batch")
+    def enrich_phased_batch(req: LobBatchPhaseRequest):
+        """Cycle 3: Synchronous execution of a single LOB batch phase."""
+        return LobAutomationEngine.execute_lob_batch_phase(
+            account_id=req.account_id,
+            company_name=req.company_name,
+            batch_lobs=req.batch_lobs,
+            phase_number=req.phase_number or 1,
+            total_phases=req.total_phases or 1,
+            sec_cik=req.sec_cik,
+        )
+
+    @lobs_router.post("/retry-deferred")
+    def retry_deferred_faults(req: LobRetryDeferredRequest):
+        """Cycle 4: Consolidated self-healing for deferred LOB connector faults."""
+        return LobAutomationEngine.resolve_deferred_faults(
+            account_id=req.account_id,
+            company_name=req.company_name,
+            deferred_failures=req.deferred_failures,
+        )
 
     @lobs_router.post("/fetch")
     def fetch_lobs_data(req: LobsFetchRequest):
