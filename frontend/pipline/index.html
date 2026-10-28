@@ -8,6 +8,33 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css?v=3.39.4">
+
+  <style>
+    .chip-toggle {
+      border: 1.5px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+      background: #f8fafc;
+      color: #334155;
+      user-select: none;
+    }
+    .chip-toggle:hover {
+      border-color: #cbd5e1;
+      background: #f1f5f9;
+    }
+    .chip-toggle.active {
+      border-color: #4f46e5;
+      background: #eef2ff;
+      color: #4338ca;
+    }
+  </style>
 </head>
 <body>
 
@@ -258,7 +285,26 @@
             Discovered operating divisions and commercial segments.
             Click any card to load associated personas and feeds.
           </p>
-          <div class="compact-card-grid" id="lobCardsContainer"></div>
+          
+          <!-- LOB Multi-Tier Taxonomy Filter Bar -->
+          <div class="lob-taxonomy-filter-bar d-flex gap-2 mb-3" id="lobTaxonomyFilterBar" style="flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm btn-primary active lob-filter-btn" data-filter="all" style="border-radius:8px;font-size:0.78rem;font-weight:700;padding:6px 14px;">
+              All Hierarchy (<span id="lobFilterCountAll">0</span>)
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary lob-filter-btn" data-filter="commercial" style="border-radius:8px;font-size:0.78rem;font-weight:600;padding:6px 14px;">
+              <i class="bi bi-star-fill text-warning"></i> Commercial Divisions (<span id="lobFilterCountCommercial">0</span>)
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary lob-filter-btn" data-filter="operating" style="border-radius:8px;font-size:0.78rem;font-weight:600;padding:6px 14px;">
+              Direct Operating Subsidiaries (<span id="lobFilterCountOperating">0</span>)
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary lob-filter-btn" data-filter="sublobs" style="border-radius:8px;font-size:0.78rem;font-weight:600;padding:6px 14px;">
+              Level 3 Sub-LOBs (<span id="lobFilterCountSublobs">0</span>)
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary lob-filter-btn" data-filter="lei" style="border-radius:8px;font-size:0.78rem;font-weight:600;padding:6px 14px;">
+              G20 LEI Verified (<span id="lobFilterCountLei">0</span>)
+            </button>
+          </div>
+<div class="compact-card-grid" id="lobCardsContainer"></div>
         </div>
 
         <!-- ========================================================
@@ -466,7 +512,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=3.39.4"></script>
+<script src="js/app.js?v=3.40.0"></script>
 <script src="js/chatbot.js?v=2.3.6"></script>
 
 <!-- --- Enhanced Add New Account Modal --- -->
@@ -492,12 +538,15 @@
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body" style="padding:24px 28px;">
+            <div class="modal-body" style="padding:24px 28px;">
         <form id="addAccountForm" autocomplete="off">
           <div style="display:flex;flex-direction:column;gap:16px;">
             <div class="add-field-group">
-              <label for="newAccountName" class="add-field-label">
-                <i class="bi bi-building"></i> Company Name <span style="color:#ef4444;">*</span>
+              <label for="newAccountName" class="add-field-label" style="display:flex;justify-content:space-between;align-items:center;">
+                <span><i class="bi bi-building"></i> Company Name <span style="color:#ef4444;">*</span></span>
+                <span id="accountCikBadge" class="badge" style="background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;font-size:0.7rem;display:none;">
+                  <i class="bi bi-patch-check-fill"></i> SEC CIK Autodetected
+                </span>
               </label>
               <input type="text" id="newAccountName" class="add-field-input"
                      placeholder="e.g. BlackRock, JPMorgan Chase, Goldman Sachs" required
@@ -517,48 +566,76 @@
             </div>
 
             <!-- Autonomous Execution & Credit Gatekeeper Toggle -->
-            <div class="form-check form-switch" style="background:#f1f5f9;padding:12px 14px 12px 42px;border-radius:10px;border:1px solid #cbd5e1;margin-top:2px;">
-              <input class="form-check-input" type="checkbox" role="switch" id="autoEnrichAccountToggle" checked style="cursor:pointer;width:2.2em;height:1.2em;">
-              <label class="form-check-label" for="autoEnrichAccountToggle" style="font-weight:700;font-size:0.83rem;color:#0f172a;cursor:pointer;display:block;">
-                <i class="bi bi-magic" style="color:#6366f1;"></i> Auto-Enrich &amp; Ingest (Automated Pipeline)
+            <div class="form-check form-switch" style="background:#f0fdf4;padding:14px 16px 14px 44px;border-radius:12px;border:1.5px solid #bbf7d0;margin-top:2px;">
+              <input class="form-check-input" type="checkbox" role="switch" id="autoEnrichAccountToggle" checked style="cursor:pointer;width:2.4em;height:1.25em;">
+              <label class="form-check-label" for="autoEnrichAccountToggle" style="font-weight:800;font-size:0.86rem;color:#166534;cursor:pointer;display:block;">
+                <i class="bi bi-cpu-fill" style="color:#16a34a;"></i> Auto-Enrich &amp; Ingest (Autonomous Pipeline)
               </label>
-              <div style="font-size:0.7rem;color:#64748b;margin-top:2px;line-height:1.35;">
+              <div style="font-size:0.72rem;color:#15803d;margin-top:2px;line-height:1.4;">
                 Pre-flight credit check &bull; 11-source harvest &bull; Self-healing retry &bull; Lossless golden record DB merge
+              </div>
+            </div>
+
+            <!-- Advanced Extraction Controls & Source Scope Section -->
+            <div id="accountExtractionControls" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <div style="font-size:0.76rem;font-weight:800;text-transform:uppercase;color:#475569;letter-spacing:0.04em;">
+                  <i class="bi bi-sliders"></i> Extraction Controls &amp; Source Scope
+                </div>
+                <span style="font-size:0.72rem;color:#6366f1;font-weight:700;">6 Credits Required &bull; Pre-Approved</span>
+              </div>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+                <div class="chip-toggle active source-pill" data-source="sec">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>SEC 10-K &amp; Ex-21 (0 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="gleif">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>GLEIF LEI Tree (0 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="serper">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>Google Serper Domain (1 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="tavily">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>Tavily Market Signals (1 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="firecrawl">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>Firecrawl Web Scraper (1 cr)</span>
+                </div>
+                <div class="chip-toggle active source-pill" data-source="diffbot">
+                  <i class="bi bi-check-circle-fill text-primary"></i>
+                  <span>Diffbot Knowledge Graph (1 cr)</span>
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px dashed #cbd5e1;padding-top:10px;font-size:0.74rem;color:#64748b;">
+                <span><i class="bi bi-shield-check text-success"></i> Pre-Flight Status: <strong class="text-success">Approved (5,000 Quota)</strong></span>
+                <span>Self-Healing Retries: <strong class="text-primary">Enabled</strong></span>
               </div>
             </div>
           </div>
         </form>
-
-        <!-- Automated Ingestion Lifecycle Preview -->
-        <div class="pipeline-step-preview">
-          <div style="font-size:0.72rem;font-weight:700;color:#0ea5e9;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:10px;">
-            <i class="bi bi-cpu"></i> Automated Pipeline Enrichment Lifecycle
-          </div>
-          <div class="pipeline-step-item">
-            <span class="pipeline-step-num" style="background:#0ea5e9;">1</span>
-            <div><strong>11-Source Intelligence Harvest</strong>: Discovers SEC CIK, 10-K filings, corporate tree, ticker &amp; leadership bios.</div>
-          </div>
-          <div class="pipeline-step-item">
-            <span class="pipeline-step-num" style="background:#6366f1;">2</span>
-            <div><strong>Hierarchy &amp; Seniority Parsing</strong>: Extracts LOB operating divisions, Sub-LOBs, and maps C-Suite, VPs &amp; Directors.</div>
-          </div>
-          <div class="pipeline-step-item">
-            <span class="pipeline-step-num" style="background:#10b981;">3</span>
-            <div><strong>25-Feed OSINT Stream</strong>: Dynamically generates live feeds for SEC insider trades, podcasts, transcripts &amp; news.</div>
-          </div>
-        </div>
       </div>
       <div class="modal-footer"
-           style="border-top:1px solid #e2e8f0;padding:16px 28px;gap:10px;background:#f8fafc;display:flex;justify-content:flex-end;">
+           style="border-top:1px solid #e2e8f0;padding:16px 28px;gap:10px;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;">
         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"
-                style="border-radius:8px;padding:8px 18px;font-weight:500;">Cancel</button>
-        <button type="button" id="startNewAccountBtn"
-                style="border-radius:8px;font-size:.85rem;padding:9px 24px;
-                       background:linear-gradient(135deg,#0ea5e9,#4f46e5);color:#fff;
-                       border:none;font-weight:600;display:inline-flex;align-items:center;gap:8px;cursor:pointer;
-                       box-shadow:0 4px 14px rgba(14,165,233,0.35);">
-          <i class="bi bi-play-fill" style="font-size:1.1rem;"></i> Start Pipeline
-        </button>
+                style="border-radius:8px;padding:8px 18px;font-weight:600;">Cancel</button>
+        <div style="display:flex;gap:10px;">
+          <button type="button" id="btnModalSaveStubOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:8px 18px;font-weight:600;">
+            <i class="bi bi-database"></i> Save Stub Only (0 cr)
+          </button>
+          <button type="button" id="startNewAccountBtn"
+                  style="border-radius:8px;font-size:.85rem;padding:9px 24px;
+                         background:linear-gradient(135deg,#0ea5e9,#4f46e5);color:#fff;
+                         border:none;font-weight:700;display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+                         box-shadow:0 4px 14px rgba(14,165,233,0.35);">
+            <i class="bi bi-play-fill" style="font-size:1.1rem;"></i> Start Autonomous Pipeline
+          </button>
+        </div>
       </div>
     </div>
   </div>

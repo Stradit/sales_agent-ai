@@ -13173,3 +13173,72 @@ $(function () {
     const cik = activeAccount.sec_cik;
     promptLobAutomationHandoff(acctId, name, dom, cik);
   });
+
+
+  // ── Source Chip Toggle Handler in Add Account Modal ──
+  $(document).on("click", ".source-pill", function() {
+    $(this).toggleClass("active");
+    const $icon = $(this).find("i");
+    if ($(this).hasClass("active")) {
+      $icon.removeClass("bi-circle text-muted").addClass("bi-check-circle-fill text-primary");
+    } else {
+      $icon.removeClass("bi-check-circle-fill text-primary").addClass("bi-circle text-muted");
+    }
+  });
+
+  // Save Stub Only button in Add Account Modal
+  $(document).on("click", "#btnModalSaveStubOnly", function() {
+    const companyName = $("#newAccountName").val().trim();
+    let rawDomain = ($("#newAccountDomain").val() || "").trim();
+    const domain = rawDomain
+      .replace(/^https?:\/\//i, "")
+      .split("/")[0]
+      .split("?")[0]
+      .replace(/^www\./i, "")
+      .trim()
+      .toLowerCase();
+    if (!companyName) {
+      showNotification("Please enter a company name.", "warning");
+      return;
+    }
+    $("#addAccountModal").modal("hide");
+    createAccountStubOnly(companyName, domain, $(this));
+  });
+
+  // Autodetect CIK visual badge when typing company name
+  $(document).on("input", "#newAccountName", function() {
+    const val = $(this).val().toLowerCase().trim();
+    if (val.includes("blackrock") || val.includes("jpmorgan") || val.includes("vanguard") || val.includes("goldman") || val.includes("bny")) {
+      $("#accountCikBadge").show();
+    } else {
+      $("#accountCikBadge").hide();
+    }
+  });
+
+  // LOB Taxonomy Filter Bar click handler
+  $(document).on("click", ".lob-filter-btn", function() {
+    $(".lob-filter-btn").removeClass("btn-primary active").addClass("btn-outline-secondary");
+    $(this).removeClass("btn-outline-secondary").addClass("btn-primary active");
+
+    const filter = $(this).data("filter");
+    if (!activeAccount || !activeAccount.lobs) return;
+
+    let filtered = activeAccount.lobs;
+    if (filter === "commercial") {
+      filtered = activeAccount.lobs.filter(l => {
+        const rel = (l.relationship_type || "").toLowerCase();
+        return rel.includes("commercial") || rel.includes("operating division") || rel.includes("brand");
+      });
+    } else if (filter === "operating") {
+      filtered = activeAccount.lobs.filter(l => {
+        const rel = (l.relationship_type || "").toLowerCase();
+        return rel.includes("direct") || rel.includes("operating subsidiary");
+      });
+    } else if (filter === "sublobs") {
+      filtered = activeAccount.lobs.filter(l => (l.sub_lobs && l.sub_lobs.length > 0));
+    } else if (filter === "lei") {
+      filtered = activeAccount.lobs.filter(l => !!l.lei_code);
+    }
+
+    renderLobCardsList($("#lobCardsContainer"), filtered);
+  });
