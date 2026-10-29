@@ -8,9 +8,9 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="css/tokens.css?v=3.0">
   <link rel="stylesheet" href="css/base.css?v=4.1">
-  <link rel="stylesheet" href="css/shell.css?v=3.0">
-  <link rel="stylesheet" href="css/deals.css?v=3.3">
-  <link rel="stylesheet" href="css/introductions.css?v=1.6">
+  <link rel="stylesheet" href="css/shell.css?v=3.1">
+  <link rel="stylesheet" href="css/deals.css?v=3.4">
+  <link rel="stylesheet" href="css/introductions.css?v=1.7">
   <link rel="stylesheet" href="css/activity-timeline.css?v=1.0">
 </head>
 <body>
@@ -29,12 +29,13 @@
         </div>
         <div class="dl-tools">
           <div class="dl-search"><i class="fa-solid fa-magnifying-glass"></i><input id="inSearch" type="search" placeholder="Search connector, account or contact" aria-label="Search introductions"></div>
-          <select id="inConnector" class="dl-select" aria-label="Filter by connector"><option value="">All connectors</option></select>
-          <select id="inBusinessLine" class="dl-select" aria-label="Filter by business line"><option value="">All business lines</option></select>
+          <button type="button" class="dl-btn dl-filters-btn" aria-expanded="false"><i class="fa-solid fa-sliders"></i> Filters<span data-filter-count></span></button>
+          <select id="inConnector" class="dl-tool-extra dl-select" aria-label="Filter by connector"><option value="">All connectors</option></select>
+          <select id="inBusinessLine" class="dl-tool-extra dl-select" aria-label="Filter by business line"><option value="">All business lines</option></select>
           <label class="dl-toggle"><input type="checkbox" id="inMine"> Mine</label>
-          <button type="button" class="dl-btn" id="inExport"><i class="fa-regular fa-file-excel"></i> Export</button>
-          <button type="button" class="dl-btn dl-btn-workflow" id="inWorkflowBtn"><i class="fa-solid fa-diagram-project"></i> How it works</button>
-          <button type="button" class="dl-btn dl-btn-primary" id="inNew"><i class="fa-solid fa-plus"></i> New introduction</button>
+          <button type="button" class="dl-tool-extra dl-btn" id="inExport"><i class="fa-regular fa-file-excel"></i> Export</button>
+          <button type="button" class="dl-tool-extra dl-btn dl-btn-workflow" id="inWorkflowBtn"><i class="fa-solid fa-diagram-project"></i> How it works</button>
+          <button type="button" class="dl-btn dl-btn-primary dl-fab" id="inNew"><i class="fa-solid fa-plus"></i> New introduction</button>
         </div>
       </header>
 
@@ -251,6 +252,7 @@
 <div class="toast" id="toast"></div>
 
 {% include "partials/copilot-dock.html" %}
+<script type="module" src="js/modules/crm-responsive.js?v=1.0"></script>
 <script type="module" src="js/modules/introductions/main.js?v=1.7"></script>
 </body>
 </html>

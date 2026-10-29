@@ -1,12 +1,40 @@
   <link rel="stylesheet" href="/css/tour.css?v=1.0">
+  {#- App sections, shared by the tablet tabs, the tablet drawer, the phone tab bar and the phone
+      "More" sheet. tab: shown in the phone tab bar; top: shown as a tablet-landscape tab.
+      Layout per width: shell.css "Responsive topbar"; behaviour: js/modules/app-nav.js. -#}
+  {%- set app_nav = [
+    {"href": "/command-center", "label": "Command Center", "short": "Home", "icon": "fa-arrow-trend-up", "tab": true, "top": true},
+    {"href": "/accounts", "label": "Accounts", "short": "Accounts", "icon": "fa-city", "tab": true, "top": true},
+    {"href": "/deals", "label": "Deals Pipeline", "short": "Deals", "icon": "fa-diagram-next", "tab": true, "top": true, "group": "CRM"},
+    {"href": "/introductions", "label": "Introductions", "short": "Introductions", "icon": "fa-handshake", "top": true, "group": "CRM"},
+  ] + ([{"href": "/forecast", "label": "Forecast", "short": "Forecast", "icon": "fa-chart-line", "group": "CRM"}] if forecast_enabled else []) + [
+    {"href": "/email-sync", "label": "Email & Calendar Sync", "short": "Email sync", "icon": "fa-envelope-circle-check", "group": "CRM"},
+    {"href": "/copilot", "label": "Sales Copilot", "short": "Copilot", "icon": "fa-wand-magic-sparkles", "tab": true, "top": true},
+    {"href": "/tasks", "label": "My Tasks", "short": "Tasks", "icon": "fa-list-check", "tasks": true},
+  ] -%}
   <header class="dash-topbar">
+    <button type="button" class="topbar-menu-btn" id="appMenuBtn" aria-label="Open menu" aria-controls="appDrawer" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
     <div class="topbar-brand">
       <div class="topbar-icon"><i class="fa-solid fa-sitemap"></i></div>
       <div>
         <div class="topbar-title">Doshin <span class="beta-badge" title="Doshin is in beta — features may still change. Tell us what to improve.">Beta</span></div>
         <div class="topbar-sub">Turn signals into strategy</div>
       </div>
+      <span class="topbar-page" id="topbarPage"></span>
     </div>
+    <nav class="topbar-nav" aria-label="Main">
+      {%- for item in app_nav if item.top %}
+      <a href="{{ item.href }}" class="topbar-nav-link" data-app-nav>{{ item.short }}</a>
+      {%- endfor %}
+      <div class="topbar-nav-more">
+        <button type="button" class="topbar-nav-link" id="appNavMoreBtn" aria-haspopup="true" aria-expanded="false" aria-controls="appNavMoreMenu">More <i class="fa-solid fa-chevron-down"></i></button>
+        <div class="topbar-nav-menu" id="appNavMoreMenu" hidden>
+          {%- for item in app_nav if not item.top %}
+          <a href="{{ item.href }}" data-app-nav><i class="fa-solid {{ item.icon }}"></i> {{ item.label }}</a>
+          {%- endfor %}
+        </div>
+      </div>
+    </nav>
     <div class="topbar-actions">
       <button id="topbarTourBtn" class="topbar-tour-btn" type="button" title="Interactive User Manual &amp; Page Tour" aria-label="Interactive User Manual">
         <i class="fa-solid fa-circle-question"></i> <span class="topbar-tour-label">User Manual</span>
@@ -15,5 +43,49 @@
       <button id="themeToggle" class="topbar-theme-btn" title="Toggle theme"><i class="fa-solid fa-moon"></i></button>
     </div>
   </header>
+
+  <!-- Tablet portrait: every section in a drawer opened from the ☰ button -->
+  <nav class="app-drawer" id="appDrawer" aria-label="Main" hidden>
+    <div class="app-drawer-head">
+      <span>Doshin</span>
+      <button type="button" class="app-close-btn" data-app-close aria-label="Close menu"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="app-drawer-body">
+      {%- set ns = namespace(group=None) %}
+      {%- for item in app_nav %}
+      {%- if item.group and item.group != ns.group %}<div class="app-sheet-label">{{ item.group }}</div>{% endif %}
+      {%- if not item.group and ns.group %}<div class="app-sheet-divider"></div>{% endif %}
+      {%- set ns.group = item.group %}
+      <a href="{{ item.href }}" class="app-sheet-link" data-app-nav><i class="fa-solid {{ item.icon }}"></i><span>{{ item.label }}</span>{% if item.tasks %}<span class="app-badge" data-app-tasks-badge hidden></span>{% endif %}</a>
+      {%- endfor %}
+    </div>
+    <div class="app-drawer-foot">Turn signals into strategy</div>
+  </nav>
+
+  <!-- Phone: bottom tab bar + "More" sheet for the rest of the sections and the topbar's settings -->
+  <nav class="app-tabbar" id="appTabbar" aria-label="Main">
+    {%- for item in app_nav if item.tab %}
+    <a href="{{ item.href }}" class="app-tab" data-app-nav><i class="fa-solid {{ item.icon }}"></i><span>{{ item.short }}</span></a>
+    {%- endfor %}
+    <button type="button" class="app-tab" id="appMoreBtn" aria-controls="appMoreSheet" aria-expanded="false"><i class="fa-solid fa-ellipsis"></i><span>More</span></button>
+  </nav>
+  <section class="app-sheet" id="appMoreSheet" aria-label="More" hidden>
+    <div class="app-sheet-head">
+      <h2>More</h2>
+      <button type="button" class="app-close-btn" data-app-close aria-label="Close menu"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    {%- set ns = namespace(group=None) %}
+    {%- for item in app_nav if not item.tab %}
+    {%- if item.group and item.group != ns.group %}<div class="app-sheet-label">{{ item.group }}</div>{% endif %}
+    {%- if not item.group and ns.group %}<div class="app-sheet-divider"></div>{% endif %}
+    {%- set ns.group = item.group %}
+    <a href="{{ item.href }}" class="app-sheet-link" data-app-nav><i class="fa-solid {{ item.icon }}"></i><span>{{ item.label }}</span>{% if item.tasks %}<span class="app-badge" data-app-tasks-badge hidden></span>{% endif %}</a>
+    {%- endfor %}
+    <button type="button" class="app-sheet-link" id="appMoreTour"><i class="fa-solid fa-circle-question"></i><span>User Manual &amp; page tour</span></button>
+    <button type="button" class="app-sheet-link" id="appMoreTheme" aria-pressed="false"><i class="fa-solid fa-moon"></i><span>Dark theme</span></button>
+  </section>
+  <div class="app-scrim" id="appScrim" hidden></div>
+
+  <script type="module" src="/js/modules/app-nav.js?v=1.0"></script>
   <script type="module" src="/js/modules/page-lineage.js"></script>
   <script type="module" src="/js/modules/tour/init.js"></script>

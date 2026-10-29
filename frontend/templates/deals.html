@@ -8,10 +8,10 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="css/tokens.css?v=3.0">
   <link rel="stylesheet" href="css/base.css?v=4.1">
-  <link rel="stylesheet" href="css/shell.css?v=3.0">
+  <link rel="stylesheet" href="css/shell.css?v=3.1">
   <link rel="stylesheet" href="css/people-drawer.css?v=3.0">
   <link rel="stylesheet" href="css/action-items.css?v=3.0">
-  <link rel="stylesheet" href="css/deals.css?v=3.3">
+  <link rel="stylesheet" href="css/deals.css?v=3.4">
   <link rel="stylesheet" href="css/activity-timeline.css?v=1.0">
   <link rel="stylesheet" href="css/elitehost.css?v=1.0">
 </head>
@@ -31,10 +31,11 @@
         </div>
         <div class="dl-tools">
           <div class="dl-search"><i class="fa-solid fa-magnifying-glass"></i><input id="dlSearch" type="search" placeholder="Search deals or accounts" aria-label="Search deals"></div>
-          <select id="dlAccount" class="dl-select" aria-label="Filter by account"><option value="">All accounts</option></select>
-          <select id="dlBusinessLine" class="dl-select" aria-label="Filter by business line"><option value="">All business lines</option></select>
-          <button type="button" class="dl-btn dl-btn-workflow" id="dlWorkflowBtn"><i class="fa-solid fa-diagram-project"></i> How it works</button>
-          <button type="button" class="dl-btn dl-btn-primary" id="dlNew"><i class="fa-solid fa-plus"></i> New deal</button>
+          <button type="button" class="dl-btn dl-filters-btn" aria-expanded="false"><i class="fa-solid fa-sliders"></i> Filters<span data-filter-count></span></button>
+          <select id="dlAccount" class="dl-tool-extra dl-select" aria-label="Filter by account"><option value="">All accounts</option></select>
+          <select id="dlBusinessLine" class="dl-tool-extra dl-select" aria-label="Filter by business line"><option value="">All business lines</option></select>
+          <button type="button" class="dl-tool-extra dl-btn dl-btn-workflow" id="dlWorkflowBtn"><i class="fa-solid fa-diagram-project"></i> How it works</button>
+          <button type="button" class="dl-btn dl-btn-primary dl-fab" id="dlNew"><i class="fa-solid fa-plus"></i> New deal</button>
         </div>
       </header>
 
@@ -257,6 +258,7 @@
 {% include "partials/drawer.html" %}
 
 {% include "partials/copilot-dock.html" %}
+<script type="module" src="js/modules/crm-responsive.js?v=1.0"></script>
 <script type="module" src="js/modules/deals/main.js?v=3.2"></script>
 </body>
 </html>

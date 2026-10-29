@@ -224,3 +224,42 @@
 .fc-exec .fc-main-grid { grid-template-columns: 1fr; }
 .fc-exec-btn.active:hover { color: #fff; }
 .fc-kpi span .fc-info i { color: inherit; margin: 0; }
+
+/* ── Phone & tablet (shared rules: deals.css "Phone & tablet"; tabs and table labels: crm-responsive.js) ── */
+/* iPad: the two charts side by side again */
+@media (min-width: 700px) and (max-width: 1100px) {
+  .fc-grid.fc-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 1023px) {
+  .fc-seg button { min-height: 40px; }
+  .fc-panel-head { flex-wrap: wrap; gap: 8px; }
+}
+@media (max-width: 640px) {
+  .fc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .fc-kpi strong { font-size: 1.15rem; }
+  .fc-seg { max-width: 100%; overflow-x: auto; }
+  .fc-seg button { flex: none; }
+
+  /* Trend / Why it moved: one chart at a time */
+  .dl-paneltabs { display: flex; margin-bottom: 0; background: var(--panel-bg); border: 1px solid var(--panel-border); border-bottom: 0; }
+  .dl-paneltabs button {
+    flex: 1; min-height: 44px; border: 0; border-bottom: 3px solid transparent; background: none; cursor: pointer;
+    font: inherit; font-size: .85rem; font-weight: 600; color: var(--text-secondary);
+  }
+  .dl-paneltabs button[aria-selected="true"] { color: var(--brand); border-bottom-color: var(--brand); }
+  .fc-charts.has-tabs > .fc-panel:not(.is-active) { display: none; }
+  .fc-charts.has-tabs > .fc-panel .fc-panel-head h2 { display: none; }
+
+  /* Tables stack as cards: one block per row, each value labelled with its column */
+  .fc-table-wrap .fc-table, .fc-table-wrap .fc-table tbody, .fc-table-wrap .fc-table tfoot { display: block; }
+  .fc-table-wrap .fc-table thead { display: none; }
+  .fc-table-wrap .fc-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--border-color); }
+  .fc-table-wrap .fc-table th, .fc-table-wrap .fc-table td {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 3px 0; border: 0; text-align: right;
+  }
+  .fc-table-wrap .fc-table tbody th, .fc-table-wrap .fc-table tfoot th { justify-content: flex-start; text-align: left; font-size: .92rem; }
+  .fc-table-wrap .fc-table td::before {
+    content: attr(data-label); flex-shrink: 0; text-align: left; font-size: .72rem; font-weight: 600; color: var(--text-secondary);
+  }
+  .fc-table-wrap .fc-table td:not([data-label])::before { content: none; }
+}

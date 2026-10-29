@@ -8,9 +8,9 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="css/tokens.css?v=3.0">
   <link rel="stylesheet" href="css/base.css?v=4.1">
-  <link rel="stylesheet" href="css/shell.css?v=3.0">
-  <link rel="stylesheet" href="css/deals.css?v=1.3">
-  <link rel="stylesheet" href="css/forecast.css?v=1.4">
+  <link rel="stylesheet" href="css/shell.css?v=3.1">
+  <link rel="stylesheet" href="css/deals.css?v=3.4">
+  <link rel="stylesheet" href="css/forecast.css?v=1.5">
 </head>
 <body>
 
@@ -28,12 +28,13 @@
         </div>
         <div class="dl-tools">
           <select id="fcPeriod" class="dl-select" aria-label="Fiscal quarter"></select>
-          <select id="fcBusinessLine" class="dl-select" aria-label="Business line"><option value="">All business lines</option></select>
-          <select id="fcOwner" class="dl-select" aria-label="Owner"><option value="">Everyone I can see</option></select>
+          <button type="button" class="dl-btn dl-filters-btn" aria-expanded="false"><i class="fa-solid fa-sliders"></i> Filters<span data-filter-count></span></button>
+          <select id="fcBusinessLine" class="dl-tool-extra dl-select" aria-label="Business line"><option value="">All business lines</option></select>
+          <select id="fcOwner" class="dl-tool-extra dl-select" aria-label="Owner"><option value="">Everyone I can see</option></select>
           <button type="button" class="dl-btn fc-exec-btn" id="fcExecBtn" aria-pressed="false" title="Hide deal-level detail and group by business line"><i class="fa-solid fa-user-tie"></i> Leadership view</button>
-          <button type="button" class="dl-btn" id="fcTargetsBtn" hidden><i class="fa-solid fa-bullseye"></i> Targets</button>
-          <button type="button" class="dl-btn" id="fcFxBtn" hidden><i class="fa-solid fa-coins"></i> Exchange rates</button>
-          <button type="button" class="dl-btn" id="fcExport"><i class="fa-regular fa-file-excel"></i> Export</button>
+          <button type="button" class="dl-tool-extra dl-btn" id="fcTargetsBtn" hidden><i class="fa-solid fa-bullseye"></i> Targets</button>
+          <button type="button" class="dl-tool-extra dl-btn" id="fcFxBtn" hidden><i class="fa-solid fa-coins"></i> Exchange rates</button>
+          <button type="button" class="dl-tool-extra dl-btn" id="fcExport"><i class="fa-regular fa-file-excel"></i> Export</button>
         </div>
       </header>
 
@@ -100,6 +101,7 @@
 <div class="toast" id="toast"></div>
 
 {% include "partials/copilot-dock.html" %}
+<script type="module" src="js/modules/crm-responsive.js?v=1.0"></script>
 <script type="module" src="js/modules/forecast/main.js?v=1.4"></script>
 </body>
 </html>

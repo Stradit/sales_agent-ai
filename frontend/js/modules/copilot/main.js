@@ -90,7 +90,9 @@ function allCitations(v) {
 }
 
 function renderContext(v) {
-  $('cpSources').innerHTML = renderSources(allCitations(v));
+  const cites = allCitations(v);
+  $('cpSources').innerHTML = renderSources(cites);
+  $('cpSourcesCount').textContent = cites.length;
   const last = [...v.messages].reverse().find(m => m.role === 'assistant' && m.extras && m.extras.entities);
   const ents = last ? last.extras.entities : null;
   const items = [];
@@ -220,15 +222,72 @@ function renderQuota(q) {
   const myLeft = Math.max(0, me.tokens_limit - me.tokens_used);
   const pct = Math.round((teamLeft / Math.max(1, t.requests_limit)) * 100);
   const low = teamLeft === 0 || myLeft < 5000;
-  const el = $('cpQuota');
-  el.classList.toggle('cp-warn', low);
-  el.innerHTML = `<div class="cp-quota-bar" title="Team AI requests left today"><span style="width:${pct}%"></span></div>
+  const html = `<div class="cp-quota-bar" title="Team AI requests left today"><span style="width:${pct}%"></span></div>
     <div>Team <strong>${teamLeft}/${t.requests_limit}</strong> · You <strong>${(myLeft / 1000).toFixed(1)}k</strong>/${(me.tokens_limit / 1000).toFixed(0)}k tokens · resets ${esc(reset)}</div>
     ${low ? '<div class="cp-small">AI summaries paused — answers show data &amp; sources</div>' : ''}`;
+  ['cpQuota', 'cpQuotaSide'].forEach((id) => {   // header, and the chats drawer on phones
+    $(id).classList.toggle('cp-warn', low);
+    $(id).innerHTML = html;
+  });
 }
 
 async function loadQuota() {
   try { renderQuota(await api('/quota')); } catch { /* optional */ }
+}
+
+// ── Responsive panels ────────────────────────────────────────────────────────
+// From 1024px the chats and context panels are docked (the Sources button shows/hides the context
+// panel, remembered per browser). Below that they are drawers over a scrim: chats from the left,
+// context from the right on tablets and as a bottom sheet on phones (copilot.css, v4 block).
+
+const docked = matchMedia('(min-width: 1024px)');
+const CTX_HIDDEN_KEY = 'cp.contextHidden';
+
+const FULL_PLACEHOLDER = 'Ask about an account or person… (@ to mention, / for commands)';
+
+function syncSourcesBtn() {
+  $('cpInput').placeholder = docked.matches ? FULL_PLACEHOLDER : 'Ask about a person or account';   // chips cover @ and /
+  const shown = docked.matches ? !$('cpBody').classList.contains('cp-ctx-hidden') : $('cpContext').classList.contains('open');
+  $('cpSourcesBtn').setAttribute('aria-expanded', String(shown));
+}
+
+function closePanels() {
+  $('cpSidebar').classList.remove('open');
+  $('cpContext').classList.remove('open');
+  $('cpScrim').hidden = true;
+  syncSourcesBtn();
+}
+
+function openPanel(id, focusId) {
+  closePanels();
+  $(id).classList.add('open');
+  $('cpScrim').hidden = false;
+  syncSourcesBtn();
+  $(focusId).focus();
+}
+
+function openSidebar(tab) {
+  if (tab) document.querySelector(`.cp-tab[data-tab="${tab}"]`).click();
+  openPanel('cpSidebar', 'cpSideClose');
+}
+
+function toggleContext() {
+  if (!docked.matches) {
+    if ($('cpContext').classList.contains('open')) closePanels(); else openPanel('cpContext', 'cpContextClose');
+    return;
+  }
+  const hidden = $('cpBody').classList.toggle('cp-ctx-hidden');
+  try { localStorage.setItem(CTX_HIDDEN_KEY, hidden ? '1' : ''); } catch { /* storage blocked: not remembered */ }
+  syncSourcesBtn();
+}
+
+function insertQuick(text) {
+  const input = $('cpInput');
+  if (text === '@') input.value += input.value && !/\s$/.test(input.value) ? ' @' : '@';
+  else input.value = text + input.value.replace(/^\/\w+\s*/, '');
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  input.dispatchEvent(new Event('input', { bubbles: true }));   // grow + open the @ mention list
 }
 
 // ── Wiring ───────────────────────────────────────────────────────────────────
@@ -241,6 +300,7 @@ function wire() {
     url.searchParams.delete('session');
     history.replaceState(null, '', url);
     renderSessions();
+    closePanels();
     $('cpInput').focus();
   });
   $('cpSessionSearch').addEventListener('input', renderSessions);
@@ -266,7 +326,7 @@ function wire() {
         startRename(row);
       } else if (row) {
         await view.openSession(row.dataset.session);
-        closeSidebarOnMobile();
+        closePanels();
       }
     } catch (err) { showToast(err.message); }
   });
@@ -327,16 +387,34 @@ function wire() {
   });
 
   $('cpHelpBtn').addEventListener('click', () => { $('cpHelp').hidden = !$('cpHelp').hidden; });
-  $('cpMenuBtn').addEventListener('click', () => $('cpSidebar').classList.toggle('open'));
+  $('cpMenuBtn').addEventListener('click', () => openSidebar());
+  $('cpRail').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rail]');
+    if (!b) return;
+    if (b.dataset.rail === 'new') $('cpNewChat').click(); else openSidebar(b.dataset.rail);
+  });
+  $('cpSideClose').addEventListener('click', closePanels);
+  $('cpContextClose').addEventListener('click', closePanels);
+  $('cpScrim').addEventListener('click', closePanels);
+  $('cpSourcesBtn').addEventListener('click', toggleContext);
+  $('cpQuick').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-insert]');
+    if (b) insertQuick(b.dataset.insert);
+  });
+  docked.addEventListener('change', closePanels);   // rotating an iPad switches between drawer and docked
+  try { if (localStorage.getItem(CTX_HIDDEN_KEY)) $('cpBody').classList.add('cp-ctx-hidden'); } catch { /* storage blocked */ }
+  syncSourcesBtn();
 
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('cpInput').focus(); }
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); $('cpNewChat').click(); }
-    if (e.key === 'Escape' && view.busy) view.stop();
+    if (e.key === 'Escape') {
+      if (!$('cpScrim').hidden) closePanels();
+      else if (view.busy) view.stop();
+    }
   });
 }
 
-function closeSidebarOnMobile() { $('cpSidebar').classList.remove('open'); }
 
 async function init() {
   view = new ChatView(

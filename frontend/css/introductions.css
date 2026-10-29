@@ -167,3 +167,20 @@
 .in-wanted-bar { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; font-size: .78rem; }
 .in-wanted-table tbody tr { cursor: default; }
 .in-wanted-closed td { opacity: .6; }
+
+/* ── Phone & tablet (shared rules: deals.css "Phone & tablet") ── */
+/* iPad landscape: all six statuses fit side by side with compact cards — no sideways scrolling */
+@media (min-width: 1024px) and (max-width: 1300px) {
+  .in-board { grid-template-columns: repeat(6, minmax(0, 1fr)); overflow-x: visible; gap: 8px; }
+  .in-board .dl-col-head { padding: 8px; }
+  .in-board .dl-col-body { padding: 6px; }
+  .in-board .dl-card { padding: 8px; }
+  .in-board .dl-card-row { gap: 6px; }
+}
+/* iPad portrait: snapping 300px columns (deals.css) instead of the fixed 220px grid above */
+@media (min-width: 641px) and (max-width: 1023px) { .in-board { grid-template-columns: none; } }
+@media (max-width: 1023px) {
+  .in-tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .in-tabs::-webkit-scrollbar { display: none; }
+  .in-tab { flex: none; min-height: 44px; white-space: nowrap; }
+}
