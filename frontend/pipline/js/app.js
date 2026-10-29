@@ -13927,7 +13927,6 @@ $(function () {
     const dom = activeAccount.domain || activeAccount.primary_domain;
     promptPersonaAutomationHandoff(acctId, name, dom);
   });
-  });
 
   // ── Source Matrix Dynamic Calculation & Interactive UI ──
   function updateAddAccountModalCredits() {
