@@ -627,11 +627,17 @@ class LobAutomationEngine:
             },
         )
 
+        # Query live balance after batch execution
+        bal_info = AccountAutomationEngine.get_workspace_credit_balance()
+        credits_remaining = bal_info.get("available_credits", 0)
+
         return {
             "phase_number": phase_number,
             "total_phases": total_phases,
             "duration_seconds": duration_sec,
             "credits_used": actual_billable_credits,
+            "credits_remaining": credits_remaining,
+            "rate_per_lob": cls.ESTIMATED_CREDITS_PER_LOB,
             "enriched_count": len(enriched_lobs),
             "saved_count": saved_count,
             "deferred_failures": deferred_failures,
@@ -825,8 +831,48 @@ class LobAutomationEngine:
         all_deferred_failures: List[Dict[str, Any]] = []
         total_credits = 0
 
-        # 4. Cycle 3: Sequential Batch Execution
+        # 4. Cycle 3: Sequential Batch Execution with Per-Batch Credit Gatekeeping
+        rate_per_lob = cls.ESTIMATED_CREDITS_PER_LOB
         for idx, batch_chunk in enumerate(batches, start=1):
+            batch_req = len(batch_chunk) * rate_per_lob
+            bal_info = AccountAutomationEngine.get_workspace_credit_balance()
+            curr_balance = bal_info.get("available_credits", 0)
+
+            # Check if current balance is sufficient for this specific batch
+            if curr_balance < batch_req:
+                logger.warning(
+                    f"[!] [LobAutomationEngine] Insufficient credits for Phase {idx}/{total_phases}. "
+                    f"Required: {batch_req} cr, Available: {curr_balance} cr. Gracefully pausing execution."
+                )
+                if job_id:
+                    _jreg_update(
+                        job_id,
+                        status="paused_insufficient_credits",
+                        progress_pct=int(20 + ((idx - 1) / total_phases) * 60),
+                        message=(
+                            f"Execution paused at Phase {idx}/{total_phases}: Required {batch_req} cr for next batch, "
+                            f"but balance is {curr_balance} cr. Safely committed {len(all_enriched_lobs)} LOBs to DB."
+                        ),
+                        credits_remaining=curr_balance,
+                        next_phase_required=batch_req,
+                        completed_phases=idx - 1,
+                        total_phases=total_phases,
+                        processed_count=len(all_enriched_lobs),
+                        total_lobs=len(stubs),
+                        error=f"Insufficient credits for Phase {idx}. Previously saved {len(all_enriched_lobs)} LOBs intact.",
+                    )
+                return {
+                    "status": "paused_insufficient_credits",
+                    "reason": "insufficient_credits",
+                    "completed_phases": idx - 1,
+                    "total_phases": total_phases,
+                    "processed_lobs_count": len(all_enriched_lobs),
+                    "total_lobs_count": len(stubs),
+                    "credits_remaining": curr_balance,
+                    "next_phase_required": batch_req,
+                    "message": f"Paused at Phase {idx} of {total_phases}: Workspace balance ({curr_balance} cr) is insufficient for next batch ({batch_req} cr).",
+                }
+
             batch_result = cls.execute_lob_batch_phase(
                 account_id=account_id,
                 company_name=company_name,
@@ -839,6 +885,24 @@ class LobAutomationEngine:
             all_enriched_lobs.extend(batch_result.get("enriched_lobs", []))
             all_deferred_failures.extend(batch_result.get("deferred_failures", []))
             total_credits += batch_result.get("credits_used", 0)
+
+            # Query updated balance after phase execution and project next batch requirement
+            post_bal = AccountAutomationEngine.get_workspace_credit_balance().get("available_credits", 0)
+            next_phase_req = (len(batches[idx]) * rate_per_lob) if idx < total_phases else 0
+
+            if job_id:
+                phase_pct = int(20 + (idx / total_phases) * 60)
+                _jreg_update(
+                    job_id,
+                    progress_pct=phase_pct,
+                    message=f"Phase {idx}/{total_phases} complete ({len(batch_chunk)} LOBs). {post_bal} credits remaining.",
+                    current_phase=idx,
+                    total_phases=total_phases,
+                    processed_count=len(all_enriched_lobs),
+                    total_lobs=len(stubs),
+                    credits_remaining=post_bal,
+                    next_phase_required=next_phase_req,
+                )
 
         # 5. Cycle 4: Consolidated Deferred Self-Healing Resolution
         if all_deferred_failures:
@@ -859,6 +923,7 @@ class LobAutomationEngine:
             "total_lobs": len(all_enriched_lobs),
             "total_phases": total_phases,
             "total_credits_used": total_credits,
+            "credits_remaining": AccountAutomationEngine.get_workspace_credit_balance().get("available_credits", 0),
             "faults_deferred": len(all_deferred_failures),
             "duration_seconds": duration_total,
         }

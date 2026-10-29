@@ -4488,6 +4488,15 @@ $(function () {
     // Render Compact LOB Cards (Top 10 with Expandable Toggle)
     renderLobCardsList($("#lobCardsContainer"), activeAccount.lobs || []);
 
+    // Dynamic LOB Action Ribbon lifecycle
+    if (activeAccount.lobs && activeAccount.lobs.length > 0) {
+      hideLobHandoffActionRibbon();
+    } else if (window._activeLobHandoffContext && window._activeLobHandoffContext.accountId === activeAccount.id) {
+      showLobHandoffActionRibbon(window._activeLobHandoffContext);
+    } else {
+      hideLobHandoffActionRibbon();
+    }
+
     if (activeAccount._isNew) {
       $("#lobSection").addClass("d-none");
     } else {
@@ -10916,6 +10925,7 @@ $(function () {
 
     // Refresh KPIs and Table
     refreshBatchConsole();
+    fetchWorkspaceCreditBalance();
 
     // Show modal and backdrop explicitly with display styles
     $("#batchEnrichmentBackdrop").removeClass("d-none").css("display", "block");
@@ -11643,7 +11653,27 @@ $(function () {
       $runBtn.removeClass("btn-batch-run-reenrich");
     }
 
-    $runBtn.prop("disabled", count === 0 || batchConsoleState.isRunning);
+    // Dynamic Credit Quota Gatekeeper for Selected Batch
+    const ratePerEntity = (entityType === "lob") ? 4 : 1;
+    const reqCredits = count * ratePerEntity;
+    const availCredits = window._cachedWorkspaceBalance;
+
+    if (count > 0) {
+      $("#batchReqCreditsBadge").removeClass("d-none");
+      $("#batchReqCreditsVal").text(reqCredits);
+      if (availCredits !== null && availCredits < reqCredits) {
+        $("#batchRemainingCreditsVal").removeClass("text-success").addClass("text-danger");
+        $runBtn.prop("disabled", true)
+          .attr("title", `Insufficient balance: ${availCredits} cr available, ${reqCredits} cr required for selected batch`);
+      } else {
+        $("#batchRemainingCreditsVal").removeClass("text-danger").addClass("text-success");
+        $runBtn.prop("disabled", count === 0 || batchConsoleState.isRunning).removeAttr("title");
+      }
+    } else {
+      $("#batchReqCreditsBadge").addClass("d-none");
+      $("#batchRemainingCreditsVal").removeClass("text-danger").addClass("text-success");
+      $runBtn.prop("disabled", count === 0 || batchConsoleState.isRunning).removeAttr("title");
+    }
 
     // Update master checkbox state
     const visibleKeys = batchConsoleState.filteredItems.map((i) => i.key || i.id);
@@ -12038,6 +12068,7 @@ $(function () {
     }
 
     showToast(`Batch completed: ${successCount} enriched successfully!`, "success");
+    fetchWorkspaceCreditBalance();
   }
 
   // ── Batch Console Event Listeners ──
@@ -12956,6 +12987,67 @@ $(function () {
   // ══════════════════════════════════════════════════════════════════
   // LOB AUTOMATION CLIENT ENGINE — PHASED INGESTION & HANDOFF
   // ══════════════════════════════════════════════════════════════════
+  function authHeaders() {
+    const token = (typeof sessionStorage !== "undefined" && sessionStorage.getItem("access_token")) ||
+                  (typeof localStorage !== "undefined" && localStorage.getItem("access_token")) || "";
+    const h = { "Content-Type": "application/json" };
+    if (token) h["Authorization"] = `Bearer ${token}`;
+    return h;
+  }
+
+  window._cachedWorkspaceBalance = null;
+
+  async function fetchWorkspaceCreditBalance() {
+    try {
+      const res = await fetch(`${API_BASE}/api/lobs/workspace-balance`, {
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const bal = typeof data.available_credits === "number" ? data.available_credits : 1000;
+        window._cachedWorkspaceBalance = bal;
+        $("#batchRemainingCreditsVal").text(bal.toLocaleString());
+        return bal;
+      }
+    } catch (err) {
+      console.warn("Failed to fetch workspace balance:", err);
+    }
+    return 1000;
+  }
+
+  function showLobHandoffActionRibbon(context) {
+    if (!context) return;
+    window._activeLobHandoffContext = context;
+    const estCount = context.estimatedCount || 10;
+    const estCredits = estCount * 4;
+    $("#ribbonLobCredits").text(estCredits);
+    $("#lobHandoffActionRibbon").removeClass("d-none").addClass("d-flex");
+  }
+
+  function hideLobHandoffActionRibbon() {
+    $("#lobHandoffActionRibbon").removeClass("d-flex").addClass("d-none");
+  }
+
+  // Deferrable Handoff Handlers: Review Account First & Resume Later
+  $(document).on("click", "#btnLobReviewAccountFirst", function () {
+    $("#lobHandoffPromptModal").modal("hide");
+    if (window._activeLobHandoffContext) {
+      showLobHandoffActionRibbon(window._activeLobHandoffContext);
+      showNotification("Account review active. You can review all account telemetry below and click 'Ingest LOBs Now' whenever you're ready.", "info", 5000);
+    }
+  });
+
+  $(document).on("click", "#btnRibbonStartLobs", function () {
+    if (window._activeLobHandoffContext) {
+      const { accountId, companyName, domain, secCik } = window._activeLobHandoffContext;
+      promptLobAutomationHandoff(accountId, companyName, domain, secCik);
+    }
+  });
+
+  $(document).on("click", "#btnRibbonDismiss", function () {
+    hideLobHandoffActionRibbon();
+  });
+
   window._activeLobHandoffContext = null;
   window._selectedLobBatchSize = 10;
 
@@ -13146,7 +13238,29 @@ $(function () {
         const job = await res.json();
         const pct = job.progress_pct || 15;
         $fill.css("width", `${pct}%`);
-        $status.html(`<strong>Running:</strong> ${esc(job.message || 'Processing LOBs...')}`);
+        
+        const curPhase = job.current_phase || 1;
+        const totPhases = job.total_phases || 1;
+        const procCount = job.processed_count || 0;
+        const totCount = job.total_lobs || 0;
+        const balBadge = job.credits_remaining != null ? ` &bull; <span class="badge bg-light text-dark border">${job.credits_remaining} cr balance</span>` : '';
+        $status.html(`<strong>Phase ${curPhase} of ${totPhases}:</strong> ${esc(job.message || 'Processing LOBs...')} <small class="text-muted">(${procCount}/${totCount} divisions)</small>${balBadge}`);
+
+        if (job.status === "paused_insufficient_credits") {
+          clearInterval(interval);
+          $fill.css("width", `${pct}%`).css("background", "#f59e0b");
+          const reqCr = job.next_phase_required || 40;
+          const remCr = job.credits_remaining || 0;
+          $status.html(
+            `<span class="text-warning"><strong>⚠️ Pipeline Paused (Insufficient Credits):</strong> Required ${reqCr} cr for next batch phase, but workspace balance is ${remCr} cr. Safely saved ${procCount} LOBs into database.</span>`
+          );
+          showNotification(`⚠️ LOB pipeline paused due to low balance (${remCr} cr available, ${reqCr} cr needed). Saved ${procCount} LOBs.`, "warning", 9000);
+          reloadAccountLobs(accountId);
+          refreshBatchHistoryTable();
+          refreshTelemetryStrip();
+          fetchWorkspaceCreditBalance();
+          return;
+        }
 
         if (job.status === "done") {
           clearInterval(interval);
@@ -13169,10 +13283,12 @@ $(function () {
             8000
           );
 
-          // Reload fresh LOBs from DB
+          // Reload fresh LOBs from DB and update balance
+          hideLobHandoffActionRibbon();
           reloadAccountLobs(accountId);
           refreshBatchHistoryTable();
           refreshTelemetryStrip();
+          fetchWorkspaceCreditBalance();
 
         } else if (job.status === "failed") {
           clearInterval(interval);

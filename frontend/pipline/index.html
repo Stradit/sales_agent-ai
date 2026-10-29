@@ -253,6 +253,32 @@
           <!-- Tabs Strip Bar (Overview, LOBs, Personas, Feeds, Activity) -->
           <div id="tabsContainer" class="pipeline-tabs-bar"></div>
 
+          <!-- Deferrable LOB Ingestion Action Ribbon (shown when account is ingested but LOBs not yet run, or when user selects "Review Account First") -->
+          <div id="lobHandoffActionRibbon" class="lob-handoff-action-ribbon alert alert-primary d-none fade-in" style="background:linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);border:1.5px solid #93c5fd;border-radius:14px;padding:16px 20px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 16px rgba(59,130,246,0.08);gap:16px;">
+            <div style="display:flex;align-items:center;gap:14px;">
+              <div style="width:42px;height:42px;border-radius:12px;background:#dbeafe;color:#2563eb;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;">
+                <i class="bi bi-diagram-3-fill"></i>
+              </div>
+              <div>
+                <div style="font-weight:700;font-size:0.92rem;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                  <span>Account Enriched &amp; Verified</span>
+                  <span class="badge" style="background:#dcfce7;color:#16a34a;border:1px solid #86efac;font-size:0.68rem;padding:3px 8px;">Ready for LOBs</span>
+                </div>
+                <div style="font-size:0.77rem;color:#475569;margin-top:2px;">
+                  Review metrics, 10-K filings, and executive personas at your own pace. When ready, kick off autonomous Line of Business extraction.
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+              <button type="button" class="btn btn-sm btn-success" id="btnRibbonStartLobs" style="font-weight:700;border-radius:8px;padding:7px 18px;background:linear-gradient(135deg, #10b981 0%, #059669 100%);border:none;box-shadow:0 3px 10px rgba(16,185,129,0.3);display:inline-flex;align-items:center;gap:6px;">
+                <i class="bi bi-lightning-charge-fill"></i> Ingest LOBs Now (<span id="ribbonLobCredits">40</span> cr) &rarr;
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRibbonDismiss" title="Dismiss banner" style="border-radius:8px;padding:7px 12px;">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+          </div>
+
           <!-- Account Overview Content (2-Column Grid) -->
           <div id="accountOverviewContainer" class="fade-in"></div>
         </div>
@@ -494,7 +520,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=3.42.0"></script>
+<script src="js/app.js?v=3.43.0"></script>
 <script src="js/chatbot.js?v=2.3.6"></script>
 
 <!-- --- Enhanced Add New Account Modal --- -->
@@ -742,8 +768,8 @@
         <!-- Dynamically rendered preview: account name, discovered stubs, rate card estimate -->
       </div>
       <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 26px;display:flex;justify-content:space-between;align-items:center;">
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;padding:8px 18px;font-weight:600;">
-          Decide Later
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnLobReviewAccountFirst" style="border-radius:8px;padding:8px 18px;font-weight:600;display:inline-flex;align-items:center;gap:6px;">
+          <i class="bi bi-eye"></i> Review Account First (Remind Later)
         </button>
         <div style="display:flex;gap:10px;align-items:center;">
           <button type="button" id="btnLobDiscoverStubsOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:8px 18px;font-weight:600;display:inline-flex;align-items:center;gap:6px;">
@@ -1595,6 +1621,12 @@
       </div>
 
       <div class="batch-action-right">
+        <!-- Live Workspace Credit Balance & Selected Quota Indicator -->
+        <div class="batch-credits-indicator" id="batchCreditsIndicator" style="display:inline-flex;align-items:center;gap:6px;background:#f8fafc;padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:0.78rem;font-weight:600;" title="Current Workspace Remaining Credits &amp; Selected Batch Quota">
+          <i class="bi bi-wallet2 text-success"></i>
+          <span>Balance: <strong id="batchRemainingCreditsVal" class="text-success">...</strong> cr</span>
+          <span id="batchReqCreditsBadge" class="badge bg-secondary-subtle text-secondary border border-secondary-subtle ms-1 d-none" style="font-size:0.72rem;">Req: <span id="batchReqCreditsVal">0</span> cr</span>
+        </div>
         <button type="button" class="btn-batch-action btn-batch-autonomous d-none" id="batchRunAutonomousPhasedBtn"
                 title="Run Autonomous Phased Pipeline (Discover, Partition into 10/15 batches, Preflight Check &amp; Self-Healing Retry)"
                 style="background:linear-gradient(135deg, #10b981 0%, #059669 100%);color:#fff;border:none;box-shadow:0 2px 8px rgba(16,185,129,0.35);font-weight:600;display:inline-flex;align-items:center;gap:6px;">

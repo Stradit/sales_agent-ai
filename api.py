@@ -2475,6 +2475,12 @@ if FASTAPI_AVAILABLE:
     # ══════════════════════════════════════════════════════
     lobs_router = APIRouter(prefix="/api/lobs", tags=["2. LOB & Sub-LOB Level"])
 
+    @lobs_router.get("/workspace-balance")
+    def get_lob_workspace_balance():
+        """Returns live workspace credit balance for Batch Console & LOB orchestrator."""
+        from services.account_automation_engine import AccountAutomationEngine
+        return AccountAutomationEngine.get_workspace_credit_balance()
+
     @lobs_router.post("/preflight")
     def preflight_lob_check(req: LobPreflightRequest):
         """Pre-flight credit and resource gatekeeper for LOB automation."""
