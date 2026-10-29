@@ -4639,6 +4639,269 @@ $(function () {
   }
   window.renderNeedsAttentionPanel = renderNeedsAttentionPanel;
 
+  // ── Hub Multi-View Tab Switcher (Overview, CRM Import, People) ──
+  let _currentHubView = "overview";
+  let _peopleState = { accountId: "", search: "", offset: 0, limit: 50, total: 2240 };
+  let _crmBacklogCache = [];
+
+  function switchHubView(viewName) {
+    _currentHubView = viewName || "overview";
+
+    // Update active tab buttons
+    $(".hub-subnav-btn").removeClass("active").css({ background: "#fff", color: "#475569", borderColor: "#e2e8f0", boxShadow: "none" });
+    if (_currentHubView === "overview") {
+      $("#hubTabOverviewBtn").addClass("active").css({ background: "#eef2ff", color: "#4338ca", borderColor: "#c7d2fe", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
+      $("#hubViewOverview").show();
+      $("#hubViewCrm").hide();
+      $("#hubViewPeople").hide();
+      renderEmptyStateHub();
+    } else if (_currentHubView === "crm") {
+      $("#hubTabCrmBtn").addClass("active").css({ background: "#eef2ff", color: "#4338ca", borderColor: "#c7d2fe", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
+      $("#hubViewOverview").hide();
+      $("#hubViewCrm").show();
+      $("#hubViewPeople").hide();
+      loadHubCrmView();
+    } else if (_currentHubView === "people") {
+      $("#hubTabPeopleBtn").addClass("active").css({ background: "#eef2ff", color: "#4338ca", borderColor: "#c7d2fe", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
+      $("#hubViewOverview").hide();
+      $("#hubViewCrm").hide();
+      $("#hubViewPeople").show();
+      loadHubPeopleView();
+    }
+  }
+  window.switchHubView = switchHubView;
+
+  // ── CRM Backlog View Loader (Reference Image 2) ──
+  async function loadHubCrmView(search) {
+    const $tbody = $("#hubCrmTableBody");
+    if (!$tbody.length) return;
+    $tbody.html('<tr><td colspan="7" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading CRM backlog...</td></tr>');
+
+    try {
+      const token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+      const headers = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      let url = `${API_BASE}/api/system/crm-backlog`;
+      if (search) url += `?search=${encodeURIComponent(search)}`;
+
+      const res = await fetch(url, { headers, credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      _crmBacklogCache = data.items || [];
+      $("#hubCrmBadgeCount").text(_crmBacklogCache.length);
+
+      renderCrmBacklogTable(_crmBacklogCache);
+    } catch (err) {
+      console.warn("[loadHubCrmView] Error:", err);
+      $tbody.html(`<tr><td colspan="7" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Failed to load CRM targets: ${esc(err.message)}</td></tr>`);
+    }
+  }
+  window.loadHubCrmView = loadHubCrmView;
+
+  function renderCrmBacklogTable(items) {
+    const $tbody = $("#hubCrmTableBody");
+    if (!items || !items.length) {
+      $tbody.html('<tr><td colspan="7" class="text-center py-4 text-muted">No CRM targets found.</td></tr>');
+      return;
+    }
+
+    const html = items.map(it => {
+      const lastScrapedStr = it.last_scraped ? formatTimeAgo(it.last_scraped) : "Pending sync";
+      const statusBadge = it.tracking_status === "active"
+        ? '<span class="badge bg-success-subtle text-success" style="font-weight:700;"><i class="bi bi-check2-circle me-1"></i>Active Tracking</span>'
+        : '<span class="badge bg-secondary-subtle text-secondary" style="font-weight:700;">Backlog</span>';
+
+      return `
+        <tr>
+          <td style="padding:12px 16px;">
+            <div style="font-weight:800;color:#0f172a;font-size:0.86rem;">${esc(it.company_name)}</div>
+            <div style="font-size:0.7rem;color:#94a3b8;">ID: #${it.id} &bull; ${it.channels_available} Connectors</div>
+          </td>
+          <td style="padding:12px 12px;">
+            <a href="https://${esc(it.domain)}" target="_blank" rel="noopener" style="color:#4f46e5;font-weight:600;text-decoration:none;">
+              <i class="bi bi-globe2 me-1"></i>${esc(it.domain)}
+            </a>
+          </td>
+          <td style="padding:12px 12px;">
+            <span class="badge bg-light text-dark border" style="font-weight:700;font-size:0.75rem;">
+              <i class="bi bi-diagram-3 me-1 text-primary"></i>${it.lobs_count} LOBs
+            </span>
+          </td>
+          <td style="padding:12px 12px;">
+            <span class="badge bg-purple-subtle text-purple border" style="background:#f3e8ff;color:#7e22ce;font-weight:700;font-size:0.75rem;">
+              <i class="bi bi-people me-1"></i>${it.personas_count} Personas
+            </span>
+          </td>
+          <td style="padding:12px 12px;">${statusBadge}</td>
+          <td style="padding:12px 12px;color:#64748b;font-size:0.75rem;">${esc(lastScrapedStr)}</td>
+          <td style="padding:12px 16px;text-align:right;">
+            <button type="button" class="btn btn-sm btn-primary" style="font-weight:700;font-size:0.74rem;border-radius:6px;padding:4px 12px;" onclick="loadAccountDetail(${it.id})">
+              <i class="bi bi-arrow-right-circle me-1"></i>Explore
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    $tbody.html(html);
+  }
+
+  function filterCrmBacklogTable(query) {
+    if (!_crmBacklogCache || !_crmBacklogCache.length) return;
+    const q = (query || "").toLowerCase().trim();
+    if (!q) {
+      renderCrmBacklogTable(_crmBacklogCache);
+      return;
+    }
+    const filtered = _crmBacklogCache.filter(it => 
+      (it.company_name && it.company_name.toLowerCase().includes(q)) ||
+      (it.domain && it.domain.toLowerCase().includes(q))
+    );
+    renderCrmBacklogTable(filtered);
+  }
+  window.filterCrmBacklogTable = filterCrmBacklogTable;
+
+  // ── Executive Intelligence (People) View Loader (Reference Image 3) ──
+  async function loadHubPeopleView(accountId, search, offset) {
+    const $tbody = $("#hubPeopleTableBody");
+    if (!$tbody.length) return;
+    $tbody.html('<tr><td colspan="6" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading executive directory from PostgreSQL...</td></tr>');
+
+    if (accountId !== undefined) _peopleState.accountId = accountId;
+    if (search !== undefined) _peopleState.search = search;
+    if (offset !== undefined) _peopleState.offset = offset;
+
+    // Populate Account Filter dropdown if needed
+    const $acctSel = $("#peopleAccountFilter");
+    if ($acctSel.length && $acctSel.children().length <= 1) {
+      const accts = (typeof MOCK_DATA !== "undefined" && Array.isArray(MOCK_DATA.accounts)) ? MOCK_DATA.accounts : [];
+      let opts = '<option value="">All Accounts (6)</option>';
+      accts.forEach(a => {
+        opts += `<option value="${a.id}">${esc(a.display_name || a.name)}</option>`;
+      });
+      $acctSel.html(opts);
+    }
+
+    try {
+      const token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+      const headers = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      let url = `${API_BASE}/api/system/people-directory?limit=${_peopleState.limit}&offset=${_peopleState.offset}`;
+      if (_peopleState.accountId) url += `&account_id=${_peopleState.accountId}`;
+      if (_peopleState.search) url += `&search=${encodeURIComponent(_peopleState.search)}`;
+
+      const res = await fetch(url, { headers, credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      _peopleState.total = data.total || 0;
+      $("#hubPeopleBadgeCount").text(_peopleState.total.toLocaleString());
+      $("#hubPeopleStatsSub").text(`Displaying ${_peopleState.total.toLocaleString()} executive personas tracked across enterprise accounts with live channel verification.`);
+
+      // Update Pagination Info
+      const startIdx = _peopleState.total > 0 ? _peopleState.offset + 1 : 0;
+      const endIdx = Math.min(_peopleState.offset + _peopleState.limit, _peopleState.total);
+      $("#peoplePaginationInfo").text(`Showing ${startIdx.toLocaleString()} to ${endIdx.toLocaleString()} of ${_peopleState.total.toLocaleString()} personas`);
+      $("#peoplePrevBtn").prop("disabled", _peopleState.offset <= 0);
+      $("#peopleNextBtn").prop("disabled", endIdx >= _peopleState.total);
+
+      renderPeopleTable(data.items || []);
+    } catch (err) {
+      console.warn("[loadHubPeopleView] Error:", err);
+      $tbody.html(`<tr><td colspan="6" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Failed to load personas: ${esc(err.message)}</td></tr>`);
+    }
+  }
+  window.loadHubPeopleView = loadHubPeopleView;
+
+  function renderPeopleTable(items) {
+    const $tbody = $("#hubPeopleTableBody");
+    if (!items || !items.length) {
+      $tbody.html('<tr><td colspan="6" class="text-center py-4 text-muted">No personas match the selected filters.</td></tr>');
+      return;
+    }
+
+    const html = items.map(p => {
+      const ch = p.channels || {};
+      const chBadges = [
+        ch.linkedin ? '<span class="badge" style="background:#0a66c2;color:#fff;font-size:0.68rem;padding:3px 6px;margin-right:3px;">in</span>' : '',
+        ch.twitter ? '<span class="badge" style="background:#0f1419;color:#fff;font-size:0.68rem;padding:3px 6px;margin-right:3px;">X</span>' : '',
+        ch.reddit ? '<span class="badge" style="background:#ff4500;color:#fff;font-size:0.68rem;padding:3px 6px;margin-right:3px;">reddit</span>' : '',
+        ch.patents ? '<span class="badge" style="background:#2563eb;color:#fff;font-size:0.68rem;padding:3px 6px;margin-right:3px;">patents</span>' : '',
+        ch.web ? '<span class="badge" style="background:#059669;color:#fff;font-size:0.68rem;padding:3px 6px;">globe</span>' : '',
+      ].filter(Boolean).join("") || '<span style="color:#94a3b8;font-size:0.7rem;">None verified</span>';
+
+      const contactPills = [];
+      if (p.email) {
+        contactPills.push(`<span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size:0.7rem;"><i class="bi bi-envelope-check me-1"></i>${esc(p.email)}</span>`);
+      }
+      if (p.phone) {
+        contactPills.push(`<span class="badge bg-light text-secondary border" style="font-size:0.7rem;"><i class="bi bi-telephone me-1"></i>${esc(p.phone)}</span>`);
+      }
+      if (!contactPills.length) {
+        contactPills.push('<span style="color:#94a3b8;font-size:0.7rem;">Awaiting enrichment</span>');
+      }
+
+      let statusBadge = '<span class="badge bg-success-subtle text-success" style="font-weight:700;"><i class="bi bi-shield-check me-1"></i>Enriched</span>';
+      if (p.status === "Pending") {
+        statusBadge = '<span class="badge bg-warning-subtle text-warning" style="font-weight:700;"><i class="bi bi-hourglass-split me-1"></i>Pending</span>';
+      }
+
+      return `
+        <tr>
+          <td style="padding:10px 16px;">
+            <div style="font-weight:800;color:#0f172a;font-size:0.86rem;">${esc(p.full_name)}</div>
+            <div style="font-size:0.72rem;color:#64748b;margin-top:1px;">${esc(p.title)}</div>
+          </td>
+          <td style="padding:10px 12px;">
+            <span class="badge bg-light text-dark border" style="font-weight:600;font-size:0.74rem;">${esc(p.account_name)}</span>
+          </td>
+          <td style="padding:10px 12px;">${chBadges}</td>
+          <td style="padding:10px 12px;">${contactPills.join(" ")}</td>
+          <td style="padding:10px 12px;">${statusBadge}</td>
+          <td style="padding:10px 16px;text-align:right;">
+            <button type="button" class="btn btn-sm btn-outline-primary" style="font-weight:700;font-size:0.74rem;border-radius:6px;padding:4px 10px;" onclick="loadAccountDetail(${p.account_id})">
+              <i class="bi bi-person-lines-fill me-1"></i>View
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    $tbody.html(html);
+  }
+
+  function filterPeopleDirectory() {
+    const acctId = $("#peopleAccountFilter").val();
+    _peopleState.offset = 0;
+    loadHubPeopleView(acctId, _peopleState.search, 0);
+  }
+  window.filterPeopleDirectory = filterPeopleDirectory;
+
+  let _peopleSearchTimeout = null;
+  function debouncePeopleSearch() {
+    clearTimeout(_peopleSearchTimeout);
+    _peopleSearchTimeout = setTimeout(() => {
+      const q = $("#peopleSearchInput").val();
+      _peopleState.offset = 0;
+      loadHubPeopleView(_peopleState.accountId, q, 0);
+    }, 300);
+  }
+  window.debouncePeopleSearch = debouncePeopleSearch;
+
+  function reloadPeopleDirectory() {
+    loadHubPeopleView(_peopleState.accountId, _peopleState.search, _peopleState.offset);
+  }
+  window.reloadPeopleDirectory = reloadPeopleDirectory;
+
+  function changePeoplePage(delta) {
+    const newOffset = _peopleState.offset + (delta * _peopleState.limit);
+    if (newOffset < 0 || newOffset >= _peopleState.total) return;
+    loadHubPeopleView(_peopleState.accountId, _peopleState.search, newOffset);
+  }
+  window.changePeoplePage = changePeoplePage;
+
   let _hubRenderPending = false;
   async function renderEmptyStateHub() {
     const $hub = $("#emptyState");
@@ -4696,12 +4959,7 @@ $(function () {
       console.warn("[renderEmptyStateHub] Pipeline overview fetch error:", err);
     }
 
-    // 2. Render Enterprise Portfolio & Outreach Readiness Cards
-    const accts = (typeof MOCK_DATA !== "undefined" && Array.isArray(MOCK_DATA.accounts))
-      ? MOCK_DATA.accounts
-      : [];
-    $("#hubPortfolioAccountsCountBadge").text(`${accts.length} Accounts Monitored`);
-    $("#hubPortfolioGrid").html(renderHubPortfolioGrid(accts));
+    // Enterprise portfolio grid relocated to CRM Import & Target Backlog view (Reference Image 2)
 
     // 3. Render Pipeline Resource Architecture & Data Lineage (Two-Tier Filter Grid inside collapsible reference)
       hubLineageFilterState = { layer: "all", cost: "all" };

@@ -171,6 +171,23 @@
           </div>
         </div>
 
+        <!-- Hub View Sub-Navigation (Matching Reference Images: Overview | CRM Import | People) -->
+        <div class="hub-nav-tabs" style="display:flex;align-items:center;gap:8px;margin-top:16px;border-bottom:1px solid #e2e8f0;padding-bottom:10px;">
+          <button type="button" class="btn btn-sm hub-subnav-btn active" id="hubTabOverviewBtn" onclick="switchHubView('overview')" style="font-weight:700;border-radius:8px;padding:7px 16px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+            <i class="bi bi-speedometer2 me-1"></i> Scraper Overview
+          </button>
+          <button type="button" class="btn btn-sm hub-subnav-btn btn-light" id="hubTabCrmBtn" onclick="switchHubView('crm')" style="font-weight:700;border-radius:8px;padding:7px 16px;border:1px solid #e2e8f0;color:#475569;">
+            <i class="bi bi-box-arrow-in-down me-1"></i> CRM Import
+            <span class="badge bg-secondary ms-1" id="hubCrmBadgeCount">6</span>
+          </button>
+          <button type="button" class="btn btn-sm hub-subnav-btn btn-light" id="hubTabPeopleBtn" onclick="switchHubView('people')" style="font-weight:700;border-radius:8px;padding:7px 16px;border:1px solid #e2e8f0;color:#475569;">
+            <i class="bi bi-people-fill me-1"></i> People
+            <span class="badge bg-primary-subtle text-primary ms-1" id="hubPeopleBadgeCount">2,240</span>
+          </button>
+        </div>
+
+        <!-- VIEW 1: Overview Tab Container -->
+        <div id="hubViewOverview">
         <!-- 1. Global 24-Hour Operational Health & Cost Strip -->
         <div class="hub-telemetry-section" style="margin-top:16px;">
           <div class="hub-kpi-grid" id="hubKpiGrid" style="grid-template-columns:repeat(auto-fit, minmax(210px, 1fr));gap:12px;">
@@ -288,24 +305,7 @@
           </div>
         </div>
 
-        <!-- 4. Enterprise Portfolio & Outreach Readiness Matrix (Preserved) -->
-        <div class="pipeline-section-card fade-in" style="margin-top:16px;">
-          <div class="section-title-row">
-            <div class="section-title-left">
-              <span class="section-title-dot"></span>
-              <span>Enterprise Portfolio &amp; Outreach Readiness</span>
-              <span class="badge-feed-count" id="hubPortfolioAccountsCountBadge">6 Accounts</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:12px;">
-              <span class="section-subtitle-hint"><i class="bi bi-shield-check text-success"></i> PostgreSQL Ground Truth</span>
-            </div>
-          </div>
-          <div class="hub-portfolio-grid" id="hubPortfolioGrid">
-            <!-- Dynamically populated from live accounts in renderEmptyStateHub() -->
-          </div>
-        </div>
-
-        <!-- 5. Collapsible Technical Lineage & Platforms Reference (Preserved) -->
+        <!-- Collapsible Technical Lineage & Platforms Reference (Preserved) -->
         <div class="pipeline-section-card fade-in" style="margin-top:16px;">
           <div class="section-title-row" style="cursor:pointer;" id="hubLineageToggleRow" title="Click to expand/collapse full platform matrix">
             <div class="section-title-left">
@@ -333,6 +333,100 @@
             </div>
             <div class="hub-lineage-container" id="hubLineageGrid">
               <!-- Dynamically populated cross-filtered cards -->
+            </div>
+          </div>
+        </div>
+        </div>
+        <!-- /VIEW 1: Overview Tab Container -->
+
+        <!-- VIEW 2: CRM Import Tab Container (Reference Image 2) -->
+        <div id="hubViewCrm" style="display:none;margin-top:16px;">
+          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+              <div>
+                <div style="font-size:1rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                  <i class="bi bi-box-arrow-in-down text-primary"></i> CRM Import &amp; Target Backlog
+                </div>
+                <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">
+                  Active enterprise accounts and prospects synced with CRM pipeline tracking.
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="text" id="crmBacklogSearch" class="form-control form-control-sm" placeholder="Filter targets..." style="width:200px;border-radius:8px;font-size:0.78rem;" oninput="filterCrmBacklogTable(this.value)">
+                <button type="button" class="btn btn-sm btn-primary" onclick="showToast('Initiating bulk pipeline sync for all 6 enterprise targets...', 'info');" style="border-radius:8px;font-weight:700;font-size:0.76rem;">
+                  <i class="bi bi-arrow-repeat me-1"></i> Sync All Targets
+                </button>
+              </div>
+            </div>
+
+            <div class="table-responsive" style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;">
+              <table class="table table-hover align-middle mb-0" style="font-size:0.8rem;">
+                <thead style="background:#f8fafc;color:#64748b;font-weight:700;text-transform:uppercase;font-size:0.68rem;">
+                  <tr>
+                    <th style="padding:12px 16px;">Company / Target</th>
+                    <th style="padding:12px 12px;">Primary Domain</th>
+                    <th style="padding:12px 12px;">Operating LOBs</th>
+                    <th style="padding:12px 12px;">Discovered Contacts</th>
+                    <th style="padding:12px 12px;">Tracking Status</th>
+                    <th style="padding:12px 12px;">Last Scraped</th>
+                    <th style="padding:12px 16px;text-align:right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="hubCrmTableBody">
+                  <tr><td colspan="7" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading CRM targets...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- VIEW 3: Executive Intelligence Directory Tab Container (Reference Image 3) -->
+        <div id="hubViewPeople" style="display:none;margin-top:16px;">
+          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+              <div>
+                <div style="font-size:1rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                  <i class="bi bi-people-fill text-indigo" style="color:#6366f1;"></i> Executive Directory &amp; Enriched Personas
+                </div>
+                <div style="font-size:0.75rem;color:#64748b;margin-top:2px;" id="hubPeopleStatsSub">
+                  Showing verified executive personas with multi-channel OSINT and contact intelligence across accounts.
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <select id="peopleAccountFilter" class="form-select form-select-sm" style="width:190px;border-radius:8px;font-size:0.78rem;" onchange="filterPeopleDirectory()">
+                  <option value="">All Accounts (6)</option>
+                </select>
+                <input type="text" id="peopleSearchInput" class="form-control form-control-sm" placeholder="Search by name or title..." style="width:210px;border-radius:8px;font-size:0.78rem;" oninput="debouncePeopleSearch()">
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="reloadPeopleDirectory()" title="Refresh directory" style="border-radius:8px;">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="table-responsive" style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-height:550px;overflow-y:auto;">
+              <table class="table table-hover align-middle mb-0" style="font-size:0.8rem;">
+                <thead style="background:#f8fafc;color:#64748b;font-weight:700;text-transform:uppercase;font-size:0.68rem;position:sticky;top:0;z-index:2;">
+                  <tr>
+                    <th style="padding:12px 16px;">Executive Persona</th>
+                    <th style="padding:12px 12px;">Account</th>
+                    <th style="padding:12px 12px;">Verified Channels</th>
+                    <th style="padding:12px 12px;">Contact Data</th>
+                    <th style="padding:12px 12px;">Status</th>
+                    <th style="padding:12px 16px;text-align:right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="hubPeopleTableBody">
+                  <tr><td colspan="6" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading executive directory...</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-size:0.76rem;color:#64748b;">
+              <span id="peoplePaginationInfo">Showing 1 to 50 of 2,240 personas</span>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-secondary" id="peoplePrevBtn" onclick="changePeoplePage(-1)" disabled>Previous</button>
+                <button type="button" class="btn btn-outline-secondary" id="peopleNextBtn" onclick="changePeoplePage(1)">Next</button>
+              </div>
             </div>
           </div>
         </div>
