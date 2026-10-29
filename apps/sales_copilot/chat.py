@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 
-from apps.sales_copilot import embed, guardrails, llm, moderation, privacy, retrieve, settings
+from apps.sales_copilot import actions, embed, guardrails, llm, moderation, privacy, retrieve, settings
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 PHONE_RE = re.compile(r"(?<!\w)\+?\d[\d\s().-]{7,}\d")
@@ -28,7 +28,10 @@ Rules:
   a **bold label** (e.g. "- **Priorities:** ..."); then an optional line "**Suggested next step:** ...".
 - Group related facts into one bullet. Put citations at the end of a bullet, not after every clause.
 - Do not write email addresses or phone numbers; the app shows a contact card itself.
-- Use markdown (bold, bullets). No tables unless asked."""
+- Use markdown (bold, bullets). No tables unless asked.
+- Never write CSV or file contents. The app itself exports lists to Excel/CSV and creates tasks, deals and
+  introduction requests: if the user wants that, tell them to ask e.g. "export these to Excel" or
+  "create a task for each of them"."""
 
 STYLE = {"brief": "Keep the answer under 90 words.", "balanced": "Keep the answer under 180 words.",
          "detailed": "You may use up to 300 words."}
@@ -148,6 +151,9 @@ def route(q: str, ents: Dict[str, Any]) -> str:
     ql = q.lower().strip()
     if re.match(r"^(/remember|remember( that)?)\b", ql):
         return "remember"
+    act = actions.detect(q)           # "create a task for each of them", "export this to Excel" (actions.py)
+    if act:
+        return act
     if re.search(r"\bwhat('?s| has| have)? changed\b|\bchanges since\b|\bany changes\b", ql):
         return "what_changed"
     if re.search(r"\b(deals?|pipeline|opportunit(y|ies))\b", ql) and \
@@ -414,7 +420,7 @@ def followups(intent: str, q: str, persona: Optional[dict], accounts: List[dict]
         out = [f"Who are the decision-makers at {a}?", f"What is {a} hiring for right now?",
                f"What's new at {a}?", f"What changed at {a} in the last 30 days?", f"List the C-suite at {a}"]
     if intent == "list_people" and table_rows:
-        out = [f"Prep me for a call with {table_rows[0]['name']}"] + out
+        out = ["Export these to Excel", "Create a task for each of them", f"Prep me for a call with {table_rows[0]['name']}"] + out
     keys = {"objection": "objection", "email": "email", "talking about": "talking about", "changed": "changed",
             "prep me": "prep", "decision-makers": "decision", "hiring": "hiring", "new at": "new at", "c-suite": "c-suite"}
     fresh = [s for s in out if not any(k in s.lower() and v in ql for k, v in keys.items())]
@@ -475,7 +481,7 @@ QUERY_EXPANSIONS = [
 ]
 
 # Bump when SYSTEM_PROMPT / DRAFT_INSTRUCTION change: part of the answer-cache key, so old answers aren't reused.
-PROMPT_VERSION = "p3"
+PROMPT_VERSION = "p4"
 
 DRAFT_INSTRUCTION = """The user wants an outreach email drafted. IGNORE the answer format rules above and write a
 ready-to-send, professional and informative B2B email in EXACTLY this layout:
@@ -674,6 +680,12 @@ def answer_without_llm(session, t: Dict[str, Any]) -> bool:
         return True
     if t["intent"] == "deals":
         _answer_deals(session, t)
+        return True
+    if t["intent"] == "export":
+        actions.export_turn(session, t, tool_list_personas)
+        return True
+    if t["intent"] == "create":
+        actions.create_turn(session, t, tool_list_personas)
         return True
     if t["intent"] == "what_changed":
         rows = tool_what_changed(session, t["acl"], persona, accounts)

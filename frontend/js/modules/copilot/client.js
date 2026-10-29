@@ -3,8 +3,13 @@
 // is why streaming uses fetch + ReadableStream instead of EventSource (which can
 // neither POST nor send an Authorization header).
 
-export async function api(path, opts = {}) {
-  const res = await fetch(`/api/copilot${path}`, {
+export function api(path, opts = {}) { return request(`/api/copilot${path}`, opts); }
+
+// Other app endpoints (CRM tasks, deals, introductions) — used when the user confirms a Copilot proposal.
+export function crm(url, opts = {}) { return request(url, opts); }
+
+async function request(url, opts) {
+  const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -14,7 +19,10 @@ export async function api(path, opts = {}) {
     throw new Error('unauthenticated');
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const d = data.detail;   // FastAPI validation errors come as a list
+    throw new Error((Array.isArray(d) ? d.map(x => x.msg).join('; ') : d) || `Request failed (${res.status})`);
+  }
   return data;
 }
 

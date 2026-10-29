@@ -4,9 +4,10 @@ PDF: reportlab (already used by pdf_export.py). Excel: openpyxl — real .xlsx w
 styled, frozen, filterable header so it opens cleanly in Excel / Google Sheets.
 """
 
+import csv
 import re
 from datetime import datetime, timezone
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import Any, Dict, List, Optional
 from xml.sax.saxutils import escape
 
@@ -212,6 +213,19 @@ def table_xlsx(table: Dict[str, Any], title: str) -> bytes:
     info = wb.create_sheet("About")
     _sheet(info, ["Field", "Value"], [["Question", title], ["Exported", _now()], ["Rows", len(table.get("rows") or [])]], [14, 90])
     return _xlsx(wb)
+
+
+def table_csv(table: Dict[str, Any]) -> bytes:
+    """The answer's table as CSV: UTF-8 with a BOM so Excel opens names correctly, and cells that start
+    like a formula (= + - @) quoted with a leading apostrophe so a spreadsheet never runs them."""
+    cols = table.get("columns") or []
+    out = StringIO()
+    w = csv.writer(out)
+    w.writerow([c.replace("_", " ").title() for c in cols])
+    for r in table.get("rows") or []:
+        w.writerow([("'" + v) if isinstance(v, str) and v[:1] in ("=", "+", "-", "@") else ("" if v is None else v)
+                    for v in (r.get(c) for c in cols)])
+    return ("﻿" + out.getvalue()).encode("utf-8")
 
 
 def sources_xlsx(citations: List[Dict[str, Any]], title: str) -> bytes:

@@ -1118,6 +1118,9 @@ async function init() {
   $('inWorkflowClose').addEventListener('click', () => { $('inWorkflowModal').hidden = true; });
   $('inWorkflowModal').addEventListener('click', (e) => { if (e.target === $('inWorkflowModal')) $('inWorkflowModal').hidden = true; });
   await loadIntros();
+  // ?view=wanted|attribution|connectors opens that tab (e.g. from the Copilot after adding to the wishlist)
+  const viewTab = p.get('view') && document.querySelector(`.in-tab[data-view="${CSS.escape(p.get('view'))}"]`);
+  if (viewTab) viewTab.click();
   if (p.get('intro')) openIntro(Number(p.get('intro')));
   if (p.get('new') === '1') openNew({ account_id: p.get('account_id'), persona_id: p.get('persona_id') });
 }

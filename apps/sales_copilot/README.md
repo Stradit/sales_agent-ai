@@ -1338,7 +1338,10 @@ Built with the app's conventions: ES modules in `frontend/js/modules/`, Dastone 
 | Answer text | Allow-listed markdown (paragraphs, bullets, bold, tables, links); everything else escaped |
 | Citation chip `[n]` | Hover shows title, type, date, snippet; click opens the profile page or source URL |
 | Mode badge | `AI` · `From database` · `Sources only` (quota exhausted, with reset time) · `Cached` |
-| Data table | For list intents; row click opens the profile |
+| Data table | For list intents; row click opens the profile. A **Download Excel / CSV** bar sits under every table (`/messages/{id}/export?format=xlsx\|csv`) |
+| Spreadsheet (`export` intent) | "export these to Excel", "download the BNY VPs as CSV" → the last table in the chat, or the people in scope, as a table with the download bar. No LLM (`actions.py`) |
+| Proposal card (`create` intent) | "create a task for each of them", "request introductions to them", "add a deal for BNY" → a card listing the people/accounts it would use, editable, nothing written yet. **Create** calls the normal CRM endpoints with the user's own permissions (tasks, deals, introductions — or the introduction wishlist when no connector is picked; warm paths preselect a connector), then `POST /messages/{id}/actions-done` records what was made so the card isn't offered twice (`actions.py`, `render.js renderActions`) |
+| Code blocks / pipe tables in AI text | Rendered as code / tables; `csv` blocks and tables get **Download CSV** (made in the browser) |
 | Contact card | Name · title · work email · phone · LinkedIn, rendered from `personas` by code |
 | Feedback | 👍/👎 with reasons (wrong, outdated, missing, not relevant) |
 | Actions | Copy · Draft email · 📌 Remember · Share |

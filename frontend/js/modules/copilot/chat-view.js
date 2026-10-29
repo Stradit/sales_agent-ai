@@ -1,8 +1,8 @@
 // Reusable chat surface for the Sales Copilot — used by the /copilot workspace
 // (main.js) and the dock on every other page (dock.js). Owns: message list,
 // streaming, composer (@mentions, /commands, ↑ to edit), answer actions.
-import { api, download, streamChat } from './client.js';
-import { draftPlain, parseDraft, renderEmpty, renderMentionList, renderMessage } from './render.js';
+import { api, crm, download, streamChat } from './client.js';
+import { downloadBlocks, draftPlain, parseDraft, renderEmpty, renderMentionList, renderMessage } from './render.js';
 import { showToast } from '../toast.js';
 
 const SAVE_HINT = /\b(meeting|call|demo|lunch|visit)\b.*\b(on|at|next|tomorrow|monday|tuesday|wednesday|thursday|friday|\d{1,2})\b|\b(we (already|pitched|proposed|sent|met)|they (said|told|mentioned|want|prefer)|prefers?|budget is|decision (by|in))\b/i;
@@ -22,6 +22,7 @@ export class ChatView {
     this.controller = null;
     this.mention = { items: [], index: 0, open: false, timer: null };
     this._raf = null;
+    this.lookups = { connectors: null, warm: {} };   // for "Request introductions" proposals (render.js renderActions)
     this.wire();
   }
 
@@ -53,10 +54,93 @@ export class ChatView {
       box.innerHTML = renderEmpty(this.scopeNames.persona || this.scopeNames.account, sugg, recent);
     } else {
       const lastBot = this.messages.map(m => m.role).lastIndexOf('assistant');
-      box.innerHTML = this.messages.map((m, i) => renderMessage(m, { compact: this.opts.compact, isLast: i === lastBot && i === this.messages.length - 1 })).join('');
+      box.innerHTML = this.messages.map((m, i) => renderMessage(m, { compact: this.opts.compact, lookups: this.lookups,
+        isLast: i === lastBot && i === this.messages.length - 1 })).join('');
       this.scrollToBottom();
+      this.loadLookups();
     }
     this.opts.onMessages && this.opts.onMessages(this);
+  }
+
+  // Connectors and warm paths for open "Request introductions" proposals — fetched once, then re-rendered.
+  async loadLookups() {
+    const open = this.messages.filter(m => m.extras && m.extras.actions && m.extras.actions.kind === 'introduction' && !m.extras.actions.done);
+    if (!open.length || this._lookupsBusy) return;
+    const missing = [...new Set(open.flatMap(m => m.extras.actions.account_ids || []))].filter(id => !(id in this.lookups.warm));
+    if (this.lookups.connectors && !missing.length) return;
+    this._lookupsBusy = true;
+    try {
+      if (!this.lookups.connectors) {
+        const data = await crm('/api/crm/connectors').catch(() => ({ connectors: [] }));
+        this.lookups.connectors = (data.connectors || []).filter(c => c.active !== false);
+      }
+      await Promise.all(missing.map(async (id) => {
+        const data = await crm(`/api/crm/warm-paths?account_id=${encodeURIComponent(id)}`).catch(() => ({ paths: [] }));
+        this.lookups.warm[id] = (data.paths || []).filter(p => p.type === 'connector');
+      }));
+      // Preselect the strongest warm path where the user hasn't chosen yet
+      open.forEach((m) => {
+        const a = m.extras.actions;
+        if (a.connector === undefined) {
+          const best = (a.account_ids || []).flatMap(id => this.lookups.warm[id] || [])[0];
+          a.connector = best && best.strength !== 'weak' ? String(best.id) : '';
+        }
+      });
+    } finally { this._lookupsBusy = false; }
+    this.render();
+  }
+
+  // Edits to a proposal card are kept on the message so they survive re-renders
+  onActionInput(e) {
+    const el = e.target.closest('[data-act-field]');
+    const msgEl = el && el.closest('[data-message-id]');
+    const msg = msgEl && this.messages.find(m => String(m.id) === msgEl.dataset.messageId);
+    const a = msg && msg.extras && msg.extras.actions;
+    if (!a) return;
+    const field = el.dataset.actField;
+    const target = el.dataset.actItem != null ? a.items[Number(el.dataset.actItem)] : a;
+    target[field] = field === 'skip' ? !el.checked : el.value;
+    if (field === 'skip' || field === 'connector') this.render();   // the button count / label changes
+  }
+
+  async runActions(msg, btn) {
+    const a = msg.extras.actions;
+    const items = a.items.filter(it => !it.skip);
+    if (!items.length) { showToast('Nothing selected'); return; }
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating…';
+    const created = [];
+    const failed = [];
+    for (const it of items) {
+      try {
+        if (a.kind === 'task') {
+          const title = (it.title_text || '').trim();
+          if (!title) throw new Error('needs a title');
+          await crm(`/api/accounts/${encodeURIComponent(it.account_id)}/action-items`, { method: 'POST',
+            body: { title, persona_id: it.persona_id, priority: a.priority || 'medium', due_date: a.due || null } });
+          created.push({ label: `Task: ${title}`, href: '/tasks' });
+        } else if (a.kind === 'deal') {
+          const d = await crm('/api/deals', { method: 'POST', body: { account_id: it.account_id, name: (it.name || '').trim(),
+            value_amount: it.value ? Number(it.value) : null, expected_close: it.close || null } });
+          created.push({ label: `Deal: ${d.name}`, href: `/deals?deal=${d.id}` });
+        } else if (a.connector) {
+          const r = await crm('/api/crm/introductions', { method: 'POST', body: { connector_id: Number(a.connector),
+            account_id: it.account_id, persona_id: it.persona_id, context: (a.context || '').trim() || null } });
+          created.push({ label: `Introduction: ${it.name}`, href: `/introductions?intro=${r.id}` });
+        } else {
+          await crm('/api/crm/wanted', { method: 'POST', body: { account_id: it.account_id,
+            role_wanted: `${it.name}${it.title ? ` — ${it.title}` : ''}`.slice(0, 200), note: (a.context || '').trim() || null } });
+          created.push({ label: `Wishlist: ${it.name}`, href: '/introductions?view=wanted' });
+        }
+      } catch (err) { failed.push(`${it.name || it.account}: ${err.message}`); }
+    }
+    if (created.length) {
+      try { a.done = (await api(`/messages/${msg.id}/actions-done`, { method: 'POST', body: { created } })).actions.done; }
+      catch { a.done = created; }
+    }
+    this.render();
+    if (failed.length) showToast(`${created.length ? `Created ${created.length}. ` : ''}Not created — ${failed.slice(0, 2).join('; ')}${failed.length > 2 ? ` (+${failed.length - 2} more)` : ''}`);
+    else showToast(`Created ${created.length}`);
   }
 
   renderLast() {
@@ -69,7 +153,7 @@ export class ChatView {
       const msg = this.messages[this.messages.length - 1];
       if (!last || !msg) return;
       const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
-      last.outerHTML = renderMessage(msg, { compact: this.opts.compact, isLast: true });
+      last.outerHTML = renderMessage(msg, { compact: this.opts.compact, lookups: this.lookups, isLast: true });
       if (nearBottom) box.scrollTop = box.scrollHeight;
     });
   }
@@ -263,6 +347,8 @@ export class ChatView {
       jump.hidden = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 200;
     });
     messages.addEventListener('click', (e) => this.onMessageClick(e));
+    messages.addEventListener('change', (e) => this.onActionInput(e));
+    messages.addEventListener('input', (e) => { if (!e.target.matches('select, [type="checkbox"]')) this.onActionInput(e); });
     messages.addEventListener('keydown', (e) => {
       const th = e.target.closest('th[data-sort]');
       if (th && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); this.sortTable(th); }
@@ -353,6 +439,18 @@ export class ChatView {
         await download(`/messages/${msg.id}/export?format=xlsx`, 'copilot-table.xlsx');
       } else if (action === 'dl-xlsx-sources') {
         await download(`/messages/${msg.id}/export?format=xlsx&part=sources`, 'copilot-sources.xlsx');
+      } else if (action === 'dl-csv') {
+        await download(`/messages/${msg.id}/export?format=csv`, 'copilot-table.csv');
+      } else if (action === 'dl-block') {
+        // A table or ```csv block the AI wrote: saved as-is (BOM so Excel reads UTF-8)
+        const csv = downloadBlocks(msg.content)[Number(act.dataset.block)];
+        if (!csv) return;
+        const url = URL.createObjectURL(new Blob(['﻿', csv], { type: 'text/csv;charset=utf-8' }));
+        const link = Object.assign(document.createElement('a'), { href: url, download: 'copilot-list.csv' });
+        document.body.appendChild(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } else if (action === 'act-create') {
+        await this.runActions(msg, act);
       }
     } catch (err) { showToast(err.message); }
   }
