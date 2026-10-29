@@ -254,10 +254,10 @@
           </div>
         </div>
 
-        <!-- 3. Split Layout: Runs Execution Table (70%) + Needs Attention Diagnostic Box (30%) -->
-        <div class="hub-split-layout" style="display:grid;grid-template-columns:7fr 3fr;gap:16px;margin-top:16px;">
+        <!-- 3. Split Layout: Runs Execution Table (68%) + Needs Attention Diagnostic Box (32%) -->
+        <div class="hub-split-layout" style="display:grid;grid-template-columns:68fr 32fr;gap:18px;margin-top:16px;align-items:start;">
           <!-- Left: Runs Console -->
-          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:18px 20px;">
+          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:18px 20px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
               <div style="font-size:0.95rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
                 <i class="bi bi-play-circle-fill text-primary"></i> Runs
@@ -271,17 +271,17 @@
             </div>
 
             <!-- Runs Table Container -->
-            <div class="table-responsive" style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-height:380px;overflow-y:auto;">
+            <div class="table-responsive" style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-height:450px;overflow-y:auto;">
               <table class="table table-hover align-middle mb-0" style="font-size:0.78rem;">
-                <thead style="background:#f8fafc;color:#64748b;font-weight:700;text-transform:uppercase;font-size:0.68rem;position:sticky;top:0;z-index:2;">
+                <thead style="background:#f8fafc;color:#64748b;font-weight:700;text-transform:uppercase;font-size:0.67rem;position:sticky;top:0;z-index:2;letter-spacing:0.04em;">
                   <tr>
                     <th style="padding:10px 14px;">Target</th>
-                    <th style="padding:10px 10px;">Trigger</th>
-                    <th style="padding:10px 10px;">Channels</th>
-                    <th style="padding:10px 10px;">Yield</th>
-                    <th style="padding:10px 10px;">Duration</th>
-                    <th style="padding:10px 10px;">Status</th>
-                    <th style="padding:10px 14px;text-align:right;">When</th>
+                    <th style="padding:10px 10px;white-space:nowrap;">Trigger</th>
+                    <th style="padding:10px 12px;white-space:nowrap;">Channels &amp; Connectors</th>
+                    <th style="padding:10px 10px;white-space:nowrap;">Yield</th>
+                    <th style="padding:10px 10px;white-space:nowrap;">Duration</th>
+                    <th style="padding:10px 10px;white-space:nowrap;">Status</th>
+                    <th style="padding:10px 14px;text-align:right;white-space:nowrap;">When</th>
                   </tr>
                 </thead>
                 <tbody id="hubOverviewRunsBody">
@@ -292,16 +292,20 @@
           </div>
 
           <!-- Right: Needs Attention Panel -->
-          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:18px 20px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-              <div style="font-size:0.95rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
-                <i class="bi bi-exclamation-triangle-fill text-warning"></i> Needs attention
+          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:16px 18px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <div style="font-size:0.92rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                <i class="bi bi-exclamation-triangle-fill" style="color:#d97706;"></i> Needs Attention
               </div>
-              <span class="badge bg-danger rounded-pill" id="hubNeedsAttentionBadge" style="font-size:0.72rem;padding:4px 8px;">4</span>
+              <span class="badge rounded-pill" id="hubNeedsAttentionBadge" style="font-size:0.72rem;padding:4px 8px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-weight:800;">0</span>
             </div>
-            <div id="hubNeedsAttentionList" style="display:flex;flex-direction:column;gap:10px;">
+            <div id="hubNeedsAttentionList" style="display:flex;flex-direction:column;gap:8px;">
               <!-- Dynamic alert cards populated via JS from live diagnostic payload -->
             </div>
+            <!-- Show More / Show Less toggle button -->
+            <button type="button" class="btn btn-sm w-100" id="hubNeedsAttentionToggleBtn" onclick="toggleNeedsAttentionExpand()" style="display:none;margin-top:10px;font-size:0.74rem;font-weight:700;color:#4f46e5;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px;transition:all 0.2s;">
+              <span id="hubNeedsAttentionToggleText">Show More</span> <i class="bi bi-chevron-down ms-1" id="hubNeedsAttentionToggleIcon"></i>
+            </button>
           </div>
         </div>
 

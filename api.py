@@ -5496,6 +5496,7 @@ if FASTAPI_AVAILABLE:
                 ch_ok = 0
                 ch_fail = 0
 
+                channels_detail = []
                 # Check credits breakdown resources
                 if isinstance(sec_dict, dict) and sec_dict:
                     for tier_k, tier_v in sec_dict.items():
@@ -5506,18 +5507,32 @@ if FASTAPI_AVAILABLE:
                                     ch_ok += 1
                                 elif st in ("error", "failed", "empty"):
                                     ch_fail += 1
+                                channels_detail.append({
+                                    "name": res.get("name", "Channel Resource"),
+                                    "status": "success" if st == "success" else ("empty" if st == "empty" else "failed"),
+                                    "credits": res.get("credits", 0),
+                                    "type": tier_k,
+                                })
 
                 # If no credits breakdown sections, parse execution logs directly
-                if (ch_ok + ch_fail) == 0 and r.execution_logs:
+                if not channels_detail and r.execution_logs:
                     for l in r.execution_logs:
                         if isinstance(l, dict):
                             st = str(l.get("status", "")).lower()
-                            step = str(l.get("step_name", "")).lower()
-                            if "collector:" in step or "selective retry:" in step or "pull" in step or "fetch" in step:
+                            step = str(l.get("step_name", "")).strip()
+                            msg = str(l.get("message", "")).strip()
+                            if any(k in step.lower() for k in ["collector:", "selective retry:", "pull", "fetch", "extract"]):
+                                clean_name = step.replace("Collector: ", "").replace("Selective Retry: ", "")
                                 if st == "success":
                                     ch_ok += 1
                                 elif st in ("failed", "error", "empty"):
                                     ch_fail += 1
+                                channels_detail.append({
+                                    "name": clean_name or "Connector",
+                                    "status": "success" if st == "success" else ("empty" if st == "empty" else "failed"),
+                                    "credits": 1 if st == "success" else 0,
+                                    "message": msg,
+                                })
 
                 # Infer trigger accurately from run_id & action
                 r_id = str(r.run_id or "").lower()
@@ -5565,12 +5580,16 @@ if FASTAPI_AVAILABLE:
                     "target": r.company_name or "Enterprise Target",
                     "trigger": trig,
                     "channels_summary": ch_summary,
+                    "channels_ok": ch_ok,
+                    "channels_failed": ch_fail,
+                    "channels_detail": channels_detail,
                     "yield_summary": yield_summary,
                     "duration_sec": round(float(r.duration_seconds or 0.0), 1),
                     "status": r.status or "success",
                     "when": when_str,
                     "started_at": r.started_at.isoformat() if r.started_at else None,
                     "credits": cr_used,
+                    "error_message": r.error_message,
                 })
 
             # 4. Real Channel Diagnostics ("Needs Attention") Parsed Dynamically from Live DB Logs

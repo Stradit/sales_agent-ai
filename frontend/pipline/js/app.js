@@ -4572,33 +4572,94 @@ $(function () {
 
     const html = filtered.map(r => {
       const statusLower = String(r.status || "success").toLowerCase();
-      let statusBadge = '<span class="badge bg-success-subtle text-success" style="font-weight:700;">success</span>';
+      let statusBadge = '<span class="badge" style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-weight:700;font-size:0.72rem;padding:3px 8px;">success</span>';
       if (statusLower.includes("fail") || statusLower.includes("err")) {
-        statusBadge = '<span class="badge bg-danger-subtle text-danger" style="font-weight:700;">failed</span>';
+        statusBadge = '<span class="badge" style="background:#fff1f2;color:#be123c;border:1px solid #fecdd3;font-weight:700;font-size:0.72rem;padding:3px 8px;">failed</span>';
       } else if (statusLower.includes("part")) {
-        statusBadge = '<span class="badge bg-warning-subtle text-warning" style="font-weight:700;">partial</span>';
+        statusBadge = '<span class="badge" style="background:#fffbeb;color:#b45309;border:1px solid #fde68a;font-weight:700;font-size:0.72rem;padding:3px 8px;">partial</span>';
       } else if (statusLower.includes("run")) {
-        statusBadge = '<span class="badge bg-primary-subtle text-primary" style="font-weight:700;">running</span>';
+        statusBadge = '<span class="badge" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-weight:700;font-size:0.72rem;padding:3px 8px;"><span class="spinner-grow spinner-grow-sm me-1" style="width:0.55rem;height:0.55rem;"></span>running</span>';
       }
 
-      let triggerBadge = `<span class="badge bg-light text-secondary border">${esc(r.trigger || "manual")}</span>`;
-      if (r.trigger === "news") triggerBadge = `<span class="badge bg-info-subtle text-info border border-info-subtle">news</span>`;
-      else if (r.trigger === "lob_batch") triggerBadge = `<span class="badge bg-primary-subtle text-primary border border-primary-subtle">lob_batch</span>`;
-      else if (r.trigger === "persona") triggerBadge = `<span class="badge bg-purple-subtle text-purple border" style="background:#f3e8ff;color:#7e22ce;">persona</span>`;
+      let triggerBadge = `<span class="badge" style="background:#f8fafc;color:#475569;border:1px solid #e2e8f0;font-size:0.7rem;font-weight:600;">${esc(r.trigger || "manual")}</span>`;
+      if (r.trigger === "news") triggerBadge = `<span class="badge" style="background:#f0f9ff;color:#0284c7;border:1px solid #bae6fd;font-size:0.7rem;font-weight:700;"><i class="bi bi-newspaper me-1"></i>news</span>`;
+      else if (r.trigger === "lob_batch") triggerBadge = `<span class="badge" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-size:0.7rem;font-weight:700;"><i class="bi bi-diagram-3 me-1"></i>lob_batch</span>`;
+      else if (r.trigger === "persona") triggerBadge = `<span class="badge" style="background:#faf5ff;color:#7e22ce;border:1px solid #e9d5ff;font-size:0.7rem;font-weight:700;"><i class="bi bi-person me-1"></i>persona</span>`;
+      else if (r.trigger === "retry") triggerBadge = `<span class="badge" style="background:#fffbeb;color:#b45309;border:1px solid #fde68a;font-size:0.7rem;font-weight:700;"><i class="bi bi-arrow-repeat me-1"></i>retry</span>`;
+
+      // Channels Breakdown & Non-Wrapping Badge
+      const chOk = r.channels_ok !== undefined ? r.channels_ok : (parseInt(r.channels_summary) || 0);
+      const chFail = r.channels_failed !== undefined ? r.channels_failed : 0;
+      const chList = r.channels_detail || [];
+
+      const okPill = `<span class="badge" style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-weight:700;font-size:0.72rem;padding:3px 7px;"><i class="bi bi-check2"></i> ${chOk} ok</span>`;
+      const failPill = chFail > 0
+        ? `<span class="badge" style="background:#fff1f2;color:#be123c;border:1px solid #fecdd3;font-weight:700;font-size:0.72rem;padding:3px 7px;"><i class="bi bi-x"></i> ${chFail} failed</span>`
+        : `<span class="badge" style="background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;font-weight:600;font-size:0.72rem;padding:3px 7px;">0 failed</span>`;
+
+      const expandBtn = chList.length > 0
+        ? `<button type="button" class="btn btn-xs btn-light border" onclick="toggleRunChannelsDrawer(${r.id}); event.stopPropagation();" title="Inspect individual channel status" style="font-size:0.68rem;padding:2px 7px;border-radius:4px;font-weight:700;color:#4f46e5;background:#fff;border-color:#cbd5e1;cursor:pointer;"><span id="chevronText_${r.id}">Details</span> <i class="bi bi-chevron-down ms-1" id="chevronIcon_${r.id}"></i></button>`
+        : '';
+
+      const channelsCell = `<div style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">${okPill} ${failPill} ${expandBtn}</div>`;
+
+      // Drawer HTML (Expandable Sub-Row)
+      let drawerRow = '';
+      if (chList.length > 0) {
+        const cardsHtml = chList.map(c => {
+          const isOk = c.status === "success";
+          const isWarn = c.status === "empty";
+          const cardBg = isOk ? "#fff" : (isWarn ? "#fffdf5" : "#fff8f8");
+          const cardBorder = isOk ? "#a7f3d0" : (isWarn ? "#fde68a" : "#fecdd3");
+          const tagBg = isOk ? "#ecfdf5" : (isWarn ? "#fffbeb" : "#fff1f2");
+          const tagColor = isOk ? "#047857" : (isWarn ? "#b45309" : "#be123c");
+          const tagBorder = isOk ? "#a7f3d0" : (isWarn ? "#fde68a" : "#fecdd3");
+          const icon = isOk ? "bi-check-circle-fill text-success" : (isWarn ? "bi-dash-circle-fill text-warning" : "bi-x-circle-fill text-danger");
+          const msg = c.message ? `<div style="font-size:0.68rem;color:#64748b;margin-top:3px;line-height:1.2;">${esc(c.message)}</div>` : '';
+          return `
+            <div style="background:${cardBg};border:1px solid ${cardBorder};border-radius:6px;padding:8px 10px;box-shadow:0 1px 2px rgba(0,0,0,0.02);">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                <strong style="font-size:0.75rem;color:#0f172a;display:flex;align-items:center;gap:5px;">
+                  <i class="bi ${icon}"></i> ${esc(c.name)}
+                </strong>
+                <span class="badge" style="background:${tagBg};color:${tagColor};border:1px solid ${tagBorder};font-size:0.64rem;font-weight:700;text-transform:uppercase;">${esc(c.status)}</span>
+              </div>
+              ${msg}
+            </div>
+          `;
+        }).join("");
+
+        drawerRow = `
+          <tr id="runChannelsDrawer_${r.id}" style="display:none;background:#f8fafc;">
+            <td colspan="7" style="padding:12px 18px;border-top:none;border-bottom:1px solid #e2e8f0;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <span style="font-size:0.76rem;font-weight:800;color:#334155;">
+                  <i class="bi bi-cpu text-primary me-1"></i> Verified Channels Breakdown (${chList.length} Connected Engines)
+                </span>
+                <span style="font-size:0.69rem;color:#94a3b8;">Run ID: ${esc(r.run_id)}</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:8px;">
+                ${cardsHtml}
+              </div>
+            </td>
+          </tr>
+        `;
+      }
 
       return `
-        <tr>
+        <tr style="cursor:pointer;" onclick="toggleRunChannelsDrawer(${r.id})">
           <td style="padding:10px 14px;">
-            <strong style="color:#0f172a;">${esc(r.target)}</strong>
+            <strong style="color:#0f172a;font-size:0.84rem;">${esc(r.target)}</strong>
             <div style="font-size:0.68rem;color:#94a3b8;">${esc(r.run_id || '')}</div>
           </td>
-          <td style="padding:10px 10px;">${triggerBadge}</td>
-          <td style="padding:10px 10px;"><span style="font-weight:600;color:#334155;">${esc(r.channels_summary)}</span></td>
-          <td style="padding:10px 10px;"><span style="color:#64748b;font-weight:600;">${esc(r.yield_summary)}</span></td>
-          <td style="padding:10px 10px;"><span style="color:#64748b;">${r.duration_sec}s</span></td>
-          <td style="padding:10px 10px;">${statusBadge}</td>
-          <td style="padding:10px 14px;text-align:right;color:#64748b;font-size:0.74rem;">${esc(r.when)}</td>
+          <td style="padding:10px 10px;white-space:nowrap;">${triggerBadge}</td>
+          <td style="padding:10px 12px;white-space:nowrap;">${channelsCell}</td>
+          <td style="padding:10px 10px;white-space:nowrap;"><span class="badge" style="background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;font-weight:700;font-size:0.73rem;">${esc(r.yield_summary)}</span></td>
+          <td style="padding:10px 10px;white-space:nowrap;"><span style="color:#64748b;font-weight:600;font-size:0.74rem;"><i class="bi bi-stopwatch text-muted me-1"></i>${r.duration_sec}s</span></td>
+          <td style="padding:10px 10px;white-space:nowrap;">${statusBadge}</td>
+          <td style="padding:10px 14px;text-align:right;color:#64748b;font-size:0.74rem;white-space:nowrap;">${esc(r.when)}</td>
         </tr>
+        ${drawerRow}
       `;
     }).join("");
 
@@ -4606,38 +4667,99 @@ $(function () {
   }
   window.renderOverviewRunsTable = renderOverviewRunsTable;
 
+  function toggleRunChannelsDrawer(runId) {
+    const $drawer = $(`#runChannelsDrawer_${runId}`);
+    const $icon = $(`#chevronIcon_${runId}`);
+    const $text = $(`#chevronText_${runId}`);
+    if (!$drawer.length) return;
+    if ($drawer.is(":visible")) {
+      $drawer.hide();
+      $icon.removeClass("bi-chevron-up").addClass("bi-chevron-down");
+      if ($text.length) $text.text("Details");
+    } else {
+      $drawer.show();
+      $icon.removeClass("bi-chevron-down").addClass("bi-chevron-up");
+      if ($text.length) $text.text("Hide");
+    }
+  }
+  window.toggleRunChannelsDrawer = toggleRunChannelsDrawer;
+
+  let _cachedNeedsAttentionItems = [];
+  let _needsAttentionExpanded = false;
+
   function renderNeedsAttentionPanel(items) {
     const $list = $("#hubNeedsAttentionList");
-    if (!$list.length) {
-      console.warn("[renderNeedsAttentionPanel] #hubNeedsAttentionList not found in DOM");
-      return;
+    const $toggleBtn = $("#hubNeedsAttentionToggleBtn");
+    const $badge = $("#hubNeedsAttentionBadge");
+    if (!$list.length) return;
+
+    if (items) {
+      _cachedNeedsAttentionItems = items;
+    } else {
+      items = _cachedNeedsAttentionItems;
     }
 
     if (!items || !items.length) {
-      $list.html('<div style="text-align:center;padding:16px;color:#10b981;font-size:0.8rem;"><i class="bi bi-shield-check-fill me-1"></i>All connectors operational</div>');
-      $("#hubNeedsAttentionBadge").text("0").removeClass("bg-danger").addClass("bg-success");
+      $list.html('<div style="text-align:center;padding:16px;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;font-size:0.78rem;font-weight:600;"><i class="bi bi-shield-check me-1"></i>All connectors operational &bull; 0 issues</div>');
+      $badge.text("0").css({ background: "#ecfdf5", color: "#047857", borderColor: "#a7f3d0" });
+      if ($toggleBtn.length) $toggleBtn.hide();
       return;
     }
 
-    $("#hubNeedsAttentionBadge").text(items.length);
+    $badge.text(items.length).css({ background: "#fff1f2", color: "#be123c", borderColor: "#fecdd3" });
 
-    const html = items.map(it => `
-      <div style="background:#fff;border:1px solid #fed7aa;border-left:4px solid #f97316;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <strong style="font-size:0.78rem;color:#9a3412;"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>${esc(it.badge || it.channel)}</strong>
-          <span style="font-size:0.66rem;color:#ea580c;font-weight:700;text-transform:uppercase;">${esc(it.status || 'degraded')}</span>
+    // Show top 3 by default unless expanded
+    const visibleItems = _needsAttentionExpanded ? items : items.slice(0, 3);
+
+    const html = visibleItems.map(it => {
+      const isDegraded = it.status === "degraded";
+      const borderLeft = isDegraded ? "#e11d48" : "#d97706";
+      const tagBg = isDegraded ? "#fff1f2" : "#fffbeb";
+      const tagColor = isDegraded ? "#be123c" : "#b45309";
+      const tagBorder = isDegraded ? "#fecdd3" : "#fde68a";
+
+      return `
+        <div style="background:#fff;border:1px solid #e2e8f0;border-left:3.5px solid ${borderLeft};border-radius:8px;padding:8px 12px;display:flex;flex-direction:column;gap:3px;box-shadow:0 1px 2px rgba(0,0,0,0.02);">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+            <strong style="font-size:0.77rem;color:#0f172a;display:flex;align-items:center;gap:5px;">
+              <i class="bi bi-exclamation-triangle-fill" style="color:${borderLeft};"></i> ${esc(it.badge || it.channel)}
+            </strong>
+            <span class="badge" style="background:${tagBg};color:${tagColor};border:1px solid ${tagBorder};font-size:0.65rem;font-weight:700;text-transform:uppercase;">${esc(it.status || 'degraded')}</span>
+          </div>
+          <div style="font-size:0.71rem;color:#475569;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;" title="${esc(it.issue)}">
+            ${esc(it.issue)}
+          </div>
+          <div style="font-size:0.67rem;color:#94a3b8;margin-top:2px;display:flex;align-items:center;justify-content:space-between;">
+            <span>${esc(it.details || '')}</span>
+            <button type="button" class="btn btn-link p-0 text-primary text-decoration-none" style="font-size:0.7rem;font-weight:700;" onclick="showToast('Initiating targeted self-healing check for ${esc(it.channel)}...', 'info');">Test &amp; Heal</button>
+          </div>
         </div>
-        <div style="font-size:0.72rem;color:#475569;line-height:1.3;">${esc(it.issue)}</div>
-        <div style="font-size:0.68rem;color:#94a3b8;margin-top:2px;display:flex;align-items:center;justify-content:space-between;">
-          <span>${esc(it.details || '')}</span>
-          <button type="button" class="btn btn-link p-0 text-primary text-decoration-none" style="font-size:0.7rem;font-weight:700;" onclick="showToast('Initiating targeted self-healing check for ${esc(it.channel)}...', 'info');">Test</button>
-        </div>
-      </div>
-    `).join("");
+      `;
+    }).join("");
 
     $list.html(html);
+
+    if (items.length > 3) {
+      $toggleBtn.show();
+      if (_needsAttentionExpanded) {
+        $("#hubNeedsAttentionToggleText").text("Show Less");
+        $("#hubNeedsAttentionToggleIcon").removeClass("bi-chevron-down").addClass("bi-chevron-up");
+      } else {
+        const remaining = items.length - 3;
+        $("#hubNeedsAttentionToggleText").text(`Show More (${remaining} more alerts)`);
+        $("#hubNeedsAttentionToggleIcon").removeClass("bi-chevron-up").addClass("bi-chevron-down");
+      }
+    } else {
+      $toggleBtn.hide();
+    }
   }
   window.renderNeedsAttentionPanel = renderNeedsAttentionPanel;
+
+  function toggleNeedsAttentionExpand() {
+    _needsAttentionExpanded = !_needsAttentionExpanded;
+    renderNeedsAttentionPanel();
+  }
+  window.toggleNeedsAttentionExpand = toggleNeedsAttentionExpand;
 
   // ── Hub Multi-View Tab Switcher (Overview, CRM Import, People) ──
   let _currentHubView = "overview";
