@@ -92,19 +92,24 @@ export class ChatView {
 
   // Edits to a proposal card are kept on the message so they survive re-renders
   onActionInput(e) {
-    const el = e.target.closest('[data-act-field]');
+    const el = e.target.closest('[data-act-field], [data-act-fld]');
     const msgEl = el && el.closest('[data-message-id]');
     const msg = msgEl && this.messages.find(m => String(m.id) === msgEl.dataset.messageId);
     const a = msg && msg.extras && msg.extras.actions;
     if (!a) return;
+    if (el.dataset.actFld != null) { a.fields[Number(el.dataset.actFld)].value = el.value; return; }   // deal field changes
     const field = el.dataset.actField;
     const target = el.dataset.actItem != null ? a.items[Number(el.dataset.actItem)] : a;
     target[field] = field === 'skip' ? !el.checked : el.value;
-    if (field === 'skip' || field === 'connector') this.render();   // the button count / label changes
+    if (['skip', 'connector', 'type', 'lost_category', 'status'].includes(field)) this.render();   // the button label / required fields change
   }
 
   async runActions(msg, btn) {
     const a = msg.extras.actions;
+    if (a.kind === 'activity') { await this.logActivity(msg, btn); return; }
+    if (a.kind === 'move_deal') { await this.moveDeals(msg, btn); return; }
+    if (a.kind === 'update_deal') { await this.updateDeals(msg, btn); return; }
+    if (a.kind === 'update_intro') { await this.updateIntros(msg, btn); return; }
     const items = a.items.filter(it => !it.skip);
     if (!items.length) { showToast('Nothing selected'); return; }
     btn.disabled = true;
@@ -141,6 +146,121 @@ export class ChatView {
     this.render();
     if (failed.length) showToast(`${created.length ? `Created ${created.length}. ` : ''}Not created — ${failed.slice(0, 2).join('; ')}${failed.length > 2 ? ` (+${failed.length - 2} more)` : ''}`);
     else showToast(`Created ${created.length}`);
+  }
+
+  async markDone(msg, done) {
+    const a = msg.extras.actions;
+    try { a.done = (await api(`/messages/${msg.id}/actions-done`, { method: 'POST', body: { created: done } })).actions.done; }
+    catch { a.done = done; }
+  }
+
+  // One activity on the account timeline, with the ticked people as participants (POST /api/crm/activities)
+  async logActivity(msg, btn) {
+    const a = msg.extras.actions;
+    const subject = (a.subject || '').trim();
+    if (!subject && !(a.summary || '').trim()) { showToast('Add a subject or some notes'); return; }
+    btn.disabled = true;
+    const links = [{ object_type: 'account', object_id: a.account_id }];
+    if (a.deal_id) links.push({ object_type: 'deal', object_id: Number(a.deal_id) });
+    try {
+      await crm('/api/crm/activities', { method: 'POST', body: {
+        type: a.type || 'call', subject: subject || null, summary: (a.summary || '').trim() || null,
+        direction: ['call', 'email', 'linkedin'].includes(a.type || 'call') ? 'outbound' : null,
+        occurred_at: a.when ? new Date(a.when).toISOString() : null, links,
+        participant_persona_ids: a.items.filter(it => !it.skip).map(it => it.persona_id) } });
+      await this.markDone(msg, [{ label: `${subject || 'Activity'} — ${a.account}`, href: `/?account=${a.account_id}` }]);
+      showToast('Logged');
+    } catch (err) { showToast(err.message); }
+    this.render();
+  }
+
+  // Field changes through PATCH /api/deals/{id} — only fields given a new value that differs from now
+  async updateDeals(msg, btn) {
+    const a = msg.extras.actions;
+    const items = a.items.filter(it => !it.skip);
+    if (!items.length) { showToast('Tick the deal to change'); return; }
+    const body = {};
+    const changed = [];
+    for (const f of a.fields) {
+      const v = f.value == null ? '' : String(f.value).trim();
+      const cur = f.current == null ? '' : String(f.current);
+      const numeric = ['value_amount', 'probability'].includes(f.key);
+      const same = numeric ? cur !== '' && Number(v) === Number(cur) : v === cur || v === cur.slice(0, 10);   // dates: compare the day
+      if (v === '' || same) continue;
+      body[f.key] = numeric ? Number(v) : v;
+      changed.push(f.label);
+    }
+    if (!changed.length) { showToast('Enter a new value first'); return; }
+    btn.disabled = true;
+    const done = [];
+    const failed = [];
+    for (const it of items) {
+      try {
+        await crm(`/api/deals/${encodeURIComponent(it.deal_id)}`, { method: 'PATCH', body });
+        done.push({ label: `${it.name}: ${changed.join(', ')} updated`, href: `/deals?deal=${it.deal_id}` });
+      } catch (err) { failed.push(`${it.name}: ${err.message}`); }
+    }
+    if (done.length) await this.markDone(msg, done);
+    this.render();
+    showToast(failed.length ? `Not saved — ${failed.join('; ')}` : 'Saved');
+  }
+
+  // Status and next step through PATCH /api/crm/introductions/{id}; the server checks the status rules
+  async updateIntros(msg, btn) {
+    const a = msg.extras.actions;
+    const items = a.items.filter(it => !it.skip);
+    if (!items.length) { showToast('Tick the introduction to change'); return; }
+    btn.disabled = true;
+    const done = [];
+    const failed = [];
+    for (const it of items) {
+      const body = {};
+      const reason = (a.reason || '').trim();
+      if (a.status && a.status !== it.from) {
+        body.status = a.status;
+        if (a.status === 'declined') body.closed_reason = reason || null;
+        else if (reason) body.reason = reason;
+      }
+      if ((a.next_step || '').trim() !== (it.next_step_now || '').trim()) body.next_step = (a.next_step || '').trim() || null;
+      if (!Object.keys(body).length) { failed.push(`${it.name}: nothing changed`); continue; }
+      try {
+        const r = await crm(`/api/crm/introductions/${encodeURIComponent(it.intro_id)}`, { method: 'PATCH', body });
+        done.push({ label: `Introduction to ${it.name}: ${r.status_label || it.from_label}${body.next_step !== undefined ? ' · next step updated' : ''}`,
+          href: `/introductions?intro=${it.intro_id}` });
+      } catch (err) { failed.push(`${it.name}: ${err.message}`); }
+    }
+    if (done.length) await this.markDone(msg, done);
+    this.render();
+    showToast(failed.length ? `Not saved — ${failed.join('; ')}` : 'Saved');
+  }
+
+  // Stage changes through PATCH /api/deals/{id}: the server applies the same rules as the Deals page
+  async moveDeals(msg, btn) {
+    const a = msg.extras.actions;
+    const items = a.items.filter(it => !it.skip && !it.blocked);
+    if (!items.length) { showToast('Nothing selected'); return; }
+    if (items.some(it => it.back) && !(a.reason || '').trim()) { showToast('Say why the deal moves back a stage'); return; }
+    if (items.some(it => it.to === 'lost')) {
+      if (!a.lost_category) { showToast('Pick why the deal was lost'); return; }
+      if (a.lost_category === 'other' && !(a.lost_reason || '').trim()) { showToast('Add a short note when the reason is Other'); return; }
+    }
+    btn.disabled = true;
+    const done = [];
+    const failed = [];
+    for (const it of items) {
+      const body = { stage: it.to };
+      if (it.back) body.reason = a.reason.trim();
+      if (it.to === 'lost') { body.lost_category = a.lost_category; body.lost_reason = (a.lost_reason || '').trim() || null; }
+      try {
+        const d = await crm(`/api/deals/${encodeURIComponent(it.deal_id)}`, { method: 'PATCH', body });
+        (d.warnings || []).forEach(w => showToast(w));
+        done.push({ label: `${it.name}: ${it.from_label} → ${it.to_label}`, href: `/deals?deal=${it.deal_id}` });
+      } catch (err) { failed.push(`${it.name}: ${err.message}`); }
+    }
+    if (done.length) await this.markDone(msg, done);
+    this.render();
+    if (failed.length) showToast(`Not moved — ${failed.join('; ')}`);
+    else showToast(`Moved ${done.length} deal${done.length === 1 ? '' : 's'}`);
   }
 
   renderLast() {
