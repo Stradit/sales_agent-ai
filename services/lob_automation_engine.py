@@ -23,6 +23,7 @@ Key Architectural Pillars:
    - Detects nested Level-3 child entities and commits them to sub_lobs table linked to parent_lob_id.
 """
 
+import copy
 import logging
 import os
 import time
@@ -430,33 +431,71 @@ class LobAutomationEngine:
         cls,
         lobs_list: List[Dict[str, Any]],
         chunk_size: int = 10,
+        priority_queue: Optional[List[Dict[str, Any]]] = None,
+        batch_size: Optional[int] = None,
+        failed_priority_queue: Optional[List[Dict[str, Any]]] = None,
+        mode: str = "auto",
     ) -> List[List[Dict[str, Any]]]:
-        """Cycle 2: Phased Batch Partitioning.
+        """Cycle 2: Phased Batch Partitioning with Priority Re-Queueing.
 
-        Prioritizes Commercial Brands and Operating Divisions first, then partitions
-        into controlled sequential chunks (e.g. 10 or 15).
+        Step A: Prepends failed LOBs from previous batches to indices 0..k (Front of Queue).
+        Step B: In Auto Mode, prioritizes Commercial Brands and Operating Divisions first.
+                In Manual Mode, preserves exact incoming order.
+        Step C: Chunks into controlled sequential phases (e.g. 10, 15, 25).
         """
-        if not lobs_list:
+        effective_chunk_size = batch_size or chunk_size or cls.DEFAULT_BATCH_SIZE
+        effective_priority = failed_priority_queue if failed_priority_queue is not None else priority_queue
+
+        if not lobs_list and not effective_priority:
             return []
 
-        def _priority_score(item: Dict[str, Any]) -> int:
-            rel = (item.get("relationship_type") or "").lower()
-            name = (item.get("lob_name") or item.get("name") or "").lower()
-            # Priority 1: Commercial Brands / Direct Operating Divisions
-            if "commercial" in rel or "operating division" in rel or "brand" in rel:
-                return 1
-            # Priority 2: Direct Operating Subsidiaries
-            if "direct" in rel or "operating subsidiary" in rel:
-                return 2
-            # Priority 3: Financial / holding units
-            if "holding" in name or "capital" in name or "finance" in name:
-                return 4
-            return 3
+        # 1. Extract and mark priority retry LOBs
+        priority_items: List[Dict[str, Any]] = []
+        priority_names = set()
+        if effective_priority:
+            for item in effective_priority:
+                p_copy = copy.deepcopy(item)
+                p_copy["is_priority_retry"] = True
+                nm = (p_copy.get("lob_name") or p_copy.get("name") or "").strip().lower()
+                if nm and nm not in priority_names:
+                    priority_names.add(nm)
+                    priority_items.append(p_copy)
 
-        sorted_lobs = sorted(lobs_list, key=_priority_score)
+        # 2. Filter out items that are already in priority queue to avoid duplicates
+        remaining = []
+        for l in lobs_list:
+            nm = (l.get("lob_name") or l.get("name") or "").strip().lower()
+            if nm not in priority_names:
+                remaining.append(l)
+
+        # 3. Sort remaining by Corporate Taxonomy if in Auto Mode
+        if mode == "auto":
+            def _priority_score(item: Dict[str, Any]) -> int:
+                rel = (item.get("relationship_type") or "").lower()
+                name = (item.get("lob_name") or item.get("name") or "").lower()
+                # Priority 1: Commercial Brands / Direct Operating Divisions
+                if "commercial" in rel or "operating division" in rel or "brand" in rel:
+                    return 1
+                # Priority 2: Direct Operating Subsidiaries
+                if "direct" in rel or "operating subsidiary" in rel:
+                    return 2
+                # Priority 3: Financial / holding units
+                if "holding" in name or "capital" in name or "finance" in name:
+                    return 4
+                return 3
+
+            sorted_remaining = sorted(remaining, key=_priority_score)
+        else:
+            sorted_remaining = remaining
+
+        # 4. Combine priority items at the FRONT (indices 0..k)
+        ordered_full_list = priority_items + sorted_remaining
+
+        # 5. Chunk into batches
         chunks = []
-        for i in range(0, len(sorted_lobs), chunk_size):
-            chunks.append(sorted_lobs[i : i + chunk_size])
+        for i in range(0, len(ordered_full_list), effective_chunk_size):
+            chunks.append(ordered_full_list[i : i + effective_chunk_size])
+
         return chunks
 
     @classmethod
@@ -496,7 +535,12 @@ class LobAutomationEngine:
         def _enrich_worker(lob_item: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
             l_name = lob_item.get("lob_name") or lob_item.get("name") or "Unknown LOB"
             l_dom = lob_item.get("domain")
+            l_is_retry = lob_item.get("is_priority_retry", False)
             failures = []
+
+            # If this is a priority retry from a previous failed batch, apply cooling backoff
+            if l_is_retry:
+                time.sleep(2.0)
 
             try:
                 # Call LobService.enrich_single_lob
@@ -516,6 +560,7 @@ class LobAutomationEngine:
                     "source": "lob_enricher_core",
                     "error": str(lob_err),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "item_data": lob_item,
                 })
                 # Fallback to existing stub with partial error metadata
                 fallback_dossier = dict(lob_item)
@@ -541,6 +586,7 @@ class LobAutomationEngine:
                             "account_id": account_id,
                             "source": "firecrawl_lob",
                             "reason": "empty_overview_and_scrape",
+                            "item_data": future_map[fut],
                         })
                     if not dossier.get("financial_snippets") and not raw_data.get("tavily"):
                         deferred_failures.append({
@@ -548,6 +594,23 @@ class LobAutomationEngine:
                             "account_id": account_id,
                             "source": "tavily",
                             "reason": "missing_financial_snippets",
+                            "item_data": future_map[fut],
+                        })
+                    if not dossier.get("website_url") and not dossier.get("domain") and not raw_data.get("serper"):
+                        deferred_failures.append({
+                            "lob_name": l_name,
+                            "account_id": account_id,
+                            "source": "serper_lob",
+                            "reason": "missing_website_and_domain",
+                            "item_data": future_map[fut],
+                        })
+                    if not dossier.get("technologies") and not raw_data.get("diffbot"):
+                        deferred_failures.append({
+                            "lob_name": l_name,
+                            "account_id": account_id,
+                            "source": "diffbot",
+                            "reason": "missing_technologies_profile",
+                            "item_data": future_map[fut],
                         })
 
                 except Exception as exc:
@@ -559,6 +622,7 @@ class LobAutomationEngine:
                         "account_id": account_id,
                         "source": "worker_thread",
                         "error": str(exc),
+                        "item_data": lob_it,
                     })
 
         # Calculate credits for this batch
@@ -702,6 +766,26 @@ class LobAutomationEngine:
                 # Adaptive cooling backoff between retries to avoid rate limit cascades
                 time.sleep(2.5)
 
+                # Complete failure recovery: If core enricher crashed, perform targeted full re-enrichment
+                if "lob_enricher_core" in sources:
+                    try:
+                        dossier = LobService.enrich_single_lob(
+                            lob_name=lob_name,
+                            parent_company=company_name,
+                            account_id=account_id,
+                            lob_domain=existing_lob.domain,
+                            sec_cik=acct.sec_cik,
+                        )
+                        if dossier:
+                            existing_lob = CoalescenceEngine.coalesce_lob(existing_lob, dossier)
+                            session.flush()
+                            resolved_count += 1
+                            total_retry_credits += cls.ESTIMATED_CREDITS_PER_LOB
+                            continue
+                    except Exception as full_retry_err:
+                        logger.warning(f"Self-healing complete retry failed for {lob_name}: {full_retry_err}")
+
+                # Partial failure recovery: Targeted micro-retries on missing connector channels
                 recovered_data: Dict[str, Any] = {}
                 for src in set(sources):
                     try:
@@ -822,89 +906,124 @@ class LobAutomationEngine:
                 _jreg_update(job_id, status="done", progress_pct=100, message=msg, result={"lobs": []})
             return {"status": "done", "lobs_count": 0, "message": msg}
 
-        # 3. Cycle 2: Phased Batch Partitioning
-        batches = cls.partition_lobs(stubs, chunk_size=batch_size)
-        total_phases = len(batches)
-        logger.info(f"[*] [LobAutomationEngine] Partitioned {len(stubs)} LOBs into {total_phases} sequential batches.")
-
+        # 3. Cycle 2 & 3: Sequential Batch Execution with Dynamic Priority Re-Queueing
         all_enriched_lobs: List[Dict[str, Any]] = []
         all_deferred_failures: List[Dict[str, Any]] = []
         total_credits = 0
 
-        # 4. Cycle 3: Sequential Batch Execution with Per-Batch Credit Gatekeeping
+        # Dynamic pool of remaining stubs and priority queue for deferred faults
+        remaining_stubs = list(stubs)
+        priority_queue: List[Dict[str, Any]] = []
+        phase_counter = 0
+
+        total_estimated_phases = max(1, (len(stubs) + batch_size - 1) // batch_size)
         rate_per_lob = cls.ESTIMATED_CREDITS_PER_LOB
-        for idx, batch_chunk in enumerate(batches, start=1):
-            batch_req = len(batch_chunk) * rate_per_lob
+
+        while remaining_stubs or priority_queue:
+            phase_counter += 1
+
+            # Build current batch: Priority Queue items FIRST (indices 0..k), then fill up to batch_size with next stubs
+            current_batch: List[Dict[str, Any]] = []
+
+            # Drain priority queue into this batch
+            while priority_queue and len(current_batch) < batch_size:
+                p_item = priority_queue.pop(0)
+                p_item["is_priority_retry"] = True
+                current_batch.append(p_item)
+
+            # Fill remaining slots with next stubs
+            while remaining_stubs and len(current_batch) < batch_size:
+                current_batch.append(remaining_stubs.pop(0))
+
+            if not current_batch:
+                break
+
+            batch_req = len(current_batch) * rate_per_lob
             bal_info = AccountAutomationEngine.get_workspace_credit_balance()
             curr_balance = bal_info.get("available_credits", 0)
 
             # Check if current balance is sufficient for this specific batch
             if curr_balance is not None and curr_balance < batch_req:
                 logger.warning(
-                    f"[!] [LobAutomationEngine] Insufficient credits for Phase {idx}/{total_phases}. "
+                    f"[!] [LobAutomationEngine] Insufficient credits for Phase {phase_counter}/{total_estimated_phases}. "
                     f"Required: {batch_req} cr, Available: {curr_balance} cr. Gracefully pausing execution."
                 )
                 if job_id:
                     _jreg_update(
                         job_id,
                         status="paused_insufficient_credits",
-                        progress_pct=int(20 + ((idx - 1) / total_phases) * 60),
+                        progress_pct=int(20 + ((phase_counter - 1) / total_estimated_phases) * 60),
                         message=(
-                            f"Execution paused at Phase {idx}/{total_phases}: Required {batch_req} cr for next batch, "
+                            f"Execution paused at Phase {phase_counter}/{total_estimated_phases}: Required {batch_req} cr for next batch, "
                             f"but balance is {curr_balance} cr. Safely committed {len(all_enriched_lobs)} LOBs to DB."
                         ),
                         credits_remaining=curr_balance,
                         next_phase_required=batch_req,
-                        completed_phases=idx - 1,
-                        total_phases=total_phases,
+                        completed_phases=phase_counter - 1,
+                        total_phases=total_estimated_phases,
                         processed_count=len(all_enriched_lobs),
                         total_lobs=len(stubs),
-                        error=f"Insufficient credits for Phase {idx}. Previously saved {len(all_enriched_lobs)} LOBs intact.",
+                        error=f"Insufficient credits for Phase {phase_counter}. Previously saved {len(all_enriched_lobs)} LOBs intact.",
                     )
                 return {
                     "status": "paused_insufficient_credits",
                     "reason": "insufficient_credits",
-                    "completed_phases": idx - 1,
-                    "total_phases": total_phases,
+                    "completed_phases": phase_counter - 1,
+                    "total_phases": total_estimated_phases,
                     "processed_lobs_count": len(all_enriched_lobs),
                     "total_lobs_count": len(stubs),
                     "credits_remaining": curr_balance,
                     "next_phase_required": batch_req,
-                    "message": f"Paused at Phase {idx} of {total_phases}: Workspace balance ({curr_balance} cr) is insufficient for next batch ({batch_req} cr).",
+                    "message": f"Paused at Phase {phase_counter} of {total_estimated_phases}: Workspace balance ({curr_balance} cr) is insufficient for next batch ({batch_req} cr).",
                 }
 
             batch_result = cls.execute_lob_batch_phase(
                 account_id=account_id,
                 company_name=company_name,
-                batch_lobs=batch_chunk,
-                phase_number=idx,
-                total_phases=total_phases,
+                batch_lobs=current_batch,
+                phase_number=phase_counter,
+                total_phases=total_estimated_phases,
                 sec_cik=sec_cik,
                 job_id=job_id,
             )
+
             all_enriched_lobs.extend(batch_result.get("enriched_lobs", []))
-            all_deferred_failures.extend(batch_result.get("deferred_failures", []))
             total_credits += batch_result.get("credits_used", 0)
+
+            # Check if any LOBs failed in this batch
+            batch_failures = batch_result.get("deferred_failures", [])
+            if batch_failures:
+                logger.info(
+                    f"[!] [LobAutomationEngine] Phase {phase_counter}: {len(batch_failures)} LOBs/connectors failed. "
+                    "Re-queueing them with PRIORITY for the next batch phase."
+                )
+                for f_item in batch_failures:
+                    item_data = f_item.get("item_data")
+                    if item_data:
+                        priority_queue.append(item_data)
+                    else:
+                        all_deferred_failures.append(f_item)
 
             # Query updated balance after phase execution and project next batch requirement
             post_bal = AccountAutomationEngine.get_workspace_credit_balance().get("available_credits", 0)
-            next_phase_req = (len(batches[idx]) * rate_per_lob) if idx < total_phases else 0
+            next_items_count = min(len(remaining_stubs) + len(priority_queue), batch_size)
+            next_phase_req = next_items_count * rate_per_lob
 
             if job_id:
-                phase_pct = int(20 + (idx / total_phases) * 60)
+                phase_pct = min(85, int(20 + (phase_counter / max(1, total_estimated_phases)) * 60))
                 _jreg_update(
                     job_id,
                     progress_pct=phase_pct,
-                    message=f"Phase {idx}/{total_phases} complete ({len(batch_chunk)} LOBs). {post_bal} credits remaining.",
-                    current_phase=idx,
-                    total_phases=total_phases,
+                    message=f"Phase {phase_counter} complete ({len(current_batch)} LOBs). {post_bal} credits remaining.",
+                    current_phase=phase_counter,
+                    total_phases=total_estimated_phases,
                     processed_count=len(all_enriched_lobs),
                     total_lobs=len(stubs),
                     credits_remaining=post_bal,
                     next_phase_required=next_phase_req,
                 )
 
-        # 5. Cycle 4: Consolidated Deferred Self-Healing Resolution
+        # 4. Cycle 4: Consolidated Deferred Self-Healing Resolution for residual failures
         if all_deferred_failures:
             healing_res = cls.resolve_deferred_faults(
                 account_id=account_id,

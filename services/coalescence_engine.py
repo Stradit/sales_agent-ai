@@ -429,11 +429,12 @@ class CoalescenceEngine:
         """
         Lossless Non-Destructive Merger for Lines of Business (LOBs).
         Shields audited_segment_revenue and operating_head from None overwrites,
-        and deep-merges segment metadata and descriptions.
+        set-unions technologies and competitors, and deep-merges segment metadata and descriptions.
         """
         is_manual = getattr(master, "is_manually_verified", False) or False
 
-        DICT_FIELDS = {"raw_data", "metadata_"}
+        DICT_FIELDS = {"raw_data", "metadata_", "financial_snippets", "patents", "osint_feed_manifest"}
+        LIST_FIELDS = {"technologies", "competitors"}
         SKIP_FIELDS = {"id", "sub_lobs", "personas", "account", "account_id"}
 
         for field, val in incoming_data.items():
@@ -448,7 +449,7 @@ class CoalescenceEngine:
             if current_val is None or current_val == "" or current_val == [] or current_val == {}:
                 if hasattr(master, field):
                     setattr(master, field, val)
-                    if field in DICT_FIELDS:
+                    if field in DICT_FIELDS or field in LIST_FIELDS:
                         flag_modified(master, field)
                 continue
 
@@ -457,6 +458,14 @@ class CoalescenceEngine:
                 if isinstance(val, dict):
                     merged_dict = cls.deep_merge_dicts(current_val if isinstance(current_val, dict) else {}, val)
                     setattr(master, field, merged_dict)
+                    flag_modified(master, field)
+                continue
+
+            # List field set-union (technologies, competitors)
+            if field in LIST_FIELDS:
+                if isinstance(val, list):
+                    merged_list = cls.merge_set_lists(current_val if isinstance(current_val, list) else [], val)
+                    setattr(master, field, merged_list)
                     flag_modified(master, field)
                 continue
 

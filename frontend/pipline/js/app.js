@@ -3037,6 +3037,11 @@ $(function () {
                   ${esc(cfg.label)}
                 </span>
                 ${lob.revenue ? `<span style="font-size:0.7rem;color:#0284c7;font-weight:600;">${esc(lob.revenue)}</span>` : ''}
+                ${(lob.status === 'partial_fault' || (lob._validation_audit && lob._validation_audit.status === 'partial_fault')) ? `
+                  <span class="badge" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;font-size:0.65rem;padding:2px 6px;border-radius:4px;display:inline-flex;align-items:center;gap:3px;" title="Degraded connector harvest: Click to self-heal or re-enrich">
+                    <i class="bi bi-exclamation-triangle-fill" style="font-size:0.65rem;"></i> Partial Fault
+                  </span>
+                ` : ''}
               </div>
             </div>
           </div>
@@ -7725,7 +7730,14 @@ $(function () {
               <div class="compact-card-title">${esc(p.name)}</div>
               ${p.department ? `<span class="persona-dept-tag">${esc(p.department)}</span>` : ""}
             </div>
-            <div class="compact-card-subtitle">${esc(p.title || "Executive")}</div>
+            <div class="compact-card-subtitle" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+              <span>${esc(p.title || "Executive")}</span>
+              ${(p.status === 'partial_fault' || (p._validation_audit && p._validation_audit.status === 'partial_fault')) ? `
+                <span class="badge" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;font-size:0.63rem;padding:1px 5px;border-radius:4px;display:inline-flex;align-items:center;gap:2px;" title="Degraded connector harvest: Click to self-heal or re-enrich">
+                  <i class="bi bi-exclamation-triangle-fill" style="font-size:0.6rem;"></i> Partial
+                </span>
+              ` : ''}
+            </div>
             ${actionsHtml}
           </div>
         </div>
@@ -11448,6 +11460,9 @@ $(function () {
   // Helper: check if a persona is truly deeply enriched (has Gemini AI dossier, extended profile, education, or past companies)
   function isPersonaItemEnriched(p) {
     if (!p) return false;
+    if (p.status === "discovered_stub" || p.status === "partial_fault") return false;
+    if (p.extended_profile && p.extended_profile.status === "discovered_stub") return false;
+    if (p._validation_audit && p._validation_audit.status === "partial_fault") return false;
     if (p.is_enriched === true) return true;
 
     // 1. AI Sales Dossier fields (generated exclusively by Gemini AI multi-source synthesis)
@@ -11474,6 +11489,8 @@ $(function () {
   // Helper: check if an LOB is truly deeply enriched (has corporate tech, competitors, filings, or LEI)
   function isLobItemEnriched(l) {
     if (!l) return false;
+    if (l.status === "discovered_stub" || l.status === "partial_fault") return false;
+    if (l._validation_audit && l._validation_audit.status === "partial_fault") return false;
     if (l.is_enriched === true) return true;
     
     // Deeply enriched LOBs have technologies, competitors, financials, patents, LEI, or overview populated
@@ -14128,6 +14145,8 @@ $(function () {
       return window.isLobItemEnriched(l);
     }
     if (!l) return false;
+    if (l.status === "discovered_stub" || l.status === "partial_fault") return false;
+    if (l._validation_audit && l._validation_audit.status === "partial_fault") return false;
     if (l.is_enriched === true) return true;
     if (Array.isArray(l.technologies) && l.technologies.length > 0) return true;
     if (Array.isArray(l.competitors) && l.competitors.length > 0) return true;
