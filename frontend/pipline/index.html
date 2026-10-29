@@ -254,56 +254,73 @@
           </div>
         </div>
 
-        <!-- 3. Split Layout: Runs Execution Table (68%) + Needs Attention Diagnostic Box (32%) -->
-        <div class="hub-split-layout" style="display:grid;grid-template-columns:68fr 32fr;gap:18px;margin-top:16px;align-items:start;">
-          <!-- Left: Runs Console -->
-          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:18px 20px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
-              <div style="font-size:0.95rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
-                <i class="bi bi-play-circle-fill text-primary"></i> Runs
+        <!-- 3. Full-Width Runs Execution Console (100% Width, Generous Table Space & No Horizontal Scrollbar) -->
+        <div class="pipeline-section-card fade-in" style="margin-top:16px;padding:20px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+            <div>
+              <div style="font-size:0.98rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                <i class="bi bi-play-circle-fill text-primary"></i> Runs Execution Console
               </div>
-              <div class="btn-group btn-group-sm" role="group" id="hubRunsFilterGroup">
-                <button type="button" class="btn btn-outline-secondary active" data-filter="all" style="font-size:0.75rem;font-weight:700;">All</button>
-                <button type="button" class="btn btn-outline-secondary" data-filter="running" style="font-size:0.75rem;font-weight:700;">Running <span class="badge bg-secondary ms-1" id="hubTabRunningCount">0</span></button>
-                <button type="button" class="btn btn-outline-secondary" data-filter="failed" style="font-size:0.75rem;font-weight:700;">Failed <span class="badge bg-secondary ms-1" id="hubTabFailedCount">0</span></button>
-                <button type="button" class="btn btn-outline-secondary" data-filter="scheduled" style="font-size:0.75rem;font-weight:700;">Scheduled <span class="badge bg-secondary ms-1">40</span></button>
+              <div style="font-size:0.74rem;color:#64748b;margin-top:2px;">
+                Live multi-tier scraping telemetry, channel yields, and execution durations.
               </div>
             </div>
-
-            <!-- Runs Table Container -->
-            <div class="table-responsive" style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-height:450px;overflow-y:auto;">
-              <table class="table table-hover align-middle mb-0" style="font-size:0.78rem;">
-                <thead style="background:#f8fafc;color:#64748b;font-weight:700;text-transform:uppercase;font-size:0.67rem;position:sticky;top:0;z-index:2;letter-spacing:0.04em;">
-                  <tr>
-                    <th style="padding:10px 14px;">Target</th>
-                    <th style="padding:10px 10px;white-space:nowrap;">Trigger</th>
-                    <th style="padding:10px 12px;white-space:nowrap;">Channels &amp; Connectors</th>
-                    <th style="padding:10px 10px;white-space:nowrap;">Yield</th>
-                    <th style="padding:10px 10px;white-space:nowrap;">Duration</th>
-                    <th style="padding:10px 10px;white-space:nowrap;">Status</th>
-                    <th style="padding:10px 14px;text-align:right;white-space:nowrap;">When</th>
-                  </tr>
-                </thead>
-                <tbody id="hubOverviewRunsBody">
-                  <tr><td colspan="7" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading live runs...</td></tr>
-                </tbody>
-              </table>
+            <div class="btn-group btn-group-sm" role="group" id="hubRunsFilterGroup">
+              <button type="button" class="btn btn-outline-secondary active" data-filter="all" style="font-size:0.75rem;font-weight:700;">All</button>
+              <button type="button" class="btn btn-outline-secondary" data-filter="running" style="font-size:0.75rem;font-weight:700;">Running <span class="badge bg-secondary ms-1" id="hubTabRunningCount">0</span></button>
+              <button type="button" class="btn btn-outline-secondary" data-filter="failed" style="font-size:0.75rem;font-weight:700;">Failed <span class="badge bg-secondary ms-1" id="hubTabFailedCount">0</span></button>
+              <button type="button" class="btn btn-outline-secondary" data-filter="scheduled" style="font-size:0.75rem;font-weight:700;">Scheduled <span class="badge bg-secondary ms-1">40</span></button>
             </div>
           </div>
 
-          <!-- Right: Needs Attention Panel -->
-          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:16px 18px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-              <div style="font-size:0.92rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
-                <i class="bi bi-exclamation-triangle-fill" style="color:#d97706;"></i> Needs Attention
+          <!-- Runs Table Container (Full Width across screen) -->
+          <div class="table-responsive" style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-height:480px;overflow-y:auto;">
+            <table class="table table-hover align-middle mb-0" style="font-size:0.8rem;width:100%;">
+              <thead style="background:#f8fafc;color:#64748b;font-weight:700;text-transform:uppercase;font-size:0.68rem;position:sticky;top:0;z-index:2;letter-spacing:0.04em;">
+                <tr>
+                  <th style="padding:11px 16px;">Target</th>
+                  <th style="padding:11px 12px;white-space:nowrap;">Trigger</th>
+                  <th style="padding:11px 16px;white-space:nowrap;">Channels &amp; Connectors</th>
+                  <th style="padding:11px 12px;white-space:nowrap;">Yield</th>
+                  <th style="padding:11px 12px;white-space:nowrap;">Duration</th>
+                  <th style="padding:11px 12px;white-space:nowrap;">Status</th>
+                  <th style="padding:11px 16px;text-align:right;white-space:nowrap;">When</th>
+                </tr>
+              </thead>
+              <tbody id="hubOverviewRunsBody">
+                <tr><td colspan="7" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading live runs...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 4. Full-Width Needs Attention Diagnostics Panel (Below Runs Console, Expanded Multi-Column Grid) -->
+        <div class="pipeline-section-card fade-in" style="margin-top:16px;padding:20px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.03);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+            <div>
+              <div style="font-size:0.98rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                <i class="bi bi-exclamation-triangle-fill" style="color:#d97706;"></i> Needs Attention &bull; Connector Health Diagnostics
               </div>
-              <span class="badge rounded-pill" id="hubNeedsAttentionBadge" style="font-size:0.72rem;padding:4px 8px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-weight:800;">0</span>
+              <div style="font-size:0.74rem;color:#64748b;margin-top:2px;">
+                Failing connectors and empty yields detected from real execution logs across recent runs.
+              </div>
             </div>
-            <div id="hubNeedsAttentionList" style="display:flex;flex-direction:column;gap:8px;">
-              <!-- Dynamic alert cards populated via JS from live diagnostic payload -->
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span class="badge rounded-pill" id="hubNeedsAttentionBadge" style="font-size:0.74rem;padding:5px 10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-weight:800;">0 Alerts</span>
+              <button type="button" class="btn btn-sm btn-outline-primary" style="font-size:0.74rem;font-weight:700;border-radius:8px;padding:5px 12px;" onclick="diagnoseAllConnectors();">
+                <i class="bi bi-arrow-repeat me-1"></i> Diagnose All
+              </button>
             </div>
-            <!-- Show More / Show Less toggle button -->
-            <button type="button" class="btn btn-sm w-100" id="hubNeedsAttentionToggleBtn" onclick="toggleNeedsAttentionExpand()" style="display:none;margin-top:10px;font-size:0.74rem;font-weight:700;color:#4f46e5;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px;transition:all 0.2s;">
+          </div>
+
+          <!-- Dynamic Multi-Column Grid for Alerts across the full width -->
+          <div id="hubNeedsAttentionList" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(350px, 1fr));gap:12px;">
+            <!-- Dynamic alert cards populated via JS from live diagnostic payload -->
+          </div>
+
+          <!-- Show More / Show Less toggle button centered at the bottom -->
+          <div style="text-align:center;margin-top:14px;">
+            <button type="button" class="btn btn-sm" id="hubNeedsAttentionToggleBtn" onclick="toggleNeedsAttentionExpand()" style="display:none;font-size:0.76rem;font-weight:700;color:#4f46e5;background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:7px 24px;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:all 0.2s;">
               <span id="hubNeedsAttentionToggleText">Show More</span> <i class="bi bi-chevron-down ms-1" id="hubNeedsAttentionToggleIcon"></i>
             </button>
           </div>
@@ -733,7 +750,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=3.47.2"></script>
+<script src="js/app.js?v=3.50.0"></script>
 <script src="js/chatbot.js?v=2.3.6"></script>
 
 <!-- --- Enhanced Add New Account Modal --- -->
