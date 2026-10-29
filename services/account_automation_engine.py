@@ -77,7 +77,29 @@ class AccountAutomationEngine:
             consumed = summary.get("total_lifetime_credits_consumed", 0)
             # Active operational quota for current workspace execution (default 5,000 credits).
             # Decoupled from historical multi-month testing/benchmark runs stored in PostgreSQL.
-            active_quota = int(os.getenv("WORKSPACE_ACTIVE_CREDIT_QUOTA", "5000"))
+            # Check if an explicit budget ceiling is configured in environment
+            explicit_quota = os.getenv("WORKSPACE_CREDIT_BUDGET") or os.getenv("WORKSPACE_CREDIT_BALANCE")
+            if explicit_quota is not None and explicit_quota.strip():
+                try:
+                    quota_val = int(explicit_quota)
+                    return {
+                        "available_credits": max(0, quota_val),
+                        "lifetime_consumed": consumed,
+                        "budget_total": quota_val,
+                        "budget_mode": "configured_budget",
+                    }
+                except ValueError:
+                    pass
+
+            # Honest Metered Pay-As-You-Go Mode: no artificial phantom balance
+            return {
+                "available_credits": None,
+                "lifetime_consumed": consumed,
+                "budget_total": None,
+                "budget_mode": "metered_pay_as_you_go",
+                "message": "Metered Pay-As-You-Go: usage tracked dynamically per vendor API invocation.",
+            }
+
             return {
                 "available_credits": active_quota,
                 "lifetime_consumed": consumed,
@@ -87,7 +109,7 @@ class AccountAutomationEngine:
         except Exception as e:
             logger.warning(f"Failed to query credit balance from DB: {e}")
             return {
-                "available_credits": cls.DEFAULT_STANDALONE_BALANCE,
+                "available_credits": None,
                 "lifetime_consumed": 0,
                 "budget_mode": "fallback",
             }

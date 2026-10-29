@@ -520,7 +520,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=3.44.0"></script>
+<script src="js/app.js?v=3.45.0"></script>
 <script src="js/chatbot.js?v=2.3.6"></script>
 
 <!-- --- Enhanced Add New Account Modal --- -->
@@ -1621,11 +1621,12 @@
       </div>
 
       <div class="batch-action-right">
-        <!-- Live Workspace Credit Balance & Selected Quota Indicator -->
-        <div class="batch-credits-indicator" id="batchCreditsIndicator" style="display:inline-flex;align-items:center;gap:6px;background:#f8fafc;padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:0.78rem;font-weight:600;" title="Current Workspace Remaining Credits &amp; Selected Batch Quota">
-          <i class="bi bi-wallet2 text-success"></i>
-          <span>Balance: <strong id="batchRemainingCreditsVal" class="text-success">...</strong> cr</span>
-          <span id="batchReqCreditsBadge" class="badge bg-secondary-subtle text-secondary border border-secondary-subtle ms-1 d-none" style="font-size:0.72rem;">Req: <span id="batchReqCreditsVal">0</span> cr</span>
+        <!-- Metered Rate Card & Batch Est Quota Indicator -->
+        <div class="batch-credits-indicator" id="batchCreditsIndicator" style="display:inline-flex;align-items:center;gap:8px;background:#f8fafc;padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:0.78rem;font-weight:600;" title="Live Metered Gateway Billing: Rate per unit and estimated consumption for this batch">
+          <span class="text-muted"><i class="bi bi-cpu-fill text-primary"></i> Metered Rate: <strong id="batchMeteredRateText" class="text-dark">4 cr / LOB</strong></span>
+          <span id="batchReqCreditsBadge" class="badge bg-primary-subtle text-primary border border-primary-subtle ms-1 d-none" style="font-size:0.72rem;padding:4px 8px;">
+            <i class="bi bi-lightning-charge"></i> Est: <strong id="batchReqCreditsVal">0</strong> cr
+          </span>
         </div>
         <button type="button" class="btn-batch-action btn-batch-autonomous d-none" id="batchRunAutonomousPhasedBtn"
                 title="Run Autonomous Phased Pipeline (Discover, Partition into 10/15 batches, Preflight Check &amp; Self-Healing Retry)"

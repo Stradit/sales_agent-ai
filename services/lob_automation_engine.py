@@ -156,7 +156,7 @@ class LobAutomationEngine:
         balance_info = AccountAutomationEngine.get_workspace_credit_balance()
         available_credits = balance_info.get("available_credits", 0)
 
-        is_sufficient = available_credits >= total_required_credits
+        is_sufficient = (available_credits >= total_required_credits) if (available_credits is not None) else True
         allowed = is_sufficient
 
         message = (
@@ -839,7 +839,7 @@ class LobAutomationEngine:
             curr_balance = bal_info.get("available_credits", 0)
 
             # Check if current balance is sufficient for this specific batch
-            if curr_balance < batch_req:
+            if curr_balance is not None and curr_balance < batch_req:
                 logger.warning(
                     f"[!] [LobAutomationEngine] Insufficient credits for Phase {idx}/{total_phases}. "
                     f"Required: {batch_req} cr, Available: {curr_balance} cr. Gracefully pausing execution."

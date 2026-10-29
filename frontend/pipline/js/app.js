@@ -11138,6 +11138,9 @@ $(function () {
       $autoLobBtn.addClass("d-none");
     }
 
+    const unitRateLabel = (entityType === "lob") ? "4 cr / LOB" : (entityType === "persona" ? "1 cr / Person" : "1 cr / Account");
+    $("#batchMeteredRateText").text(unitRateLabel);
+
     // Sync Switcher Tab badges dynamically with active selection scope
     const currentVal = $("#batchCompanySelector").val();
     const isAllScope = (entityType === "account" && currentVal === "all");
@@ -11675,27 +11678,21 @@ $(function () {
       $runBtn.removeClass("btn-batch-run-reenrich");
     }
 
-    // Dynamic Credit Quota Gatekeeper for Selected Batch
+    // Dynamic Metered Quota Calculation for Selected Batch (Option 1: Honest Metered Display)
     const ratePerEntity = (entityType === "lob") ? 4 : 1;
+    const unitLabel = (entityType === "lob") ? "LOB" : (entityType === "persona" ? "Person" : "Account");
     const reqCredits = count * ratePerEntity;
-    const availCredits = window._cachedWorkspaceBalance;
+
+    $("#batchMeteredRateText").text(`${ratePerEntity} cr / ${unitLabel}`);
+    $("#batchReqCreditsVal").text(reqCredits);
 
     if (count > 0) {
       $("#batchReqCreditsBadge").removeClass("d-none");
-      $("#batchReqCreditsVal").text(reqCredits);
-      if (availCredits !== null && availCredits < reqCredits) {
-        $("#batchRemainingCreditsVal").removeClass("text-success").addClass("text-danger");
-        $runBtn.prop("disabled", true)
-          .attr("title", `Insufficient balance: ${availCredits} cr available, ${reqCredits} cr required for selected batch`);
-      } else {
-        $("#batchRemainingCreditsVal").removeClass("text-danger").addClass("text-success");
-        $runBtn.prop("disabled", count === 0 || batchConsoleState.isRunning).removeAttr("title");
-      }
     } else {
       $("#batchReqCreditsBadge").addClass("d-none");
-      $("#batchRemainingCreditsVal").removeClass("text-danger").addClass("text-success");
-      $runBtn.prop("disabled", count === 0 || batchConsoleState.isRunning).removeAttr("title");
     }
+
+    $runBtn.prop("disabled", count === 0 || batchConsoleState.isRunning).removeAttr("title");
 
     // Update master checkbox state
     const visibleKeys = batchConsoleState.filteredItems.map((i) => i.key || i.id);
@@ -13145,24 +13142,24 @@ $(function () {
               </div>
             </div>
 
-            <!-- Live Rate Card & Quota Tally -->
+            <!-- Live Metered Rate Card & Quota Tally (Option 1: Honest Gateway Accounting) -->
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
               <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
-                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Required Credits</div>
-                <div style="font-size:1.15rem;font-weight:800;color:${isAllowed ? '#059669' : '#dc2626'};">${reqCr} cr</div>
+                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Estimated Run Quota</div>
+                <div style="font-size:1.15rem;font-weight:800;color:#059669;">${reqCr} cr</div>
                 <div style="font-size:0.68rem;color:#64748b;">4 cr &times; ${count} entities</div>
               </div>
               <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
-                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Workspace Balance</div>
-                <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">${availCr.toLocaleString()} cr</div>
+                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Billing Model</div>
+                <div style="font-size:1.05rem;font-weight:800;color:#0f172a;margin-top:2px;">Metered Live</div>
                 <div style="font-size:0.68rem;color:#059669;font-weight:600;">
-                  ${isAllowed ? '✓ Pre-Approved' : '⚠ Shortage'}
+                  ✓ Gateways Connected
                 </div>
               </div>
               <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
-                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Remaining Balance</div>
-                <div style="font-size:1.15rem;font-weight:800;color:#475569;">${Math.max(0, availCr - reqCr).toLocaleString()} cr</div>
-                <div style="font-size:0.68rem;color:#64748b;">Post-run margin</div>
+                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Unit Rate</div>
+                <div style="font-size:1.15rem;font-weight:800;color:#475569;">4 cr / LOB</div>
+                <div style="font-size:0.68rem;color:#64748b;">Diffbot &bull; Firecrawl &bull; Serper</div>
               </div>
             </div>
 
@@ -13268,8 +13265,8 @@ $(function () {
         const totPhases = job.total_phases || 1;
         const procCount = job.processed_count || 0;
         const totCount = job.total_lobs || 0;
-        const balBadge = job.credits_remaining != null ? ` &bull; <span class="badge bg-light text-dark border">${job.credits_remaining} cr balance</span>` : '';
-        $status.html(`<strong>Phase ${curPhase} of ${totPhases}:</strong> ${esc(job.message || 'Processing LOBs...')} <small class="text-muted">(${procCount}/${totCount} divisions)</small>${balBadge}`);
+        const meteredBadge = ` &bull; <span class="badge bg-light text-dark border"><i class="bi bi-cpu text-primary"></i> ~${procCount * 4} cr metered</span>`;
+        $status.html(`<strong>Phase ${curPhase} of ${totPhases}:</strong> ${esc(job.message || 'Processing LOBs...')} <small class="text-muted">(${procCount}/${totCount} divisions)</small>${meteredBadge}`);
 
         if (job.status === "paused_insufficient_credits") {
           clearInterval(interval);
