@@ -2942,10 +2942,15 @@ $(function () {
         </div>`
       );
       $("#lobCountBadge").text("(0 Entities)");
+      if (typeof updateLobSectionHeader === "function") {
+        updateLobSectionHeader(activeAccount || { lobs: [] });
+      }
       return;
     }
 
-    $("#lobCountBadge").text(`(${lobs.length} Corporate Entit${lobs.length > 1 ? "ies" : "y"})`);
+    if (typeof updateLobSectionHeader === "function") {
+      updateLobSectionHeader(activeAccount || { lobs: lobs });
+    }
 
     // Taxonomy Category Badge Colors & Iconography
     const TAXONOMY_CONFIG = {
@@ -3061,7 +3066,9 @@ $(function () {
       renderFilteredCards(cat);
     });
 
-
+    if (typeof updateLobSectionHeader === "function") {
+      updateLobSectionHeader(activeAccount || { lobs: lobs });
+    }
   }
 
   function formatCompactRevenue(val) {
@@ -3935,6 +3942,14 @@ $(function () {
 
           <div class="header-actions-col">
             <div class="header-btn-group">
+              ${isLobItemEnriched(lob)
+                ? `<button type="button" class="action-btn-pill btn-enrich-single-lob" data-lob-id="${lob.id}" data-lob-name="${esc(lob.lob_name || lob.name || '')}" style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;" title="Additive Re-enrichment: update intelligence without losing data">
+                    <i class="bi bi-arrow-repeat"></i> Re-enrich Division
+                  </button>`
+                : `<button type="button" class="action-btn-pill btn-pill-blue btn-enrich-single-lob" data-lob-id="${lob.id}" data-lob-name="${esc(lob.lob_name || lob.name || '')}" title="Run autonomous deep AI and OSINT enrichment for this single division">
+                    <i class="bi bi-lightning-charge-fill"></i> Enrich Division
+                  </button>`
+              }
               <button type="button" class="action-btn-pill btn-pill-purple" id="lobEditToggleBtn">
                 Edit
               </button>
@@ -5858,6 +5873,12 @@ $(function () {
       $("#accountOverviewContainer").addClass("d-none");
       $("#lobSection").removeClass("d-none");
       $("#allPersonasSection").addClass("d-none");
+      if (activeAccount && Array.isArray(activeAccount.lobs)) {
+        renderLobCardsList($("#lobCardsContainer"), activeAccount.lobs);
+        if (typeof updateLobSectionHeader === "function") {
+          updateLobSectionHeader(activeAccount);
+        }
+      }
       $('html, body').animate({ scrollTop: $("#lobSection").offset().top - 80 }, 300);
     } else if (tab === "personas") {
       $("#accountOverviewContainer").addClass("d-none");
@@ -10855,6 +10876,7 @@ $(function () {
       $("#batchKpiTotalLabel").text("Total Accounts");
       $("#batchKpiPendingLabel").text("Pending Accounts");
       $("#batchTierFilter").addClass("d-none");
+      $("#batchRunAutonomousPhasedBtn").addClass("d-none");
       $("#batchColThName").text("ACCOUNT / INSTITUTION");
       $("#batchColThCompany").text("DOMAIN & TICKER");
       $("#batchColThTitle").text("SEC CIK & TYPE");
@@ -10865,6 +10887,7 @@ $(function () {
       $("#batchKpiTotalLabel").text("Total LOBs");
       $("#batchKpiPendingLabel").text("Pending Divisions");
       $("#batchTierFilter").addClass("d-none");
+      $("#batchRunAutonomousPhasedBtn").removeClass("d-none");
       $("#batchColThName").text("LINE OF BUSINESS");
       $("#batchColThCompany").text("COMPANY");
       $("#batchColThTitle").text("SEGMENT & OVERVIEW");
@@ -10875,6 +10898,7 @@ $(function () {
       $("#batchKpiTotalLabel").text("Total People");
       $("#batchKpiPendingLabel").text("Pending Stubs");
       $("#batchTierFilter").removeClass("d-none");
+      $("#batchRunAutonomousPhasedBtn").addClass("d-none");
       $("#batchColThName").text("NAME & EXECUTIVE");
       $("#batchColThCompany").text("COMPANY");
       $("#batchColThTitle").text("TITLE & DEPT");
@@ -10947,6 +10971,7 @@ $(function () {
       $("#batchKpiTotalLabel").text("Total Accounts");
       $("#batchKpiPendingLabel").text("Pending Accounts");
       $("#batchTierFilter").addClass("d-none");
+      $("#batchRunAutonomousPhasedBtn").addClass("d-none");
       $("#batchColThName").text("ACCOUNT / INSTITUTION");
       $("#batchColThCompany").text("DOMAIN & TICKER");
       $("#batchColThTitle").text("SEC CIK & TYPE");
@@ -10957,6 +10982,7 @@ $(function () {
       $("#batchKpiTotalLabel").text("Total LOBs");
       $("#batchKpiPendingLabel").text("Pending Divisions");
       $("#batchTierFilter").addClass("d-none");
+      $("#batchRunAutonomousPhasedBtn").removeClass("d-none");
       $("#batchColThName").text("LINE OF BUSINESS");
       $("#batchColThCompany").text("COMPANY");
       $("#batchColThTitle").text("SEGMENT & OVERVIEW");
@@ -10967,6 +10993,7 @@ $(function () {
       $("#batchKpiTotalLabel").text("Total People");
       $("#batchKpiPendingLabel").text("Pending Stubs");
       $("#batchTierFilter").removeClass("d-none");
+      $("#batchRunAutonomousPhasedBtn").addClass("d-none");
       $("#batchColThName").text("NAME & EXECUTIVE");
       $("#batchColThCompany").text("COMPANY");
       $("#batchColThTitle").text("TITLE & DEPT");
@@ -13200,6 +13227,7 @@ $(function () {
           renderLobCardsList($("#lobCardsContainer"), activeAccount.lobs);
           $("#topbarLobsCount").text(activeAccount.lobs.length);
           $("#lobCountBadge").text(`${activeAccount.lobs.length} Divisions / Sub-Organizations`);
+          updateLobSectionHeader(activeAccount);
         }
       }
     } catch (err) {
@@ -13225,6 +13253,46 @@ $(function () {
     }
   });
 
+  // ── Dynamic State-Driven LOB Section Header Lifecycle ──
+  function updateLobSectionHeader(account) {
+    const lobs = (account && Array.isArray(account.lobs)) ? account.lobs : [];
+    const totalCount = lobs.length;
+    let enrichedCount = 0;
+    lobs.forEach((l) => {
+      if (isLobItemEnriched(l)) enrichedCount++;
+    });
+    const pendingCount = totalCount - enrichedCount;
+
+    const $btn = $("#lobAutoPipelineBtn");
+    const $actionsContainer = $("#lobBatchActions");
+    $actionsContainer.find("#lobAllEnrichedBadge").remove();
+
+    if (totalCount === 0) {
+      // State 1: 0 LOBs discovered -> Show Discover & Ingest LOBs
+      $btn.removeClass("d-none").show()
+        .html('<i class="bi bi-magic"></i> Discover &amp; Ingest LOBs')
+        .attr("title", "Run Autonomous Phased LOB Discovery & Ingestion");
+      $("#lobCountBadge").text("0 Divisions / Sub-Organizations");
+    } else if (pendingCount > 0) {
+      // State 2: Pending stubs exist -> Show Enrich Remaining with exact pending count
+      $btn.removeClass("d-none").show()
+        .html(`<i class="bi bi-lightning-charge-fill"></i> Enrich Remaining (${pendingCount} Pending)`)
+        .attr("title", `Run Autonomous Phased Pipeline for ${pendingCount} pending divisions`);
+      $("#lobCountBadge").text(`${totalCount} Divisions (${enrichedCount} Enriched, ${pendingCount} Pending)`);
+    } else {
+      // State 3: 100% enriched -> HIDE the Auto-Ingest button completely and show an enterprise verified badge!
+      $btn.addClass("d-none").hide();
+      $actionsContainer.prepend(`
+        <span id="lobAllEnrichedBadge" class="badge"
+              style="background:rgba(16,185,129,0.12);color:#059669;border:1px solid rgba(16,185,129,0.3);font-size:0.75rem;padding:6px 12px;border-radius:6px;display:inline-flex;align-items:center;gap:6px;font-weight:600;"
+              title="All operating lines of business and subsidiaries are fully enriched and verified in PostgreSQL">
+          <i class="bi bi-patch-check-fill"></i> All ${totalCount} Divisions Enriched
+        </span>
+      `);
+      $("#lobCountBadge").text(`${totalCount} Divisions / Sub-Organizations (100% Enriched)`);
+    }
+  }
+
   // Header Auto-Ingest button in LOB section
   $(document).on("click", "#lobAutoPipelineBtn", function () {
     if (!activeAccount) {
@@ -13235,6 +13303,87 @@ $(function () {
     const name = activeAccount.display_name || activeAccount.name || activeAccount.key;
     const dom = activeAccount.domain || activeAccount.primary_domain;
     const cik = activeAccount.sec_cik;
+    promptLobAutomationHandoff(acctId, name, dom, cik);
+  });
+
+  // Single-LOB On-Demand Enrichment Handler (LOB Card / Detail View)
+  $(document).on("click", ".btn-enrich-single-lob", async function (e) {
+    e.preventDefault();
+    const $btn = $(this);
+    const lobId = $btn.data("lob-id");
+    if (!activeAccount) {
+      showNotification("Please select an active account first.", "warning");
+      return;
+    }
+
+    const lob = (activeAccount.lobs || []).find((l) => String(l.id) === String(lobId)) || activeLob;
+    if (!lob) {
+      showNotification("Could not identify Line of Business record.", "error");
+      return;
+    }
+
+    const origHtml = $btn.html();
+    $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="width:0.75rem;height:0.75rem;"></span> Enriching...');
+
+    try {
+      showNotification(`Enriching division <strong>${esc(lob.lob_name || lob.name || 'Division')}</strong>...`, "info", 4000);
+      const res = await fetch(`${API_BASE}/api/lobs/enrich-phased-batch`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          account_id: activeAccount.id,
+          company_name: activeAccount.legal_name || activeAccount.display_name || activeAccount.name || "",
+          batch_lobs: [lob],
+          phase_number: 1,
+          total_phases: 1,
+          sec_cik: activeAccount.sec_cik || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Server returned HTTP ${res.status}`);
+      }
+
+      const result = await res.json();
+      const enrichedLobs = result.enriched_lobs || [];
+      const updatedLob = enrichedLobs.length > 0 ? enrichedLobs[0] : null;
+
+      if (updatedLob) {
+        const idx = (activeAccount.lobs || []).findIndex((l) => String(l.id) === String(lobId));
+        if (idx !== -1) {
+          activeAccount.lobs[idx] = { ...activeAccount.lobs[idx], ...updatedLob, is_enriched: true };
+          activeLob = activeAccount.lobs[idx];
+        } else {
+          activeLob = { ...lob, ...updatedLob, is_enriched: true };
+        }
+      }
+
+      // Re-render Detail View and Cards
+      $("#lobDetailViewContainer").html(renderModernLobDetailView(activeLob));
+      renderLobCardsList($("#lobCardsContainer"), activeAccount.lobs || []);
+      updateLobSectionHeader(activeAccount);
+
+      showNotification(`Successfully enriched division <strong>${esc(lob.lob_name || lob.name || 'Division')}</strong> and committed to PostgreSQL!`, "success", 5000);
+    } catch (err) {
+      console.error("Single LOB enrichment failed:", err);
+      showNotification(`Failed to enrich division: ${esc(err.message)}`, "error", 7000);
+      $btn.prop("disabled", false).html(origHtml);
+    }
+  });
+
+  // Batch Console Unified Autonomous Phased Execution Handler
+  $(document).on("click", "#batchRunAutonomousPhasedBtn", function (e) {
+    e.preventDefault();
+    const acct = batchConsoleState.targetAccount || activeAccount;
+    if (!acct) {
+      showToast("Please select a target enterprise account first.", "warning");
+      return;
+    }
+    const acctId = acct.id;
+    const name = acct.legal_name || acct.display_name || acct.name || acct.key;
+    const dom = acct.primary_domain || acct.domain;
+    const cik = acct.sec_cik;
     promptLobAutomationHandoff(acctId, name, dom, cik);
   });
 

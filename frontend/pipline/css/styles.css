@@ -7828,6 +7828,25 @@ body {
   background: #dc2626;
 }
 
+.btn-batch-autonomous {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: 1px solid #059669;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.25);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease-in-out;
+}
+
+.btn-batch-autonomous:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);
+  transform: translateY(-1px);
+}
+
 /* ── 7. Real-Time Progress Track ── */
 .batch-progress-section {
   padding: 10px 24px;

@@ -494,7 +494,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=3.41.0"></script>
+<script src="js/app.js?v=3.42.0"></script>
 <script src="js/chatbot.js?v=2.3.6"></script>
 
 <!-- --- Enhanced Add New Account Modal --- -->
@@ -1595,6 +1595,11 @@
       </div>
 
       <div class="batch-action-right">
+        <button type="button" class="btn-batch-action btn-batch-autonomous d-none" id="batchRunAutonomousPhasedBtn"
+                title="Run Autonomous Phased Pipeline (Discover, Partition into 10/15 batches, Preflight Check &amp; Self-Healing Retry)"
+                style="background:linear-gradient(135deg, #10b981 0%, #059669 100%);color:#fff;border:none;box-shadow:0 2px 8px rgba(16,185,129,0.35);font-weight:600;display:inline-flex;align-items:center;gap:6px;">
+          <i class="bi bi-lightning-charge-fill"></i> Run Autonomous Phased Pipeline
+        </button>
         <button type="button" class="btn-batch-action btn-batch-run" id="batchRunEnrichmentBtn" disabled>
           <i class="bi bi-play-fill"></i> Run Enrichment (<span id="batchRunCountText">0</span>)
         </button>
