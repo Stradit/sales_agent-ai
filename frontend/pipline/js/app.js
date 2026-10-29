@@ -10896,7 +10896,6 @@ $(function () {
       $("#batchKpiTotalLabel").text("Total LOBs");
       $("#batchKpiPendingLabel").text("Pending Divisions");
       $("#batchTierFilter").addClass("d-none");
-      $("#batchRunAutonomousPhasedBtn").removeClass("d-none");
       $("#batchColThName").text("LINE OF BUSINESS");
       $("#batchColThCompany").text("COMPANY");
       $("#batchColThTitle").text("SEGMENT & OVERVIEW");
@@ -10992,7 +10991,6 @@ $(function () {
       $("#batchKpiTotalLabel").text("Total LOBs");
       $("#batchKpiPendingLabel").text("Pending Divisions");
       $("#batchTierFilter").addClass("d-none");
-      $("#batchRunAutonomousPhasedBtn").removeClass("d-none");
       $("#batchColThName").text("LINE OF BUSINESS");
       $("#batchColThCompany").text("COMPANY");
       $("#batchColThTitle").text("SEGMENT & OVERVIEW");
@@ -11115,6 +11113,30 @@ $(function () {
     $("#batchKpiTotal").text(total);
     $("#batchKpiEnriched").text(enrichedCount);
     $("#batchKpiPending").text(pendingCount);
+
+    // Dynamic Autonomous Pipeline Button Lifecycle in Batch Console
+    const $autoLobBtn = $("#batchRunAutonomousPhasedBtn");
+    $("#batchAllEnrichedBadge").remove();
+    if (entityType === "lob") {
+      if (pendingCount === 0 && total > 0) {
+        // State: All LOBs already onboarded & enriched -> Hide auto run, show All Enriched badge
+        $autoLobBtn.addClass("d-none");
+        $autoLobBtn.after(
+          `<span id="batchAllEnrichedBadge" class="badge" style="background:#dcfce7;color:#16a34a;border:1.5px solid #86efac;padding:8px 14px;border-radius:8px;font-weight:700;font-size:0.78rem;display:inline-flex;align-items:center;gap:6px;">` +
+            `<i class="bi bi-check-circle-fill"></i> All ${total} Divisions Enriched` +
+          `</span>`
+        );
+      } else if (pendingCount > 0) {
+        // State: Pending divisions exist -> Show run button with count
+        $autoLobBtn.removeClass("d-none")
+          .html(`<i class="bi bi-lightning-charge-fill"></i> Run Autonomous Phased Pipeline (${pendingCount} Pending)`)
+          .attr("title", `Run Autonomous Phased Pipeline for ${pendingCount} pending divisions`);
+      } else {
+        $autoLobBtn.addClass("d-none");
+      }
+    } else {
+      $autoLobBtn.addClass("d-none");
+    }
 
     // Sync Switcher Tab badges dynamically with active selection scope
     const currentVal = $("#batchCompanySelector").val();
@@ -13004,7 +13026,7 @@ $(function () {
       });
       if (res.ok) {
         const data = await res.json();
-        const bal = typeof data.available_credits === "number" ? data.available_credits : 1000;
+        const bal = typeof data.available_credits === "number" ? data.available_credits : 5000;
         window._cachedWorkspaceBalance = bal;
         $("#batchRemainingCreditsVal").text(bal.toLocaleString());
         return bal;
@@ -13012,7 +13034,10 @@ $(function () {
     } catch (err) {
       console.warn("Failed to fetch workspace balance:", err);
     }
-    return 1000;
+    const fallbackBal = window._cachedWorkspaceBalance != null ? window._cachedWorkspaceBalance : 5000;
+    window._cachedWorkspaceBalance = fallbackBal;
+    $("#batchRemainingCreditsVal").text(fallbackBal.toLocaleString());
+    return fallbackBal;
   }
 
   function showLobHandoffActionRibbon(context) {

@@ -2475,12 +2475,6 @@ if FASTAPI_AVAILABLE:
     # ══════════════════════════════════════════════════════
     lobs_router = APIRouter(prefix="/api/lobs", tags=["2. LOB & Sub-LOB Level"])
 
-    @lobs_router.get("/workspace-balance")
-    def get_lob_workspace_balance():
-        """Returns live workspace credit balance for Batch Console & LOB orchestrator."""
-        from services.account_automation_engine import AccountAutomationEngine
-        return AccountAutomationEngine.get_workspace_credit_balance()
-
     @lobs_router.post("/preflight")
     def preflight_lob_check(req: LobPreflightRequest):
         """Pre-flight credit and resource gatekeeper for LOB automation."""
@@ -4671,6 +4665,13 @@ if FASTAPI_AVAILABLE:
     # ══════════════════════════════════════════════════════
     # SOLID REST API ENDPOINTS
     # ══════════════════════════════════════════════════════
+
+    @app.get("/api/lobs/workspace-balance", tags=["2. Lines of Business"])
+    @app.get("/api/pipeline/workspace-balance", tags=["0. Authentication & Workspace"])
+    def get_public_workspace_balance():
+        """Returns live workspace credit balance for UI metering and telemetry."""
+        from services.account_automation_engine import AccountAutomationEngine
+        return AccountAutomationEngine.get_workspace_credit_balance()
 
     @app.get("/api/accounts/{account_id}", tags=["1. Accounts"])
     def get_account_by_id(account_id: int, user: User = Depends(auth.require_account_access)):
