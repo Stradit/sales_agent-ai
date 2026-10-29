@@ -4544,6 +4544,101 @@ $(function () {
     }
   }
 
+  // ── Pipeline Overview Home Page Renderers (Reference Image 1 Layout) ──
+  function renderOverviewRunsTable(runs, filter) {
+    filter = filter || "all";
+    const $tbody = $("#hubOverviewRunsBody");
+    if (!$tbody.length) {
+      console.warn("[renderOverviewRunsTable] #hubOverviewRunsBody not found in DOM");
+      return;
+    }
+
+    if (!runs || !runs.length) {
+      $tbody.html('<tr><td colspan="7" class="text-center py-4 text-muted">No execution runs recorded yet.</td></tr>');
+      return;
+    }
+
+    let filtered = runs;
+    if (filter === "running") {
+      filtered = runs.filter(r => String(r.status).toLowerCase().includes("run"));
+    } else if (filter === "failed") {
+      filtered = runs.filter(r => String(r.status).toLowerCase().includes("fail") || String(r.status).toLowerCase().includes("err"));
+    }
+
+    if (!filtered.length) {
+      $tbody.html(`<tr><td colspan="7" class="text-center py-4 text-muted">No runs matching filter "${esc(filter)}".</td></tr>`);
+      return;
+    }
+
+    const html = filtered.map(r => {
+      const statusLower = String(r.status || "success").toLowerCase();
+      let statusBadge = '<span class="badge bg-success-subtle text-success" style="font-weight:700;">success</span>';
+      if (statusLower.includes("fail") || statusLower.includes("err")) {
+        statusBadge = '<span class="badge bg-danger-subtle text-danger" style="font-weight:700;">failed</span>';
+      } else if (statusLower.includes("part")) {
+        statusBadge = '<span class="badge bg-warning-subtle text-warning" style="font-weight:700;">partial</span>';
+      } else if (statusLower.includes("run")) {
+        statusBadge = '<span class="badge bg-primary-subtle text-primary" style="font-weight:700;">running</span>';
+      }
+
+      let triggerBadge = `<span class="badge bg-light text-secondary border">${esc(r.trigger || "manual")}</span>`;
+      if (r.trigger === "news") triggerBadge = `<span class="badge bg-info-subtle text-info border border-info-subtle">news</span>`;
+      else if (r.trigger === "lob_batch") triggerBadge = `<span class="badge bg-primary-subtle text-primary border border-primary-subtle">lob_batch</span>`;
+      else if (r.trigger === "persona") triggerBadge = `<span class="badge bg-purple-subtle text-purple border" style="background:#f3e8ff;color:#7e22ce;">persona</span>`;
+
+      return `
+        <tr>
+          <td style="padding:10px 14px;">
+            <strong style="color:#0f172a;">${esc(r.target)}</strong>
+            <div style="font-size:0.68rem;color:#94a3b8;">${esc(r.run_id || '')}</div>
+          </td>
+          <td style="padding:10px 10px;">${triggerBadge}</td>
+          <td style="padding:10px 10px;"><span style="font-weight:600;color:#334155;">${esc(r.channels_summary)}</span></td>
+          <td style="padding:10px 10px;"><span style="color:#64748b;font-weight:600;">${esc(r.yield_summary)}</span></td>
+          <td style="padding:10px 10px;"><span style="color:#64748b;">${r.duration_sec}s</span></td>
+          <td style="padding:10px 10px;">${statusBadge}</td>
+          <td style="padding:10px 14px;text-align:right;color:#64748b;font-size:0.74rem;">${esc(r.when)}</td>
+        </tr>
+      `;
+    }).join("");
+
+    $tbody.html(html);
+  }
+  window.renderOverviewRunsTable = renderOverviewRunsTable;
+
+  function renderNeedsAttentionPanel(items) {
+    const $list = $("#hubNeedsAttentionList");
+    if (!$list.length) {
+      console.warn("[renderNeedsAttentionPanel] #hubNeedsAttentionList not found in DOM");
+      return;
+    }
+
+    if (!items || !items.length) {
+      $list.html('<div style="text-align:center;padding:16px;color:#10b981;font-size:0.8rem;"><i class="bi bi-shield-check-fill me-1"></i>All connectors operational</div>');
+      $("#hubNeedsAttentionBadge").text("0").removeClass("bg-danger").addClass("bg-success");
+      return;
+    }
+
+    $("#hubNeedsAttentionBadge").text(items.length);
+
+    const html = items.map(it => `
+      <div style="background:#fff;border:1px solid #fed7aa;border-left:4px solid #f97316;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <strong style="font-size:0.78rem;color:#9a3412;"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>${esc(it.badge || it.channel)}</strong>
+          <span style="font-size:0.66rem;color:#ea580c;font-weight:700;text-transform:uppercase;">${esc(it.status || 'degraded')}</span>
+        </div>
+        <div style="font-size:0.72rem;color:#475569;line-height:1.3;">${esc(it.issue)}</div>
+        <div style="font-size:0.68rem;color:#94a3b8;margin-top:2px;display:flex;align-items:center;justify-content:space-between;">
+          <span>${esc(it.details || '')}</span>
+          <button type="button" class="btn btn-link p-0 text-primary text-decoration-none" style="font-size:0.7rem;font-weight:700;" onclick="showToast('Initiating targeted self-healing check for ${esc(it.channel)}...', 'info');">Test</button>
+        </div>
+      </div>
+    `).join("");
+
+    $list.html(html);
+  }
+  window.renderNeedsAttentionPanel = renderNeedsAttentionPanel;
+
   let _hubRenderPending = false;
   async function renderEmptyStateHub() {
     const $hub = $("#emptyState");
@@ -14063,88 +14158,7 @@ $(function () {
   });
 
 
-  // "?"? Pipeline Overview Home Page Renderers (Reference Image 1 Layout) "?"?
-  function renderOverviewRunsTable(runs, filter) {
-    filter = filter || "all";
-    const $tbody = $("#hubOverviewRunsBody");
-    if (!runs || !runs.length) {
-      $tbody.html('<tr><td colspan="7" class="text-center py-4 text-muted">No execution runs recorded yet.</td></tr>');
-      return;
-    }
 
-    let filtered = runs;
-    if (filter === "running") {
-      filtered = runs.filter(r => String(r.status).toLowerCase().includes("run"));
-    } else if (filter === "failed") {
-      filtered = runs.filter(r => String(r.status).toLowerCase().includes("fail") || String(r.status).toLowerCase().includes("err"));
-    }
-
-    if (!filtered.length) {
-      $tbody.html(`<tr><td colspan="7" class="text-center py-4 text-muted">No runs matching filter "${esc(filter)}".</td></tr>`);
-      return;
-    }
-
-    const html = filtered.map(r => {
-      const statusLower = String(r.status || "success").toLowerCase();
-      let statusBadge = '<span class="badge bg-success-subtle text-success" style="font-weight:700;">success</span>';
-      if (statusLower.includes("fail") || statusLower.includes("err")) {
-        statusBadge = '<span class="badge bg-danger-subtle text-danger" style="font-weight:700;">failed</span>';
-      } else if (statusLower.includes("part")) {
-        statusBadge = '<span class="badge bg-warning-subtle text-warning" style="font-weight:700;">partial</span>';
-      } else if (statusLower.includes("run")) {
-        statusBadge = '<span class="badge bg-primary-subtle text-primary" style="font-weight:700;">running</span>';
-      }
-
-      let triggerBadge = `<span class="badge bg-light text-secondary border">${esc(r.trigger || "manual")}</span>`;
-      if (r.trigger === "news") triggerBadge = `<span class="badge bg-info-subtle text-info border border-info-subtle">news</span>`;
-      else if (r.trigger === "lob_batch") triggerBadge = `<span class="badge bg-primary-subtle text-primary border border-primary-subtle">lob_batch</span>`;
-      else if (r.trigger === "persona") triggerBadge = `<span class="badge bg-purple-subtle text-purple border" style="background:#f3e8ff;color:#7e22ce;">persona</span>`;
-
-      return `
-        <tr>
-          <td style="padding:10px 14px;">
-            <strong style="color:#0f172a;">${esc(r.target)}</strong>
-            <div style="font-size:0.68rem;color:#94a3b8;">${esc(r.run_id || '')}</div>
-          </td>
-          <td style="padding:10px 10px;">${triggerBadge}</td>
-          <td style="padding:10px 10px;"><span style="font-weight:600;color:#334155;">${esc(r.channels_summary)}</span></td>
-          <td style="padding:10px 10px;"><span style="color:#64748b;font-weight:600;">${esc(r.yield_summary)}</span></td>
-          <td style="padding:10px 10px;"><span style="color:#64748b;">${r.duration_sec}s</span></td>
-          <td style="padding:10px 10px;">${statusBadge}</td>
-          <td style="padding:10px 14px;text-align:right;color:#64748b;font-size:0.74rem;">${esc(r.when)}</td>
-        </tr>
-      `;
-    }).join("");
-
-    $tbody.html(html);
-  }
-
-  function renderNeedsAttentionPanel(items) {
-    const $list = $("#hubNeedsAttentionList");
-    if (!items || !items.length) {
-      $list.html('<div style="text-align:center;padding:16px;color:#10b981;font-size:0.8rem;"><i class="bi bi-shield-check-fill me-1"></i>All connectors operational</div>');
-      $("#hubNeedsAttentionBadge").text("0").removeClass("bg-danger").addClass("bg-success");
-      return;
-    }
-
-    $("#hubNeedsAttentionBadge").text(items.length);
-
-    const html = items.map(it => `
-      <div style="background:#fff;border:1px solid #fed7aa;border-left:4px solid #f97316;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <strong style="font-size:0.78rem;color:#9a3412;"><i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>${esc(it.badge || it.channel)}</strong>
-          <span style="font-size:0.66rem;color:#ea580c;font-weight:700;text-transform:uppercase;">${esc(it.status || 'degraded')}</span>
-        </div>
-        <div style="font-size:0.72rem;color:#475569;line-height:1.3;">${esc(it.issue)}</div>
-        <div style="font-size:0.68rem;color:#94a3b8;margin-top:2px;display:flex;align-items:center;justify-content:space-between;">
-          <span>${esc(it.details || '')}</span>
-          <button type="button" class="btn btn-link p-0 text-primary text-decoration-none" style="font-size:0.7rem;font-weight:700;" onclick="showToast('Initiating targeted self-healing check for ${esc(it.channel)}...', 'info');">Test</button>
-        </div>
-      </div>
-    `).join("");
-
-    $list.html(html);
-  }
 
   // Event Handlers for Overview Controls
   $(document).on("click", "#hubLineageToggleRow", function() {
