@@ -106,13 +106,13 @@ function render() {
   const roleBadge = getUserRoleBadge(user);
 
   el.innerHTML = `
-    ${showTasks ? '<button type="button" id="topbarMyTasksBtn" class="topbar-link topbar-link-btn" title="View assigned action items"><i class="bi bi-list-check"></i> My Tasks <span class="tab-badge" id="topbarMyTasksBadge">…</span></button>' : ''}
+    ${showTasks ? '<button type="button" id="topbarMyTasksBtn" class="topbar-link topbar-link-btn" title="View assigned action items" aria-label="My Tasks"><i class="fa-solid fa-list-check"></i> <span class="topbar-link-label">My Tasks</span> <span class="tab-badge" id="topbarMyTasksBadge">…</span></button>' : ''}
     
     <div class="topbar-profile-container" id="topbarProfileContainer">
       <button type="button" class="topbar-profile-btn" id="topbarProfileBtn" aria-expanded="false" aria-haspopup="true" title="User profile for ${esc(displayName)} (${esc(roleBadge.label)})">
         <div class="topbar-profile-avatar">${esc(initials)}</div>
         <span class="topbar-profile-label">${esc(displayName)}</span>
-        <i class="bi bi-chevron-down topbar-profile-arrow"></i>
+        <i class="fa-solid fa-chevron-down topbar-profile-arrow"></i>
       </button>
 
       <div class="topbar-profile-dropdown" id="topbarProfileDropdown" role="menu">
@@ -134,7 +134,7 @@ function render() {
         <div class="profile-dropdown-divider"></div>
 
         <button type="button" class="profile-dropdown-item profile-dropdown-logout" id="topbarLogoutBtn" role="menuitem">
-          <i class="bi bi-box-arrow-right"></i>
+          <i class="fa-solid fa-right-from-bracket"></i>
           <span>Logout</span>
         </button>
       </div>

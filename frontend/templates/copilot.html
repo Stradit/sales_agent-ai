@@ -2,26 +2,36 @@
 <html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Sales Copilot | Doshin</title>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="css/tokens.css?v=3.0">
   <link rel="stylesheet" href="css/base.css?v=4.1">
-  <link rel="stylesheet" href="css/shell.css?v=3.0">
-  <link rel="stylesheet" href="css/copilot.css?v=2.3">
+  <link rel="stylesheet" href="css/shell.css?v=3.1">
+  <link rel="stylesheet" href="css/copilot.css?v=2.4">
   <link rel="stylesheet" href="css/elitehost.css?v=1.0">
 </head>
-<body>
+<body class="cp-page">
 
 <div class="dash-shell">
 
 {% include "partials/topbar.html" %}
 
-  <div class="dash-body cp-body">
+  <div class="dash-body cp-body" id="cpBody">
 
-    <!-- Left: chats + notes -->
+    <!-- Tablet portrait: icon rail that opens the chats/notes drawer -->
+    <nav class="cp-rail" id="cpRail" aria-label="Copilot">
+      <button type="button" class="cp-rail-btn cp-rail-new" data-rail="new" title="New chat" aria-label="New chat"><i class="fa-solid fa-plus"></i></button>
+      <button type="button" class="cp-rail-btn" data-rail="chats" aria-controls="cpSidebar"><i class="fa-regular fa-comments"></i> Chats</button>
+      <button type="button" class="cp-rail-btn" data-rail="notes" aria-controls="cpSidebar"><i class="fa-solid fa-thumbtack"></i> Notes</button>
+      <span class="cp-rail-spacer"></span>
+      <a href="/accounts" class="cp-rail-btn"><i class="fa-solid fa-arrow-left"></i> Accounts</a>
+    </nav>
+
+    <!-- Left: chats + notes (a drawer below 1024px) -->
     <aside class="cp-sidebar" id="cpSidebar" aria-label="Chats and notes">
+      <button type="button" class="cp-icon-btn cp-side-close" id="cpSideClose" aria-label="Close chats"><i class="fa-solid fa-xmark"></i></button>
       <div class="cp-sidebar-top">
         <a href="/accounts" class="cp-back"><i class="fa-solid fa-arrow-left"></i> Accounts</a>
         <button type="button" class="cp-btn cp-btn-primary cp-new" id="cpNewChat" title="New chat (Ctrl+Shift+O)"><i class="fa-solid fa-plus"></i> New chat</button>
@@ -56,6 +66,7 @@
         </div>
         <div id="cpNoteList"></div>
       </div>
+      <div class="cp-sidebar-foot"><div class="cp-quota" id="cpQuotaSide" title="Free AI quota — resets daily"></div></div>
     </aside>
 
     <!-- Center: conversation -->
@@ -68,6 +79,7 @@
         </div>
         <div class="cp-header-right">
           <div class="cp-quota" id="cpQuota" title="Free AI quota — resets daily"></div>
+          <button type="button" class="cp-sources-btn" id="cpSourcesBtn" aria-controls="cpContext" aria-expanded="true" title="Sources and context"><i class="fa-solid fa-book-open"></i> <span class="cp-sources-label">Sources</span> <span id="cpSourcesCount">0</span></button>
           <span class="cp-chat-actions" id="cpChatActions" hidden>
             <span class="cp-menu-wrap">
               <button type="button" class="cp-icon-btn" onclick="this.parentNode.classList.toggle('open')" title="Download this chat" aria-haspopup="true" aria-label="Download this chat"><i class="fa-solid fa-download"></i></button>
@@ -98,6 +110,14 @@
         <button type="button" class="cp-jump" id="cpJump" hidden aria-label="Jump to latest"><i class="fa-solid fa-arrow-down"></i> Latest</button>
       </div>
 
+      <div class="cp-quick" id="cpQuick" aria-label="Quick commands">
+        <button type="button" data-insert="/prep ">Prep</button>
+        <button type="button" data-insert="/email ">Email</button>
+        <button type="button" data-insert="/changes ">Changes</button>
+        <button type="button" data-insert="/news ">News</button>
+        <button type="button" data-insert="@">@ Mention</button>
+      </div>
+
       <form class="cp-composer" id="cpComposer" autocomplete="off">
         <div class="cp-mention" id="cpMention" role="listbox" hidden></div>
         <textarea id="cpInput" rows="1" placeholder="Ask about an account or person… (@ to mention, / for commands)" aria-label="Your question"></textarea>
@@ -106,8 +126,12 @@
       <div class="cp-hint">Answers cite your data. Contact details come from the database, never from the AI. Free AI quota is shared by the team.</div>
     </main>
 
-    <!-- Right: context + sources -->
+    <!-- Right: context + sources (a slide-over on tablets, a bottom sheet on phones) -->
     <aside class="cp-context" id="cpContext" aria-label="Sources and context">
+      <div class="cp-context-head">
+        <h2 class="cp-context-title">This chat</h2>
+        <button type="button" class="cp-icon-btn" id="cpContextClose" aria-label="Close sources"><i class="fa-solid fa-xmark"></i></button>
+      </div>
       <section>
         <h3 class="cp-h3">In focus</h3>
         <div id="cpFocus" class="cp-muted cp-small">Nothing yet — mention a person or account.</div>
@@ -118,10 +142,11 @@
       </section>
     </aside>
   </div>
+  <div class="cp-scrim" id="cpScrim" hidden></div>
 </div>
 
 <div class="toast" id="toast"></div>
 
-<script type="module" src="js/modules/copilot/main.js?v=2.3"></script>
+<script type="module" src="js/modules/copilot/main.js?v=2.4"></script>
 </body>
 </html>
