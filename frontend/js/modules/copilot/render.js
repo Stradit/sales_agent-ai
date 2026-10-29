@@ -75,13 +75,63 @@ function inline(s, nCites) {
   return h;
 }
 
-export function renderMarkdown(text, nCites = 0) {
+// Splits an answer into lines, fenced code blocks (```csv … ```) and pipe tables (| a | b |).
+// Shared by renderMarkdown and downloadBlocks so a block's index means the same thing in both.
+const FENCE_RE = /^\s*```\s*([\w-]*)\s*$/;
+const PIPE_RE = /^\s*\|.*\|\s*$/;
+const PIPE_RULE_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+function segments(text) {
   const lines = fixText(text || '').replace(/\r/g, '').split('\n');
   const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const fence = lines[i].match(FENCE_RE);
+    if (fence) {
+      const body = [];
+      for (i++; i < lines.length && !FENCE_RE.test(lines[i]); i++) body.push(lines[i]);   // unclosed while streaming: to the end
+      out.push({ type: 'code', lang: fence[1].toLowerCase(), lines: body });
+    } else if (PIPE_RE.test(lines[i])) {
+      const rows = [];
+      for (; i < lines.length && PIPE_RE.test(lines[i]); i++) {
+        if (!PIPE_RULE_RE.test(lines[i])) rows.push(lines[i].trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()));
+      }
+      i--;
+      out.push({ type: 'table', rows });
+    } else out.push({ type: 'line', text: lines[i] });
+  }
+  return out;
+}
+const isDownloadable = (s) => s.type === 'table' || (s.type === 'code' && (s.lang === 'csv' || s.lang === 'tsv'));
+const csvCell = (v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+
+// The CSV text of each downloadable block in an answer, in order (tables and ```csv blocks).
+export function downloadBlocks(text) {
+  return segments(text).filter(isDownloadable).map(s => (s.type === 'table'
+    ? s.rows.map(r => r.map(csvCell).join(',')).join('\n')
+    : s.lines.join('\n')));
+}
+
+export function renderMarkdown(text, nCites = 0) {
+  const out = [];
   let list = null;
+  let block = 0;
   const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
-  for (const raw of lines) {
-    const line = raw.trimEnd();
+  const dlButton = () => `<button type="button" class="cp-link-btn" data-action="dl-block" data-block="${block++}"><i class="fa-solid fa-file-csv"></i> Download CSV</button>`;
+  for (const seg of segments(text)) {
+    if (seg.type === 'code') {
+      closeList();
+      out.push(`<div class="cp-code">${isDownloadable(seg) ? `<div class="cp-code-head"><span>${esc(seg.lang)}</span>${dlButton()}</div>` : ''}
+        <pre><code>${esc(seg.lines.join('\n'))}</code></pre></div>`);
+      continue;
+    }
+    if (seg.type === 'table') {
+      closeList();
+      const [head, ...body] = seg.rows;
+      out.push(`<div class="cp-table-wrap"><table class="cp-table"><thead><tr>${(head || []).map(c => `<th scope="col">${inline(c, nCites)}</th>`).join('')}</tr></thead>
+        <tbody>${body.map(r => `<tr>${r.map(c => `<td>${inline(c, nCites)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+        <div class="cp-table-dl">${dlButton()}</div>`);
+      continue;
+    }
+    const line = seg.text.trimEnd();
     let m;
     if (!line.trim()) { closeList(); continue; }
     if ((m = line.match(/^\s*[-*•]\s+(.*)$/))) {
@@ -145,6 +195,61 @@ function renderContacts(contacts) {
       </div>
     </div>`;
   }).join('');
+}
+
+// "Create …" proposal (apps/sales_copilot/actions.py): the records the user can review, edit and confirm.
+// Edits live on the message (chat-view.js) so they survive re-renders; nothing is created until "Create".
+// lookups: { connectors: [{id, name, organisation}], warm: {account_id: [{id, name, strength}]} }
+const ACTION_TITLE = { task: 'Create tasks', introduction: 'Request introductions', deal: 'Create a deal' };
+function renderActions(a, lookups = {}) {
+  if (!a || !a.items || !a.items.length) return '';
+  const head = `<header class="cp-action-head"><i class="fa-solid fa-bolt"></i> ${ACTION_TITLE[a.kind] || 'Create'}</header>`;
+  if (a.done) {
+    return `<section class="cp-action is-done">${head}<p class="cp-small">Created ${a.done.length}:</p>
+      <ul class="cp-action-done">${a.done.map(c => `<li><i class="fa-solid fa-check"></i> ${c.href ? `<a href="${esc(c.href)}">${esc(c.label)}</a>` : esc(c.label)}</li>`).join('')}</ul></section>`;
+  }
+  const on = a.items.filter(it => !it.skip).length;
+  const field = (i, key, value, attrs = '') => `<input class="cp-action-input" data-act-item="${i}" data-act-field="${key}" value="${esc(value == null ? '' : value)}" ${attrs}>`;
+  const rows = a.items.map((it, i) => {
+    const check = `<input type="checkbox" data-act-item="${i}" data-act-field="skip"${it.skip ? '' : ' checked'} aria-label="Include ${esc(it.name || it.account)}">`;
+    if (a.kind === 'deal') {
+      return `<li class="cp-action-row cp-action-deal">${check}<div class="cp-action-main"><strong>${esc(it.account)}</strong>
+        <label>Deal name ${field(i, 'name', it.name, 'maxlength="200"')}</label>
+        <div class="cp-action-pair"><label>Value (USD) ${field(i, 'value', it.value, 'type="number" min="0" step="1000" inputmode="numeric"')}</label>
+          <label>Expected close ${field(i, 'close', it.close, 'type="date"')}</label></div></div></li>`;
+    }
+    const who = `<strong>${esc(it.name)}</strong><span class="cp-muted">${esc(shortTitle(it.title || '', 70))}${it.account ? ` · ${esc(it.account)}` : ''}</span>`;
+    return `<li class="cp-action-row">${check}<div class="cp-action-main">${who}
+      ${a.kind === 'task' ? field(i, 'title_text', it.title_text, 'maxlength="500" aria-label="Task title"') : ''}</div></li>`;
+  }).join('');
+  let shared = '';
+  if (a.kind === 'task') {
+    shared = `<div class="cp-action-pair"><label>Due ${`<input class="cp-action-input" type="date" data-act-field="due" value="${esc(a.due || '')}">`}</label>
+      <label>Priority <select class="cp-action-input" data-act-field="priority">${['high', 'medium', 'low'].map(p => `<option value="${p}"${(a.priority || 'medium') === p ? ' selected' : ''}>${p[0].toUpperCase() + p.slice(1)}</option>`).join('')}</select></label></div>`;
+  } else if (a.kind === 'introduction') {
+    const warm = (a.account_ids || []).flatMap(id => (lookups.warm || {})[id] || []);
+    const warmIds = new Set(warm.map(w => String(w.id)));
+    const others = (lookups.connectors || []).filter(c => !warmIds.has(String(c.id)));
+    const opt = (c, note) => `<option value="${c.id}"${String(a.connector || '') === String(c.id) ? ' selected' : ''}>${esc(c.name)}${note ? ` — ${esc(note)}` : ''}</option>`;
+    shared = `<label>Who will introduce you?
+        <select class="cp-action-input" data-act-field="connector">
+          <option value="">No one yet — add to the introduction wishlist</option>
+          ${warm.length ? `<optgroup label="Suggested (warm paths)">${warm.map(w => opt(w, `${w.strength} path`)).join('')}</optgroup>` : ''}
+          ${others.length ? `<optgroup label="All connectors">${others.map(c => opt(c, c.organisation)).join('')}</optgroup>` : ''}
+        </select></label>
+      ${lookups.connectors ? '' : '<p class="cp-small cp-muted">Loading connectors…</p>'}
+      <label>Why — shared with the connector (optional)
+        <textarea class="cp-action-input" data-act-field="context" rows="2" maxlength="1000">${esc(a.context || '')}</textarea></label>`;
+  }
+  const noun = { task: 'task', introduction: a.connector ? 'introduction' : 'wishlist request', deal: 'deal' }[a.kind];
+  return `<section class="cp-action" aria-label="${esc(ACTION_TITLE[a.kind] || 'Create')}">${head}
+    <ul class="cp-action-list">${rows}</ul>
+    ${shared ? `<div class="cp-action-shared">${shared}</div>` : ''}
+    <footer class="cp-action-foot">
+      <button type="button" class="cp-btn cp-btn-primary" data-action="act-create"${on ? '' : ' disabled'}>
+        <i class="fa-solid fa-check"></i> Create ${on} ${noun}${on === 1 ? '' : 's'}</button>
+      <span class="cp-small cp-muted">Uses your CRM permissions · nothing is created until you confirm</span>
+    </footer></section>`;
 }
 
 function renderFollowups(list) {
@@ -235,7 +340,12 @@ export function renderMessage(msg, opts = {}) {
       ${(!streaming && extras.draft && renderDraft(msg, cites.length)) || `<div class="cp-md">${renderMarkdown(msg.content, cites.length)}${streaming && msg.content ? '<span class="cp-caret" aria-hidden="true"></span>' : ''}</div>`}
       ${!streaming && !extras.draft ? renderGuardrails(extras.guardrails, true) : ''}
       ${renderTable(extras.table)}
+      ${hasTable && !streaming && msg.id ? `<div class="cp-table-dl${extras.download ? ' is-primary' : ''}">
+        <button type="button" class="cp-btn${extras.download ? ' cp-btn-primary' : ''}" data-action="dl-xlsx"><i class="fa-regular fa-file-excel"></i> Download Excel</button>
+        <button type="button" class="cp-btn" data-action="dl-csv"><i class="fa-solid fa-file-csv"></i> CSV</button>
+        <span class="cp-small cp-muted">${extras.table.rows.length} row${extras.table.rows.length === 1 ? '' : 's'}</span></div>` : ''}
       ${renderContacts(extras.contacts)}
+      ${!streaming && msg.id ? renderActions(extras.actions, opts.lookups) : ''}
       ${cites.length && !opts.compact ? `<div class="cp-cite-row" aria-label="Sources">${cites.slice(0, 5).map(c =>
         `<button type="button" class="cp-src-pill" data-cite="${c.n}" title="${esc(shortTitle(c.title, 200))}${c.snippet ? ' — ' + esc(fixText(c.snippet).slice(0, 160)) : ''}"><span class="cp-cite">${c.n}</span><i class="${typeIcon(c.doc_type)}"></i><span class="cp-pill-text">${esc(shortTitle(c.title, 38))}</span></button>`).join('')}${cites.length > 5 ? `<span class="cp-more-sources">+${cites.length - 5} more in Sources</span>` : ''}</div>` : ''}
       ${!streaming && msg.id ? `<div class="cp-msg-actions">

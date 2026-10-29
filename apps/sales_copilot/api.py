@@ -4,7 +4,7 @@ api.py under /api/copilot. Every endpoint is scoped to the calling user."""
 import json
 import re
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
@@ -273,11 +273,33 @@ def export_message(mid: int, format: str = "pdf", part: str = "table",
         if not msg["citations"]:
             raise HTTPException(400, "This answer has no sources.")
         return _file(exports.sources_xlsx(msg["citations"], question), exports.safe_filename(question[:40] + "-sources", "xlsx"), XLSX)
-    if format == "xlsx":
+    if format in ("xlsx", "csv"):
         if not (msg["extras"].get("table") or {}).get("rows"):
             raise HTTPException(400, "This answer has no table to export.")
+        if format == "csv":
+            return _file(exports.table_csv(msg["extras"]["table"]), name + "csv", "text/csv; charset=utf-8")
         return _file(exports.table_xlsx(msg["extras"]["table"], question), name + "xlsx", XLSX)
-    raise HTTPException(400, "format must be pdf or xlsx")
+    raise HTTPException(400, "format must be pdf, xlsx or csv")
+
+
+class ActionsDoneIn(BaseModel):
+    created: List[Dict[str, Any]] = Field(default_factory=list, max_length=100)   # [{label, href}] of the records made
+
+
+@router.post("/messages/{mid}/actions-done")
+def actions_done(mid: int, body: ActionsDoneIn, user: User = Depends(auth.get_current_user), s=Depends(_session)):
+    """Marks a "create …" proposal (actions.py) as carried out, so reopening the chat shows what was created
+    instead of offering the same records again. The records themselves were made by the CRM endpoints."""
+    row = s.execute(text("""SELECT m.extras FROM copilot_messages m JOIN copilot_sessions ss ON ss.id = m.session_id
+                            WHERE m.id = :m AND ss.user_id = :u AND m.role = 'assistant'"""), {"m": mid, "u": user.id}).fetchone()
+    if not row or not (row[0] or {}).get("actions"):
+        raise HTTPException(404, "Proposal not found.")
+    extras = row[0]
+    extras["actions"]["done"] = [{"label": str(c.get("label", ""))[:200], "href": str(c.get("href", ""))[:300]}
+                                 for c in body.created]
+    s.execute(text("UPDATE copilot_messages SET extras = :e WHERE id = :m"), {"e": json.dumps(extras, default=str), "m": mid})
+    s.commit()
+    return {"ok": True, "actions": extras["actions"]}
 
 
 def _load_chat(s, sid: str, user_id: int):
