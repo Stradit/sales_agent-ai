@@ -127,53 +127,174 @@
 
       <!-- Interactive Quick-Launch Hub (Empty State) -->
       <div id="emptyState" class="empty-state-hub fade-in">
-        <!-- Hub Top Banner -->
-        <div class="hub-header">
-          <div class="hub-header-badge">
-            <span class="pulse-dot-green"></span> Enterprise Sales Intelligence Console
+        <!-- Hub Top Banner with Client Switcher -->
+        <div class="hub-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:16px;">
+          <div>
+            <div class="hub-header-badge">
+              <span class="pulse-dot-green"></span> Enterprise Sales Intelligence Console
+            </div>
+            <h1 class="hub-title" style="margin-bottom:4px;">Pipeline Overview</h1>
+            <p class="hub-subtitle" style="margin-bottom:0;">
+              Run health over the last 24 hours, data coverage, and anything that needs a look.
+            </p>
           </div>
-          <h1 class="hub-title">Interactive Quick-Launch Hub</h1>
-          <p class="hub-subtitle">
-            Explore mapped executive hierarchies, audited operating divisions, and real-time signals across verified corporate accounts.
-          </p>
+          <!-- Client Workspace Switcher & Top Actions -->
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div class="dropdown">
+              <button class="btn btn-sm btn-white dropdown-toggle" type="button" id="hubClientDropdown" data-bs-toggle="dropdown" aria-expanded="false" style="background:#fff;border:1px solid #cbd5e1;font-weight:700;color:#0f172a;border-radius:8px;padding:7px 14px;box-shadow:0 1px 2px rgba(0,0,0,0.05);display:flex;align-items:center;gap:8px;">
+                <i class="bi bi-buildings-fill text-primary"></i>
+                <span>Client: <strong id="hubActiveClientName">Stradit</strong></span>
+                <span class="badge bg-primary-subtle text-primary" id="hubActiveClientBadge" style="font-size:0.7rem;">6 Accounts</span>
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end shadow" style="min-width:240px;border-radius:10px;font-size:0.82rem;">
+                <li><h6 class="dropdown-header" style="font-size:0.7rem;font-weight:700;text-transform:uppercase;">Tenant Workspaces</h6></li>
+                <li>
+                  <a class="dropdown-item active d-flex align-items-center justify-content-between py-2" href="#" id="clientWorkspaceStradit">
+                    <span><i class="bi bi-check2 text-primary me-2"></i><strong>Stradit Global Operations</strong></span>
+                    <span class="badge bg-light text-dark ms-2">Current</span>
+                  </a>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <a class="dropdown-item py-2 text-muted" href="#" onclick="showToast('Multi-client workspace provisioning available for Enterprise Tier', 'info'); return false;">
+                    <i class="bi bi-plus-circle me-2"></i>Add Client Workspace...
+                  </a>
+                </li>
+              </ul>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnHubNewTarget" style="border-radius:8px;font-weight:700;padding:7px 14px;background:#fff;border-color:#cbd5e1;">
+              <i class="bi bi-plus-lg"></i> New Target
+            </button>
+            <button type="button" class="btn btn-sm" id="btnHubFetchDigest" style="border-radius:8px;font-weight:700;padding:7px 18px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border:none;box-shadow:0 2px 8px rgba(99,102,241,0.35);">
+              <i class="bi bi-play-fill"></i> Fetch &amp; Digest
+            </button>
+          </div>
         </div>
 
-        <!-- Global System Health & Metered Credit Telemetry -->
-        <div class="hub-telemetry-section">
-          <div class="hub-section-heading">
-            <i class="bi bi-cpu-fill"></i> System Telemetry &amp; Metered Pipeline Health
-          </div>
-          <div class="hub-kpi-grid" id="hubKpiGrid">
-            <div class="hub-kpi-card">
-              <div class="hub-kpi-label"><i class="bi bi-lightning-charge-fill text-warning"></i> Metered Pipeline Units</div>
-              <div class="hub-kpi-val" id="hubCreditsConsumed">0</div>
-              <div class="hub-kpi-sub" id="hubCreditsSub">Across all pipeline stages</div>
+        <!-- 1. Global 24-Hour Operational Health & Cost Strip -->
+        <div class="hub-telemetry-section" style="margin-top:16px;">
+          <div class="hub-kpi-grid" id="hubKpiGrid" style="grid-template-columns:repeat(auto-fit, minmax(210px, 1fr));gap:12px;">
+            <div class="hub-kpi-card" style="border-top:3px solid #10b981;">
+              <div class="hub-kpi-label"><i class="bi bi-check-circle-fill text-success"></i> Success Rate &bull; 24h</div>
+              <div class="hub-kpi-val" id="hubSuccessRateVal">100%</div>
+              <div class="hub-kpi-sub" id="hubSuccessRateSub">9 of 9 runs succeeded</div>
             </div>
-            <div class="hub-kpi-card">
-              <div class="hub-kpi-label"><i class="bi bi-clock-history text-primary"></i> Total Pipeline Runs</div>
-              <div class="hub-kpi-val" id="hubTotalRuns">0</div>
-              <div class="hub-kpi-sub">Ingestion, LOB &amp; Persona batches</div>
+            <div class="hub-kpi-card" style="border-top:3px solid #3b82f6;">
+              <div class="hub-kpi-label"><i class="bi bi-play-circle-fill text-primary"></i> Running Now</div>
+              <div class="hub-kpi-val" id="hubRunningNowVal">0</div>
+              <div class="hub-kpi-sub" id="hubRunningNowSub">Idle (3 worker pool)</div>
             </div>
-            <div class="hub-kpi-card">
-              <div class="hub-kpi-label"><i class="bi bi-database-fill-check text-success"></i> Database Engine</div>
-              <div class="hub-kpi-val text-success" id="hubDbStatus"><span class="pulse-dot-green"></span> PostgreSQL</div>
-              <div class="hub-kpi-sub" id="hubDbName">sales_ai_universal</div>
+            <div class="hub-kpi-card" style="border-top:3px solid #10b981;">
+              <div class="hub-kpi-label"><i class="bi bi-shield-check text-success"></i> Failed &bull; 24h</div>
+              <div class="hub-kpi-val" id="hubFailedVal">0</div>
+              <div class="hub-kpi-sub" id="hubFailedSub">No failures</div>
             </div>
-            <div class="hub-kpi-card">
-              <div class="hub-kpi-label"><i class="bi bi-arrow-repeat text-info"></i> Last Synced</div>
-              <div class="hub-kpi-val" id="hubLastSync">&mdash;</div>
-              <div class="hub-kpi-sub" id="hubFreshnessLabel">System freshness status</div>
+            <div class="hub-kpi-card" style="border-top:3px solid #8b5cf6;">
+              <div class="hub-kpi-label"><i class="bi bi-lightning-charge-fill text-warning"></i> Harvested Records &bull; 24h</div>
+              <div class="hub-kpi-val" id="hubHarvestedVal">2,035</div>
+              <div class="hub-kpi-sub" id="hubHarvestedSub">Metered cost: $0.06 USD (11 cr)</div>
             </div>
           </div>
         </div>
 
-        <!-- Section 2: Enterprise Portfolio & Outreach Readiness Matrix -->
-        <div class="pipeline-section-card fade-in" style="margin-top:20px;">
+        <!-- 2. End-to-End Data Pipeline Funnel Bar -->
+        <div class="pipeline-section-card fade-in" style="margin-top:16px;padding:16px 20px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+            <div style="font-size:0.92rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+              <span style="width:8px;height:8px;border-radius:50%;background:#4f46e5;display:inline-block;"></span>
+              Data Pipeline Funnel
+            </div>
+            <div style="font-size:0.74rem;color:#64748b;font-weight:600;">
+              CRM &rarr; Targets &rarr; Scraped &rarr; Stored &rarr; Digest
+            </div>
+          </div>
+          <div class="hub-funnel-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:12px;">
+            <div class="hub-funnel-col" style="border-top:3px solid #f97316;background:#f8fafc;padding:12px 14px;border-radius:8px;border:1px solid #e2e8f0;border-top-width:3px;">
+              <div style="font-size:0.68rem;font-weight:800;color:#64748b;text-transform:uppercase;">CRM Backlog</div>
+              <div style="font-size:1.35rem;font-weight:800;color:#0f172a;margin:2px 0;" id="hubFunnelCrmVal">1,572</div>
+              <div style="font-size:0.7rem;color:#94a3b8;" id="hubFunnelCrmSub">un-enrolled candidates</div>
+            </div>
+            <div class="hub-funnel-col" style="border-top:3px solid #3b82f6;background:#f8fafc;padding:12px 14px;border-radius:8px;border:1px solid #e2e8f0;border-top-width:3px;">
+              <div style="font-size:0.68rem;font-weight:800;color:#64748b;text-transform:uppercase;">Tracked</div>
+              <div style="font-size:1.35rem;font-weight:800;color:#0f172a;margin:2px 0;" id="hubFunnelTrackedVal">2,246</div>
+              <div style="font-size:0.7rem;color:#94a3b8;" id="hubFunnelTrackedSub">6 companies &bull; 2,240 people</div>
+            </div>
+            <div class="hub-funnel-col" style="border-top:3px solid #3b82f6;background:#f8fafc;padding:12px 14px;border-radius:8px;border:1px solid #e2e8f0;border-top-width:3px;">
+              <div style="font-size:0.68rem;font-weight:800;color:#64748b;text-transform:uppercase;">Scraped</div>
+              <div style="font-size:1.35rem;font-weight:800;color:#0f172a;margin:2px 0;" id="hubFunnelScrapedVal">2,188</div>
+              <div style="font-size:0.7rem;color:#10b981;font-weight:600;" id="hubFunnelScrapedSub">97.7% coverage</div>
+            </div>
+            <div class="hub-funnel-col" style="border-top:3px solid #8b5cf6;background:#f8fafc;padding:12px 14px;border-radius:8px;border:1px solid #e2e8f0;border-top-width:3px;">
+              <div style="font-size:0.68rem;font-weight:800;color:#64748b;text-transform:uppercase;">Posts Stored</div>
+              <div style="font-size:1.35rem;font-weight:800;color:#0f172a;margin:2px 0;" id="hubFunnelPostsVal">35,213</div>
+              <div style="font-size:0.7rem;color:#94a3b8;" id="hubFunnelPostsSub">avg 15 per target</div>
+            </div>
+            <div class="hub-funnel-col" style="border-top:3px solid #10b981;background:#f8fafc;padding:12px 14px;border-radius:8px;border:1px solid #e2e8f0;border-top-width:3px;">
+              <div style="font-size:0.68rem;font-weight:800;color:#64748b;text-transform:uppercase;">Digests</div>
+              <div style="font-size:1.35rem;font-weight:800;color:#0f172a;margin:2px 0;" id="hubFunnelDigestsVal">12</div>
+              <div style="font-size:0.7rem;color:#94a3b8;" id="hubFunnelDigestsSub">sales briefs generated</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Split Layout: Runs Execution Table (70%) + Needs Attention Diagnostic Box (30%) -->
+        <div class="hub-split-layout" style="display:grid;grid-template-columns:7fr 3fr;gap:16px;margin-top:16px;">
+          <!-- Left: Runs Console -->
+          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:18px 20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+              <div style="font-size:0.95rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                <i class="bi bi-play-circle-fill text-primary"></i> Runs
+              </div>
+              <div class="btn-group btn-group-sm" role="group" id="hubRunsFilterGroup">
+                <button type="button" class="btn btn-outline-secondary active" data-filter="all" style="font-size:0.75rem;font-weight:700;">All</button>
+                <button type="button" class="btn btn-outline-secondary" data-filter="running" style="font-size:0.75rem;font-weight:700;">Running <span class="badge bg-secondary ms-1" id="hubTabRunningCount">0</span></button>
+                <button type="button" class="btn btn-outline-secondary" data-filter="failed" style="font-size:0.75rem;font-weight:700;">Failed <span class="badge bg-secondary ms-1" id="hubTabFailedCount">0</span></button>
+                <button type="button" class="btn btn-outline-secondary" data-filter="scheduled" style="font-size:0.75rem;font-weight:700;">Scheduled <span class="badge bg-secondary ms-1">40</span></button>
+              </div>
+            </div>
+
+            <!-- Runs Table Container -->
+            <div class="table-responsive" style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-height:380px;overflow-y:auto;">
+              <table class="table table-hover align-middle mb-0" style="font-size:0.78rem;">
+                <thead style="background:#f8fafc;color:#64748b;font-weight:700;text-transform:uppercase;font-size:0.68rem;position:sticky;top:0;z-index:2;">
+                  <tr>
+                    <th style="padding:10px 14px;">Target</th>
+                    <th style="padding:10px 10px;">Trigger</th>
+                    <th style="padding:10px 10px;">Channels</th>
+                    <th style="padding:10px 10px;">Yield</th>
+                    <th style="padding:10px 10px;">Duration</th>
+                    <th style="padding:10px 10px;">Status</th>
+                    <th style="padding:10px 14px;text-align:right;">When</th>
+                  </tr>
+                </thead>
+                <tbody id="hubOverviewRunsBody">
+                  <tr><td colspan="7" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading live runs...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Needs Attention Panel -->
+          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:18px 20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+              <div style="font-size:0.95rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                <i class="bi bi-exclamation-triangle-fill text-warning"></i> Needs attention
+              </div>
+              <span class="badge bg-danger rounded-pill" id="hubNeedsAttentionBadge" style="font-size:0.72rem;padding:4px 8px;">4</span>
+            </div>
+            <div id="hubNeedsAttentionList" style="display:flex;flex-direction:column;gap:10px;">
+              <!-- Dynamic alert cards populated via JS from live diagnostic payload -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Enterprise Portfolio & Outreach Readiness Matrix (Preserved) -->
+        <div class="pipeline-section-card fade-in" style="margin-top:16px;">
           <div class="section-title-row">
             <div class="section-title-left">
               <span class="section-title-dot"></span>
               <span>Enterprise Portfolio &amp; Outreach Readiness</span>
-              <span class="badge-feed-count" id="hubPortfolioAccountsCountBadge">5 Accounts</span>
+              <span class="badge-feed-count" id="hubPortfolioAccountsCountBadge">6 Accounts</span>
             </div>
             <div style="display:flex;align-items:center;gap:12px;">
               <span class="section-subtitle-hint"><i class="bi bi-shield-check text-success"></i> PostgreSQL Ground Truth</span>
@@ -184,51 +305,35 @@
           </div>
         </div>
 
-        <!-- Section 3: Multi-Tier Resource Architecture & Data Lineage (Two-Tier Filter Grid) -->
-        <div class="pipeline-section-card fade-in" style="margin-top:20px;">
-          <div class="section-title-row">
+        <!-- 5. Collapsible Technical Lineage & Platforms Reference (Preserved) -->
+        <div class="pipeline-section-card fade-in" style="margin-top:16px;">
+          <div class="section-title-row" style="cursor:pointer;" id="hubLineageToggleRow" title="Click to expand/collapse full platform matrix">
             <div class="section-title-left">
-              <span class="section-title-dot"></span>
+              <span class="section-title-dot" style="background:#64748b;"></span>
               <span>Pipeline Resource Architecture &amp; Data Lineage</span>
               <span class="badge-feed-count" id="hubActiveConnectorsBadge">23 Platforms (27+ Tools)</span>
             </div>
-            <!-- Two-Tier Split Filters -->
-            <div class="hub-lineage-controls-wrap">
-              <!-- Tier 1: Scope Layer Filter -->
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span class="section-subtitle-hint" style="color:#64748b;"><i class="bi bi-chevron-down" id="hubLineageChevron"></i> Click to expand technical catalog</span>
+            </div>
+          </div>
+          <div id="hubLineageCollapsibleWrap" style="display:none;margin-top:14px;">
+            <div class="hub-lineage-controls-wrap" style="margin-bottom:12px;">
               <div class="hub-lineage-filter-pills" id="hubLineageScopePills">
                 <button type="button" class="hub-lineage-pill active" data-layer="all">All Layers</button>
                 <button type="button" class="hub-lineage-pill" data-layer="account">Account Layer</button>
                 <button type="button" class="hub-lineage-pill" data-layer="lob">Division / LOB</button>
                 <button type="button" class="hub-lineage-pill" data-layer="persona">Persona Layer</button>
               </div>
-
-              <!-- Tier 2: Cost Filter Toggle -->
               <div class="hub-lineage-cost-toggle" id="hubLineageCostToggle">
                 <button type="button" class="hub-cost-toggle-btn active" data-cost="all">All Costs</button>
                 <button type="button" class="hub-cost-toggle-btn" data-cost="free"><i class="bi bi-gift-fill" style="color:#059669;"></i> Free Only</button>
                 <button type="button" class="hub-cost-toggle-btn" data-cost="metered"><i class="bi bi-lightning-fill" style="color:#d97706;"></i> Metered</button>
               </div>
             </div>
-          </div>
-          <div class="hub-lineage-container" id="hubLineageGrid">
-            <!-- Dynamically populated cross-filtered cards -->
-          </div>
-        </div>
-
-        <!-- Section 4: Live Pipeline Execution Audit (Recent Runs Feed) -->
-        <div class="pipeline-section-card fade-in" style="margin-top:20px;">
-          <div class="section-title-row">
-            <div class="section-title-left">
-              <span class="section-title-dot"></span>
-              <span>Recent Pipeline Execution Audit</span>
-              <span class="badge-feed-count" id="hubRecentRunsBadge">PostgreSQL Run Audit</span>
+            <div class="hub-lineage-container" id="hubLineageGrid">
+              <!-- Dynamically populated cross-filtered cards -->
             </div>
-            <div style="display:flex;align-items:center;gap:12px;">
-              <span class="section-subtitle-hint"><i class="bi bi-activity text-info"></i> Real-time Execution Telemetry</span>
-            </div>
-          </div>
-          <div id="hubRecentRunsContainer">
-            <!-- Dynamically populated from /api/pipeline/runs?limit=5 -->
           </div>
         </div>
       </div>
@@ -530,7 +635,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=3.46.0"></script>
+<script src="js/app.js?v=3.47.0"></script>
 <script src="js/chatbot.js?v=2.3.6"></script>
 
 <!-- --- Enhanced Add New Account Modal --- -->
