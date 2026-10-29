@@ -328,6 +328,11 @@
               <i class="bi bi-people-fill"></i>&nbsp; Organizational Hierarchy &amp; Contacts
             </span>
             <div class="batch-pipeline-actions" id="personaBatchActions">
+              <button type="button" class="batch-btn batch-btn-auto-persona" id="personaAutoPipelineBtn"
+                      title="Run Autonomous Phased Persona Discovery & Ingestion"
+                      style="background:linear-gradient(135deg, #10b981 0%, #059669 100%);color:#fff;border:none;box-shadow:0 2px 8px rgba(16,185,129,0.35);font-weight:600;display:inline-flex;align-items:center;gap:6px;">
+                <i class="bi bi-magic"></i> Auto-Ingest Personas
+              </button>
               <button type="button" class="batch-btn batch-btn-pull" id="personaBatchPull"
                       title="Open Batch Console to discover and enrich personas for this LOB">
                 <i class="bi bi-grid-3x3-gap-fill"></i> Batch Console
@@ -358,6 +363,11 @@
             </div>
             <div class="d-flex align-items-center gap-2 flex-wrap">
               <div class="batch-pipeline-actions" id="allPersonasBatchActions">
+                <button type="button" class="batch-btn batch-btn-auto-persona" id="allPersonasAutoPipelineBtn"
+                        title="Run Autonomous Phased Persona Discovery & Ingestion"
+                        style="background:linear-gradient(135deg, #10b981 0%, #059669 100%);color:#fff;border:none;box-shadow:0 2px 8px rgba(16,185,129,0.35);font-weight:600;display:inline-flex;align-items:center;gap:6px;">
+                  <i class="bi bi-magic"></i> Auto-Ingest Personas
+                </button>
                 <button type="button" class="batch-btn batch-btn-pull" id="allPersonasBatchPull"
                         title="Open Batch Console to discover and enrich all personas for this account">
                   <i class="bi bi-grid-3x3-gap-fill"></i> Batch Console
@@ -777,6 +787,46 @@
           </button>
           <button type="button" id="btnStartAutomatedLobPipeline" class="btn btn-sm btn-success" style="border-radius:8px;padding:8px 22px;font-weight:700;background:linear-gradient(135deg, #10b981 0%, #059669 100%);border:none;box-shadow:0 4px 14px rgba(16,185,129,0.35);display:inline-flex;align-items:center;gap:8px;">
             <i class="bi bi-magic" style="font-size:1rem;"></i> Start Phased Ingestion (<span id="lobHandoffBtnCredits">40</span> cr) &rarr;
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LOB-to-Persona Autonomous Handoff Prompt Modal -->
+<div class="modal fade" id="personaHandoffPromptModal" tabindex="-1" aria-labelledby="personaHandoffPromptModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:680px;">
+    <div class="modal-content" style="border-radius:18px;border:1px solid #e0e7ff;box-shadow:0 25px 55px rgba(0,0,0,0.18);overflow:hidden;">
+      <div class="modal-header" style="background:linear-gradient(135deg, #f0fdf4 0%, #ede9fe 100%);border-bottom:1px solid #e2e8f0;padding:20px 26px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:44px;height:44px;border-radius:14px;background:#ede9fe;color:#7c3aed;border:1.5px solid #c4b5fd;display:flex;align-items:center;justify-content:center;font-size:1.35rem;">
+            <i class="bi bi-people-fill"></i>
+          </div>
+          <div>
+            <h5 class="modal-title" id="personaHandoffPromptModalLabel" style="font-size:1.08rem;font-weight:700;color:#0f172a;margin:0;">
+              Executive Hierarchy &amp; Personas: Autonomous Ingestion
+            </h5>
+            <p style="margin:0;font-size:0.76rem;color:#475569;">
+              Multi-cycle discovery: Name &amp; Seniority (0 cr) &rarr; Phased Enrichment with Priority Re-Queueing.
+            </p>
+          </div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="padding:22px 26px;" id="personaHandoffPromptModalBody">
+        <!-- Dynamically rendered preview: company name, discovered stubs, rate card estimate -->
+      </div>
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 26px;display:flex;justify-content:space-between;align-items:center;">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;padding:8px 18px;font-weight:600;">
+          Decide Later
+        </button>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button type="button" id="btnPersonaDiscoverStubsOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:8px 18px;font-weight:600;display:inline-flex;align-items:center;gap:6px;">
+            <i class="bi bi-person-badge"></i> Discover Names Only (0 cr)
+          </button>
+          <button type="button" id="btnStartAutomatedPersonaPipeline" class="btn btn-sm btn-success" style="border-radius:8px;padding:8px 22px;font-weight:700;background:linear-gradient(135deg, #10b981 0%, #059669 100%);border:none;box-shadow:0 4px 14px rgba(16,185,129,0.35);display:inline-flex;align-items:center;gap:8px;">
+            <i class="bi bi-magic" style="font-size:1rem;"></i> Start Phased Ingestion (<span id="personaHandoffBtnCredits">100</span> cr) &rarr;
           </button>
         </div>
       </div>

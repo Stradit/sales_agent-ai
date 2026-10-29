@@ -13331,6 +13331,15 @@ $(function () {
           refreshTelemetryStrip();
           fetchWorkspaceCreditBalance();
 
+          // Smooth handoff: prompt autonomous Persona ingestion after LOBs are in DB
+          setTimeout(() => {
+            promptPersonaAutomationHandoff(
+              accountId,
+              companyName,
+              window._activeLobHandoffContext ? window._activeLobHandoffContext.domain : null
+            );
+          }, 1500);
+
         } else if (job.status === "failed") {
           clearInterval(interval);
           $fill.css("width", "100%").css("background", "#dc2626");
@@ -13542,6 +13551,366 @@ $(function () {
     const dom = acct.primary_domain || acct.domain;
     const cik = acct.sec_cik;
     promptLobAutomationHandoff(acctId, name, dom, cik);
+  });
+
+  // ══════════════════════════════════════════════════════════════════
+  // PERSONA AUTOMATION CLIENT ENGINE — PHASED INGESTION & HANDOFF
+  // ══════════════════════════════════════════════════════════════════
+  window._activePersonaHandoffContext = null;
+  window._selectedPersonaBatchSize = 20;
+  window._selectedPersonaBatchMode = "auto";
+
+  async function promptPersonaAutomationHandoff(accountId, companyName, domain) {
+    window._activePersonaHandoffContext = { accountId, companyName, domain };
+    window._selectedPersonaBatchSize = 20;
+    window._selectedPersonaBatchMode = "auto";
+
+    const $modal = $("#personaHandoffPromptModal");
+    const $body = $("#personaHandoffPromptModalBody");
+
+    $body.html(`
+      <div style="text-align:center;padding:28px 0;">
+        <div class="spinner-border text-primary" role="status" style="width:2.2rem;height:2.2rem;"></div>
+        <p style="margin-top:14px;font-size:0.86rem;color:#64748b;font-weight:600;">Auditing Persona rate cards &amp; scanning executive roster...</p>
+      </div>
+    `);
+
+    $modal.modal("show");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/personas/preflight`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          account_id: accountId,
+          company_name: companyName,
+          batch_size: 20,
+        }),
+      });
+
+      const preflight = res.ok ? await res.json() : null;
+      const count = preflight ? preflight.estimated_persona_count : 20;
+      const availCr = preflight ? preflight.available_credits : 5000;
+      const perItemCr = preflight ? preflight.credits_per_persona : 5;
+
+      function updatePersonaHandoffModalView(batchSize, mode) {
+        window._selectedPersonaBatchSize = batchSize;
+        window._selectedPersonaBatchMode = mode || "auto";
+
+        const phases = Math.ceil(count / batchSize);
+        const reqCr = count * perItemCr;
+        const isAllowed = availCr >= reqCr;
+
+        $body.html(`
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+              <div>
+                <div style="font-size:1.05rem;font-weight:800;color:#0f172a;">${esc(companyName)}</div>
+                <div style="font-size:0.74rem;color:#64748b;">
+                  Operating structure committed &bull; Ready for Level 3 Executive Discovery &amp; Enrichment
+                </div>
+              </div>
+              <span class="badge" style="background:#ede9fe;color:#6d28d9;font-size:0.78rem;font-weight:700;padding:6px 12px;border-radius:8px;">
+                <i class="bi bi-people-fill"></i> ~${count} Executive Personas Detected
+              </span>
+            </div>
+
+            <!-- Strategy & Mode Selector -->
+            <div style="background:#ffffff;border:1px solid #cbd5e1;border-radius:10px;padding:12px 14px;margin-bottom:14px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;">
+                  <i class="bi bi-diagram-2"></i> Seniority Hierarchy Ingestion Mode
+                </span>
+                <span style="font-size:0.7rem;color:#7c3aed;font-weight:700;">
+                  ${mode === 'auto' ? 'Auto Hierarchical (C-Suite → VPs → Directors)' : 'Manual Sequential Order'}
+                </span>
+              </div>
+              <div class="btn-group w-100 mb-2" role="group" id="personaBatchModeSelector">
+                <button type="button" class="btn btn-sm ${mode === 'auto' ? 'btn-primary active' : 'btn-outline-secondary'} btn-persona-mode-pill" data-mode="auto" style="font-size:0.76rem;font-weight:700;">
+                  <i class="bi bi-trophy"></i> Auto Mode (C-Suite First)
+                </button>
+                <button type="button" class="btn btn-sm ${mode === 'manual' ? 'btn-primary active' : 'btn-outline-secondary'} btn-persona-mode-pill" data-mode="manual" style="font-size:0.76rem;font-weight:700;">
+                  <i class="bi bi-list-ol"></i> Manual Order
+                </button>
+              </div>
+
+              <div style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;margin-top:10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                <span><i class="bi bi-sliders2"></i> Batch Partitioning Size</span>
+                <span style="font-size:0.7rem;color:#0284c7;font-weight:700;">${phases} Sequential Phases (${batchSize} / phase)</span>
+              </div>
+              <div class="btn-group w-100" role="group" id="personaBatchSizeSelector">
+                <button type="button" class="btn btn-sm ${batchSize === 10 ? 'btn-primary active' : 'btn-outline-secondary'} btn-persona-batch-pill" data-batch="10" style="font-size:0.76rem;font-weight:700;">
+                  <i class="bi bi-shield-check"></i> 10 / Batch (Cautious)
+                </button>
+                <button type="button" class="btn btn-sm ${batchSize === 20 ? 'btn-primary active' : 'btn-outline-secondary'} btn-persona-batch-pill" data-batch="20" style="font-size:0.76rem;font-weight:700;">
+                  <i class="bi bi-speedometer2"></i> 20 / Batch (Recommended)
+                </button>
+                <button type="button" class="btn btn-sm ${batchSize === 30 ? 'btn-primary active' : 'btn-outline-secondary'} btn-persona-batch-pill" data-batch="30" style="font-size:0.76rem;font-weight:700;">
+                  <i class="bi bi-lightning-charge"></i> 30 / Batch (Fast)
+                </button>
+              </div>
+            </div>
+
+            <!-- Live Rate Card & Quota Tally -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
+              <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
+                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Required Credits</div>
+                <div style="font-size:1.15rem;font-weight:800;color:${isAllowed ? '#059669' : '#dc2626'};">${reqCr} cr</div>
+                <div style="font-size:0.68rem;color:#64748b;">${perItemCr} cr &times; ${count} personas</div>
+              </div>
+              <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
+                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Workspace Balance</div>
+                <div style="font-size:1.15rem;font-weight:800;color:#0f172a;">${availCr.toLocaleString()} cr</div>
+                <div style="font-size:0.68rem;color:#059669;font-weight:600;">
+                  ${isAllowed ? '✓ Pre-Approved' : '⚠ Shortage'}
+                </div>
+              </div>
+              <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
+                <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Remaining Balance</div>
+                <div style="font-size:1.15rem;font-weight:800;color:#475569;">${Math.max(0, availCr - reqCr).toLocaleString()} cr</div>
+                <div style="font-size:0.68rem;color:#64748b;">Post-run margin</div>
+              </div>
+            </div>
+
+            <!-- 4-Cycle Execution Architecture Visual Summary -->
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:12px 14px;font-size:0.76rem;color:#4c1d95;line-height:1.5;">
+              <div style="font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;color:#6d28d9;">
+                <i class="bi bi-diagram-3-fill"></i> Autonomous Persona Architecture
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div><strong>Cycle 1: Zero-Credit Discovery:</strong> Scans Apollo &amp; SEC for names, positions &amp; seniority tiers (0 cr) &bull; Dumps stubs to DB.</div>
+                <div><strong>Cycle 2: Phased Execution:</strong> Chunks into ${phases} batches &bull; 3 concurrent worker threads with immediate PostgreSQL commit per batch.</div>
+                <div><strong>Cycle 3: Dynamic Priority Re-Queueing:</strong> If any personas encounter vendor rate limits, they are <em>immediately prepended to the front of the next batch queue</em>!</div>
+                <div><strong>Cycle 4: Consolidated Self-Healing:</strong> Automated cooldown backoff &amp; targeted micro-retries for any remaining deferred connector faults.</div>
+              </div>
+            </div>
+          </div>
+        `);
+
+        $("#personaHandoffBtnCredits").text(reqCr);
+
+        if (!isAllowed) {
+          $("#btnStartAutomatedPersonaPipeline").prop("disabled", true).addClass("opacity-50");
+        } else {
+          $("#btnStartAutomatedPersonaPipeline").prop("disabled", false).removeClass("opacity-50");
+        }
+      }
+
+      updatePersonaHandoffModalView(20, "auto");
+
+      // Event listeners for pills inside modal
+      $(document).off("click", ".btn-persona-batch-pill").on("click", ".btn-persona-batch-pill", function () {
+        const batch = parseInt($(this).data("batch"), 10) || 20;
+        updatePersonaHandoffModalView(batch, window._selectedPersonaBatchMode);
+      });
+
+      $(document).off("click", ".btn-persona-mode-pill").on("click", ".btn-persona-mode-pill", function () {
+        const mode = $(this).data("mode") || "auto";
+        updatePersonaHandoffModalView(window._selectedPersonaBatchSize, mode);
+      });
+
+    } catch (err) {
+      console.warn("Persona preflight error", err);
+      $body.html(`
+        <div class="alert alert-warning" style="font-size:0.85rem;">
+          Could not load live rate card preflight (${esc(err.message)}). You may still proceed with automated ingestion or free stub discovery.
+        </div>
+      `);
+    }
+  }
+
+  async function startAutomatedPersonaPipeline(accountId, companyName, domain, batchSize) {
+    batchSize = batchSize || window._selectedPersonaBatchSize || 20;
+    $("#personaSection").removeClass("d-none");
+    $("#allPersonasSection").removeClass("d-none");
+
+    const $pProgress = $("#personaBatchProgress").removeClass("d-none");
+    const $pFill = $("#personaProgressFill").css("width", "10%").removeClass("dump");
+    const $pStatus = $("#personaBatchStatus").html(`<strong>Starting Phased Persona Pipeline:</strong> Pre-flight gatekeeper verifying credits...`);
+
+    const $aProgress = $("#allPersonasBatchProgress").removeClass("d-none");
+    const $aFill = $("#allPersonasProgressFill").css("width", "10%").removeClass("dump");
+    const $aStatus = $("#allPersonasBatchStatus").html(`<strong>Starting Phased Persona Pipeline:</strong> Pre-flight gatekeeper verifying credits...`);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/personas/auto-pipeline`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          account_id: accountId,
+          company_name: companyName,
+          domain: domain,
+          batch_size: batchSize,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        if (res.status === 402 || (errData.detail && errData.detail.reason === "insufficient_credits")) {
+          showNotification("Credit Gatekeeper Alert: Insufficient credits for persona batch run.", "error");
+          $pStatus.html(`<span class="text-danger">Execution Halted: Insufficient credits.</span>`);
+          $aStatus.html(`<span class="text-danger">Execution Halted: Insufficient credits.</span>`);
+          return;
+        }
+        throw new Error(errData.detail || "Failed to start Persona pipeline");
+      }
+
+      const data = await res.json();
+      const jobId = data.job_id;
+      showNotification(`🚀 Autonomous Persona pipeline launched for <strong>${esc(companyName)}</strong>`, "info", 5000);
+      pollAutonomousPersonaJob(jobId, accountId, companyName);
+
+    } catch (err) {
+      console.error("Persona pipeline launch error", err);
+      $pStatus.html(`<span class="text-danger">Failed to start Persona pipeline: ${esc(err.message)}</span>`);
+      $aStatus.html(`<span class="text-danger">Failed to start Persona pipeline: ${esc(err.message)}</span>`);
+      showNotification(`Error: ${esc(err.message)}`, "error");
+    }
+  }
+
+  function pollAutonomousPersonaJob(jobId, accountId, companyName) {
+    const $pFill = $("#personaProgressFill");
+    const $pStatus = $("#personaBatchStatus");
+    const $aFill = $("#allPersonasProgressFill");
+    const $aStatus = $("#allPersonasBatchStatus");
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/pipeline/job/${jobId}`, {
+          headers: authHeaders(),
+        });
+        if (!res.ok) return;
+
+        const job = await res.json();
+        const pct = job.progress_pct || 15;
+        $pFill.css("width", `${pct}%`);
+        $aFill.css("width", `${pct}%`);
+
+        const msgHtml = `<strong>Running:</strong> ${esc(job.message || 'Processing Personas...')}`;
+        $pStatus.html(msgHtml);
+        $aStatus.html(msgHtml);
+
+        if (job.status === "done") {
+          clearInterval(interval);
+          $pFill.css("width", "100%").addClass("dump");
+          $aFill.css("width", "100%").addClass("dump");
+
+          const resObj = job.result || {};
+          const totalPersonas = resObj.total_personas || 0;
+          const credits = resObj.total_credits_used || 0;
+          const phases = resObj.total_phases || 1;
+
+          const doneMsg = `<strong>✓ Complete:</strong> Ingested <span class="batch-success">${totalPersonas} Personas across ${phases} batch phases</span> (${credits} credits deducted).`;
+          $pStatus.html(doneMsg);
+          $aStatus.html(doneMsg);
+
+          showNotification(
+            `✅ <strong>${esc(companyName)}</strong> Executive Personas successfully ingested!<br/>
+             <span style="font-size:0.74rem;color:#059669;font-weight:600;">
+               ${totalPersonas} Executives Captured &bull; ${credits} Credits Deducted &bull; DB Committed
+             </span>`,
+            "success",
+            8000
+          );
+
+          // Reload fresh personas from DB
+          reloadAccountPersonas(accountId);
+          refreshBatchHistoryTable();
+          refreshTelemetryStrip();
+
+        } else if (job.status === "failed") {
+          clearInterval(interval);
+          $pFill.css("width", "100%").css("background", "#dc2626");
+          $aFill.css("width", "100%").css("background", "#dc2626");
+          const failMsg = `<span class="text-danger">❌ Persona Ingestion Failed: ${esc(job.error || 'Execution halted')}</span>`;
+          $pStatus.html(failMsg);
+          $aStatus.html(failMsg);
+          showNotification(`❌ Persona Ingestion Error: ${esc(job.error || 'Execution failed')}`, "error", 8000);
+        }
+      } catch (pollErr) {
+        console.warn("Polling error for Persona job", jobId, pollErr);
+      }
+    }, 2500);
+  }
+
+  async function discoverPersonaStubsOnly(accountId, companyName, domain) {
+    showNotification(`🔍 Discovering executive names &amp; seniority tiers for <strong>${esc(companyName)}</strong>...`, "info", 4000);
+    try {
+      const res = await fetch(`${API_BASE}/api/personas/discover-stubs`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          account_id: accountId,
+          company_name: companyName,
+          domain: domain,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to discover stubs");
+      const data = await res.json();
+      showNotification(
+        `✅ Discovered and committed <strong>${data.discovered_count} Persona stubs</strong> to DB (0 billable credits).`,
+        "success",
+        6000
+      );
+      reloadAccountPersonas(accountId);
+    } catch (err) {
+      showNotification(`Failed to discover Persona stubs: ${esc(err.message)}`, "error");
+    }
+  }
+
+  async function reloadAccountPersonas(accountId) {
+    try {
+      const res = await fetch(`${API_BASE}/api/accounts/${accountId}/personas`, {
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const personasList = data.personas || [];
+        if (activeAccount && activeAccount.id === accountId) {
+          activeAccount.personas = personasList;
+          if (window.allPersonasDirectoryState) {
+            window.allPersonasDirectoryState.personas = personasList;
+          }
+          renderAllPersonasDirectory(activeAccount);
+          $("#allPersonasCountBadge").text(`(${personasList.length} Total Captured)`);
+          $("#topbarPersonasCount").text(personasList.length);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to reload Personas for account", accountId, err);
+    }
+  }
+
+  // Hook up Persona modal action buttons
+  $(document).on("click", "#btnStartAutomatedPersonaPipeline", function () {
+    $("#personaHandoffPromptModal").modal("hide");
+    if (window._activePersonaHandoffContext) {
+      const { accountId, companyName, domain } = window._activePersonaHandoffContext;
+      const batchSize = window._selectedPersonaBatchSize || 20;
+      startAutomatedPersonaPipeline(accountId, companyName, domain, batchSize);
+    }
+  });
+
+  $(document).on("click", "#btnPersonaDiscoverStubsOnly", function () {
+    $("#personaHandoffPromptModal").modal("hide");
+    if (window._activePersonaHandoffContext) {
+      const { accountId, companyName, domain } = window._activePersonaHandoffContext;
+      discoverPersonaStubsOnly(accountId, companyName, domain);
+    }
+  });
+
+  // Header Auto-Ingest buttons in Persona sections
+  $(document).on("click", "#personaAutoPipelineBtn, #allPersonasAutoPipelineBtn", function () {
+    if (!activeAccount) {
+      showNotification("Please select an active account first.", "warning");
+      return;
+    }
+    const acctId = activeAccount.id;
+    const name = activeAccount.display_name || activeAccount.name || activeAccount.key;
+    const dom = activeAccount.domain || activeAccount.primary_domain;
+    promptPersonaAutomationHandoff(acctId, name, dom);
+  });
   });
 
   // ── Source Matrix Dynamic Calculation & Interactive UI ──

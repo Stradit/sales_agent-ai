@@ -84,6 +84,7 @@ from db.repositories.pipeline_run_repository import PipelineRunRepository
 from services.account_service import AccountService
 from services.account_automation_engine import AccountAutomationEngine
 from services.lob_automation_engine import LobAutomationEngine
+from services.persona_automation_engine import PersonaAutomationEngine
 from services.lob_service import LobService, LobValidator
 from services.persona_service import PersonaService, PersonaValidator
 from services.pipeline_run_logger import PipelineRunLogger
@@ -898,6 +899,36 @@ if FASTAPI_AVAILABLE:
     class LobsDumpRequest(BaseModel):
         account_id: int
         lobs_data: List[Dict[str, Any]]
+
+    class PersonaPreflightRequest(BaseModel):
+        account_id: Optional[int] = None
+        company_name: Optional[str] = None
+        persona_count: Optional[int] = None
+        batch_size: Optional[int] = 20
+
+    class PersonaDiscoverStubsRequest(BaseModel):
+        account_id: int
+        company_name: Optional[str] = None
+        domain: Optional[str] = None
+
+    class PersonaAutoPipelineRequest(BaseModel):
+        account_id: int
+        company_name: Optional[str] = None
+        domain: Optional[str] = None
+        batch_size: Optional[int] = 20
+
+    class PersonaBatchPhaseRequest(BaseModel):
+        account_id: int
+        company_name: str
+        batch_personas: List[Dict[str, Any]]
+        phase_number: Optional[int] = 1
+        total_phases: Optional[int] = 1
+        domain: Optional[str] = None
+
+    class PersonaRetryDeferredRequest(BaseModel):
+        account_id: int
+        company_name: str
+        deferred_failures: List[Dict[str, Any]]
 
     class PersonaCardFetchRequest(BaseModel):
         """
@@ -3452,6 +3483,104 @@ if FASTAPI_AVAILABLE:
     # TAB 4: PERSONAS LEVEL (INDIVIDUAL & BATCH LIFECYCLE)
     # ══════════════════════════════════════════════════════
     personas_router = APIRouter(prefix="/api/personas", tags=["3. Personas Level"])
+
+    @personas_router.post("/preflight")
+    def preflight_persona_check(req: PersonaPreflightRequest):
+        """Pre-flight credit and resource gatekeeper for Persona automation."""
+        return PersonaAutomationEngine.preflight_persona_check(
+            account_id=req.account_id,
+            company_name=req.company_name,
+            persona_count=req.persona_count,
+            batch_size=req.batch_size or 20,
+        )
+
+    @personas_router.post("/discover-stubs")
+    def discover_persona_stubs(req: PersonaDiscoverStubsRequest):
+        """Cycle 1: Zero-Credit Name & Seniority Discovery.
+        Fast extraction of executive names, positions/titles, and seniority tiers without running
+        expensive deep bio search or LLMs. Commits stubs to DB at 0 credits.
+        """
+        return PersonaAutomationEngine.discover_persona_stubs(
+            account_id=req.account_id,
+            company_name=req.company_name or "",
+            domain=req.domain,
+        )
+
+    @personas_router.post("/auto-pipeline")
+    def auto_persona_pipeline(req: PersonaAutoPipelineRequest):
+        """End-to-end background phased Persona automation pipeline.
+        Pre-flight -> Stub Discovery -> Partitioning -> Phased Execution (with dynamic priority re-queueing of failures) -> Deferred Self-Healing.
+        Returns job_id immediately (200ms).
+        """
+        preflight = PersonaAutomationEngine.preflight_persona_check(
+            account_id=req.account_id,
+            company_name=req.company_name,
+            batch_size=req.batch_size or 20,
+        )
+        if not preflight["allowed"]:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "status": "error",
+                    "reason": "insufficient_credits",
+                    "detail": preflight["message"],
+                    "preflight": preflight,
+                },
+            )
+
+        job_id = _jreg_create(TYPE_PERSONA, meta={
+            "account_id": req.account_id,
+            "company_name": req.company_name,
+            "domain": req.domain,
+            "mode": "autonomous_phased_persona_pipeline",
+        })
+
+        def _bg_persona_auto():
+            try:
+                PersonaAutomationEngine.execute_full_persona_automation(
+                    account_id=req.account_id,
+                    company_name=req.company_name or "",
+                    domain=req.domain,
+                    batch_size=req.batch_size or 20,
+                    job_id=job_id,
+                )
+            except Exception as exc:
+                _jreg_exc(job_id, exc)
+
+        import threading
+        threading.Thread(target=_bg_persona_auto, daemon=False, name=f"auto-persona-{job_id}").start()
+
+        return {
+            "status": "started",
+            "job_id": job_id,
+            "account_id": req.account_id,
+            "company_name": req.company_name,
+            "poll_url": f"/api/pipeline/job/{job_id}",
+            "estimated_credits": preflight["required_credits"],
+            "preflight": preflight,
+            "message": f"Autonomous phased Persona pipeline started for account {req.account_id}. Polling job '{job_id}'.",
+        }
+
+    @personas_router.post("/enrich-phased-batch")
+    def enrich_persona_phased_batch(req: PersonaBatchPhaseRequest):
+        """Cycle 3: Synchronous execution of a single Persona batch phase."""
+        return PersonaAutomationEngine.execute_persona_batch_phase(
+            account_id=req.account_id,
+            company_name=req.company_name,
+            batch_personas=req.batch_personas,
+            phase_number=req.phase_number or 1,
+            total_phases=req.total_phases or 1,
+            domain=req.domain,
+        )
+
+    @personas_router.post("/retry-deferred")
+    def retry_persona_deferred_faults(req: PersonaRetryDeferredRequest):
+        """Cycle 4: Consolidated self-healing for deferred Persona connector faults."""
+        return PersonaAutomationEngine.resolve_deferred_faults(
+            account_id=req.account_id,
+            company_name=req.company_name,
+            deferred_failures=req.deferred_failures,
+        )
 
     @personas_router.post("/fetch")
     def fetch_persona_from_card(card: PersonaCardFetchRequest):
