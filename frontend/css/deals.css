@@ -1164,7 +1164,7 @@
    641-1023 board columns are 300px and snap; the strip's tiles jump to a column
    ≤640px   one stage at a time (tabs); New deal / New introduction float above the tab bar;
             the deal room / intro drawer is full screen with sticky, scrollable tabs */
-.dl-filters-btn, .dl-stagebar, .dl-paneltabs { display: none; }
+.dl-filters-btn, .dl-stagebar, .dl-paneltabs, .dl-card-acts, .dl-room-quick { display: none; }
 .dl-stagebar:has(+ .dl-board[hidden]) { display: none !important; }
 
 @media (max-width: 1023px) {
@@ -1203,6 +1203,25 @@
   .dl-step { flex: 1 0 auto; min-width: 84px; min-height: 36px; }
   .dl-tabs { position: sticky; top: 0; z-index: 5; background: var(--panel-bg); overflow-x: auto; scrollbar-width: none; }
   .dl-tab { flex: none; min-height: 44px; white-space: nowrap; }
+
+  /* Card buttons in place of drag-and-drop (deals/main.js and introductions/main.js cardActions) */
+  .dl-card-acts { display: flex; margin: 10px -10px -10px; border-top: 1px solid var(--border-color); }
+  .dl-card-acts > button, .dl-card-acts > a {
+    flex: 1; min-width: 0; min-height: 44px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border: 0; background: none; cursor: pointer; font: inherit; font-size: .8rem; font-weight: 600; color: var(--text-primary); text-decoration: none;
+  }
+  .dl-card-acts > * + * { border-left: 1px solid var(--border-color); }
+  .dl-card-acts > :last-child { color: var(--brand); }
+  .dl-card-acts > :hover { background: var(--brand-muted); }
+
+  /* Deal room: Log call / Add task / next stage stay in reach at the bottom */
+  .dl-room-quick {
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; position: sticky; bottom: 0; z-index: 21;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: var(--panel-bg);
+    border-top: 1px solid var(--border-mid); box-shadow: 0 -3px 12px rgba(0, 0, 0, .06);
+  }
+  .dl-room-quick .dl-btn { justify-content: center; min-width: 0; }
+  .dl-room-quick + .dl-room-foot { position: static; box-shadow: none; margin-top: 0; }
 }
 
 @media (min-width: 641px) and (max-width: 1023px) {
@@ -1227,6 +1246,7 @@
   .dl-board.has-tabs .dl-col-head { display: none; }
   .dl-board.has-tabs .dl-col-body { padding: 0; gap: 10px; }
   .dl-card { padding: 12px; background: var(--panel-bg); }
+  .dl-card-acts { margin: 10px -12px -12px; }
   .dl-card-name { font-size: .95rem; }
   .dl-card-acct { font-size: .8rem; }
   .dl-card-row, .dl-card-next { font-size: .8rem; }

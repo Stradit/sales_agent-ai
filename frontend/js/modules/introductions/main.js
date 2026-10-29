@@ -109,7 +109,31 @@ function card(i) {
     ${i.next_step ? `<div class="dl-card-next"><i class="fa-solid fa-arrow-right"></i> ${esc(i.next_step)}</div>` : ''}
     <div class="dl-card-row in-card-foot${stale ? ' in-stale' : ''}"><span>${i.owner_name ? esc(i.owner_name) : 'Unassigned'}</span>
       <span>${i.days_in_status}d in ${esc(i.status_label)}</span></div>
+    ${cardActions(i)}
   </article>`;
+}
+
+// Follow-up email to the connector while an introduction waits in Requested
+function nudgeHref(i) {
+  if (!i.connector.email) return '';
+  const subject = `Following up: introduction to ${contactOf(i)} at ${accountOf(i)}`;
+  const body = [`Hi ${firstName(i.connector.name)},`, '',
+    `Just following up on my note about an introduction to ${contactOf(i)} at ${accountOf(i)}. Did you get a chance to check whether they're open to it?`,
+    '', 'Thanks!'].join('\n');
+  return `mailto:${encodeURIComponent(i.connector.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+// Touch screens can't drag cards between statuses: phones and tablets get buttons instead (deals.css)
+function cardActions(i) {
+  if (readOnly() || !OPEN.includes(i.status)) return '';
+  const next = BOARD[BOARD.indexOf(i.status) + 1];
+  let first = '';
+  if (i.status === 'proposed') first = `<button type="button" data-card-ask="${i.id}"><i class="fa-regular fa-envelope"></i> Write the ask</button>`;
+  else if (i.status === 'requested' && nudgeHref(i)) first = `<a href="${esc(nudgeHref(i))}" data-card-nudge><i class="fa-regular fa-bell"></i> Nudge connector</a>`;
+  const move = i.status === 'meeting_held'
+    ? `<button type="button" data-card-convert="${i.id}">Convert to deal <i class="fa-solid fa-arrow-right"></i></button>`
+    : (i.status === 'proposed' ? '' : `<button type="button" data-card-move="${i.id}" data-to="${next}">Mark ${esc(label(next).toLowerCase())} <i class="fa-solid fa-arrow-right"></i></button>`);
+  return first || move ? `<div class="dl-card-acts">${first}${move}</div>` : '';
 }
 
 function renderBoard() {
@@ -965,10 +989,19 @@ function wireViews() {
 function wireBoard() {
   const board = $('inBoard');
   const openCard = (e) => { const c = e.target.closest('[data-intro]'); if (c) openIntro(Number(c.dataset.intro)); };
-  board.addEventListener('click', openCard);
+  board.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-card-nudge]')) return;   // the mail link opens the email app
+    const ask = e.target.closest('[data-card-ask]');
+    if (ask) { await openIntro(Number(ask.dataset.cardAsk)); if (st.intro) { st.askOpen = true; renderRoom(); if ($('inAskText')) $('inAskText').focus(); } return; }
+    const conv = e.target.closest('[data-card-convert]');
+    if (conv) { await openIntro(Number(conv.dataset.cardConvert)); if (st.intro) moveTo('converted'); return; }
+    const move = e.target.closest('[data-card-move]');
+    if (move) { patchIntro({ status: move.dataset.to }, Number(move.dataset.cardMove)); return; }   // the server checks the stage criteria
+    openCard(e);
+  });
   $('inClosed').addEventListener('click', openCard);
   $('inTriage').addEventListener('click', (e) => { const b = e.target.closest('[data-open-intro]'); if (b) openIntro(Number(b.dataset.openIntro)); });
-  board.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('[data-intro]')) { e.preventDefault(); openCard(e); } });
+  board.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-intro]')) { e.preventDefault(); openCard(e); } });
   board.addEventListener('dragstart', (e) => {
     const c = e.target.closest('[data-intro]');
     if (!c) return;

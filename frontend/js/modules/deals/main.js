@@ -85,7 +85,18 @@ function card(d) {
     ${d.next_step ? `<div class="dl-card-next ${overdue ? 'dl-overdue' : ''}"><i class="fa-solid fa-arrow-right"></i> ${esc(d.next_step)}${d.next_step_due ? ` · ${esc(dateLabel(d.next_step_due))}` : ''}</div>` : ''}
     ${gap && OPEN_STAGES.includes(d.stage) ? `<div class="dl-card-gap"><i class="fa-solid fa-triangle-exclamation"></i> ${esc(gap)}</div>` : ''}
     ${d.stage === 'lost' ? `<div class="dl-card-lost"><i class="fa-solid fa-circle-xmark"></i> ${esc(lostText(d) || 'No reason recorded')}</div>` : ''}
+    ${cardActions(d)}
   </article>`;
+}
+
+// Touch screens can't drag cards between stages: phones and tablets get buttons instead (deals.css)
+function cardActions(d) {
+  if (!OPEN_STAGES.includes(d.stage) || document.body.classList.contains('role-viewer')) return '';
+  const next = OPEN_STAGES[OPEN_STAGES.indexOf(d.stage) + 1];
+  return `<div class="dl-card-acts">
+    <button type="button" data-card-log="${d.id}"><i class="fa-solid fa-plus"></i> Log activity</button>
+    ${next ? `<button type="button" data-card-move="${d.id}" data-to="${next}">Move to ${esc(stageLabel(next))} <i class="fa-solid fa-arrow-right"></i></button>` : ''}
+  </div>`;
 }
 
 // Deals that need a nudge: no recent activity, next step overdue, or close date already past
@@ -443,6 +454,7 @@ function renderRoom() {
           : '<p class="dl-task-empty">No tasks yet. Tasks added here also appear on <a href="/tasks">My Tasks</a>.</p>'}
       </div>
     </div>
+    ${roomQuickBar(d)}
     <div class="dl-room-foot">
       <a class="dl-btn" href="${esc(copilotHref(d, ''))}" title="Ask the Sales Copilot about this deal"><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Copilot</a>
       <button type="button" class="dl-btn" data-export><i class="fa-regular fa-file-excel"></i> Export</button>
@@ -453,7 +465,52 @@ function renderRoom() {
     mountTimeline($('dlTimeline'), { objectType: 'deal', objectId: d.id, accountId: d.account_id, dealId: d.id,
       onChange: () => { api(`/${d.id}`).then(fresh => { if (st.deal && st.deal.id === fresh.id) { st.deal.tasks = fresh.tasks; st.deal.health = fresh.health; } loadDeals(); }).catch(() => {}); } });
   }
+  // Phones: the tab row scrolls sideways; keep the open tab in view
+  const tabRow = $('dlRoom').querySelector('.dl-tabs');
+  const openTab = tabRow && tabRow.querySelector('.dl-tab.active');
+  if (openTab && tabRow.scrollWidth > tabRow.clientWidth) tabRow.scrollLeft = openTab.offsetLeft - 16;
   if (room && prevScroll > 0) room.scrollTop = prevScroll;
+}
+
+// Phones/tablets: the three things done most in the room, always in reach (deals.css)
+function roomQuickBar(d) {
+  if (!OPEN_STAGES.includes(d.stage) || document.body.classList.contains('role-viewer')) return '';
+  const next = OPEN_STAGES[OPEN_STAGES.indexOf(d.stage) + 1];
+  return `<div class="dl-room-quick">
+    <button type="button" class="dl-btn" data-quick-log="call"><i class="fa-solid fa-phone"></i> Log call</button>
+    <button type="button" class="dl-btn" data-quick-task><i class="fa-solid fa-list-check"></i> Add task</button>
+    ${next ? `<button type="button" class="dl-btn dl-btn-primary" data-advance="${next}">${esc(stageLabel(next))} <i class="fa-solid fa-arrow-right"></i></button>` : ''}
+  </div>`;
+}
+
+// Open the Activity tab with the timeline's log form showing (type preset when given)
+function openLogForm(type) {
+  st.tab = 'activity';
+  renderRoom();
+  const box = $('dlTimeline');
+  if (!box) return;
+  const show = () => {
+    const btn = box.querySelector('[data-open-form="log"]');
+    if (!btn) return false;
+    const form = box.querySelector('[data-form="log"]');
+    if (form && form.hidden) btn.click();
+    if (type) { const r = box.querySelector(`input[name="atType"][value="${type}"]`); if (r) r.checked = true; }
+    const subject = box.querySelector('[data-form="log"] [name="subject"]');
+    if (subject) { subject.scrollIntoView({ block: 'center' }); subject.focus(); }
+    return true;
+  };
+  if (show()) return;
+  // The timeline loads its items first; wait for its buttons (give up after a few seconds)
+  const obs = new MutationObserver(() => { if (show()) obs.disconnect(); });
+  obs.observe(box, { childList: true, subtree: true });
+  setTimeout(() => obs.disconnect(), 5000);
+}
+
+function openTaskForm() {
+  st.tab = 'tasks';
+  renderRoom();
+  const title = $('dlTaskTitle');
+  if (title) { title.scrollIntoView({ block: 'center' }); title.focus(); }
 }
 
 // ── Tasks ────────────────────────────────────────────────────────────────────
@@ -609,6 +666,9 @@ function wireRoom() {
     }
     const adv = t.closest('[data-advance]');
     if (adv) { moveToStage(adv.dataset.advance); return; }
+    const quickLog = t.closest('[data-quick-log]');
+    if (quickLog) { openLogForm(quickLog.dataset.quickLog); return; }
+    if (t.closest('[data-quick-task]')) { openTaskForm(); return; }
     const fix = t.closest('[data-gap-action]');
     if (fix) { runGapAction(fix.dataset.gapAction); return; }
     if (t.closest('[data-goto-offerings]')) {
@@ -932,13 +992,17 @@ function wireBoard() {
     st.dragId = null;
     if (d && d.stage !== col.dataset.stage) moveToStage(col.dataset.stage, id);
   });
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
+    const log = e.target.closest('[data-card-log]');
+    if (log) { await openDeal(Number(log.dataset.cardLog)); if (st.deal) openLogForm(); return; }
+    const move = e.target.closest('[data-card-move]');
+    if (move) { moveToStage(move.dataset.to, Number(move.dataset.cardMove)); return; }
     const c = e.target.closest('.dl-card');
     if (c) openDeal(Number(c.dataset.deal));
   });
   document.addEventListener('keydown', (e) => {
     const c = e.target.closest && e.target.closest('.dl-card');
-    if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDeal(Number(c.dataset.deal)); }
+    if (c && e.target === c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDeal(Number(c.dataset.deal)); }
     // Alt+←/→ moves the focused card between stages (keyboard alternative to drag-and-drop)
     if (c && e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
       const d = st.deals.find(x => x.id === Number(c.dataset.deal));
