@@ -12,7 +12,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 
-from apps.sales_copilot import actions, embed, guardrails, llm, moderation, privacy, retrieve, settings
+from apps.sales_copilot import actions, embed, guardrails, llm, moderation, privacy, records, retrieve, settings
+
+RECORD_TURNS = {"deal_info": "deal_info_turn", "intro_info": "intro_info_turn",
+                "update_deal": "update_deal_turn", "update_intro": "update_intro_turn"}
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 PHONE_RE = re.compile(r"(?<!\w)\+?\d[\d\s().-]{7,}\d")
@@ -687,6 +690,12 @@ def answer_without_llm(session, t: Dict[str, Any]) -> bool:
     if t["intent"] == "create":
         actions.create_turn(session, t, tool_list_personas)
         return True
+    if t["intent"] == "move_deal":
+        actions.move_turn(session, t)
+        return True
+    if t["intent"] in RECORD_TURNS:                   # one deal / introduction (records.py)
+        getattr(records, RECORD_TURNS[t["intent"]])(session, t)
+        return True
     if t["intent"] == "what_changed":
         rows = tool_what_changed(session, t["acl"], persona, accounts)
         who = persona["name"] if persona else (accounts[0]["name"] if accounts else "your accounts")
@@ -850,6 +859,10 @@ def finish_turn(session, t: Dict[str, Any], stopped: bool = False) -> Dict[str, 
     session.execute(text("UPDATE copilot_sessions SET last_message_at = now() WHERE id = :s"), {"s": sid})
     if stopped:
         t["extras"]["stopped"] = True
+    elif "next_actions" not in t["extras"]:
+        nxt = actions.next_actions(session, t)      # "Create a follow-up task for …" chips (actions.py)
+        if nxt:
+            t["extras"]["next_actions"] = nxt
     info = t["llm_info"]
     latency = int((datetime.now(timezone.utc) - t["t0"]).total_seconds() * 1000)
     answer = t["answer"] or ""

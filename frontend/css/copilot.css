@@ -746,3 +746,54 @@ textarea.cp-action-input { resize: vertical; }
   .cp-table-dl .cp-btn, .cp-action-foot .cp-btn { min-height: 44px; }
 }
 @media (max-width: 640px) { .cp-action-pair { grid-template-columns: 1fr; } }
+
+/* CSV in an answer, shown like a spreadsheet (render.js renderSheet) */
+.cp-sheet { margin: 8px 0 12px; border: 1px solid var(--border-mid); background: var(--panel-bg); }
+.cp-sheet-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px 6px 10px;
+  background: var(--content-bg); border-bottom: 1px solid var(--border-mid); font-size: .74rem; font-weight: 600; color: var(--text-secondary); }
+.cp-sheet-bar i { color: var(--success); margin-right: 4px; }
+.cp-sheet-scroll { max-height: 360px; overflow: auto; }
+.cp-sheet-scroll:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.cp-sheet-grid { border-collapse: separate; border-spacing: 0; font-size: .76rem; min-width: 100%; }
+.cp-sheet-grid th, .cp-sheet-grid td {
+  border-right: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); padding: 5px 8px;
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; color: var(--text-primary);
+}
+.cp-sheet-grid td.is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.cp-sheet-grid thead th {           /* column letters A, B, C … */
+  position: sticky; top: 0; z-index: 2; background: var(--badge-bg); color: var(--text-muted);
+  font-weight: 600; font-size: .68rem; text-align: center; padding: 3px 8px;
+}
+.cp-sheet-grid .cp-sheet-n, .cp-sheet-grid .cp-sheet-corner {   /* row numbers 1, 2, 3 … */
+  position: sticky; left: 0; z-index: 1; width: 1%; min-width: 34px; background: var(--badge-bg);
+  color: var(--text-muted); font-weight: 600; font-size: .68rem; text-align: center;
+}
+.cp-sheet-grid .cp-sheet-corner { z-index: 3; }
+.cp-sheet-grid tr.is-head td {      /* first CSV row = the header: bold and frozen under the letters */
+  position: sticky; top: 23px; z-index: 1; background: var(--brand-soft); font-weight: 700;
+}
+.cp-sheet-grid tbody tr:not(.is-head):hover td { background: var(--brand-muted); }
+
+/* Deal stage change card */
+.cp-move-steps { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; font-size: .78rem; }
+.cp-move-steps i { color: var(--text-muted); font-size: .7rem; }
+.cp-stage { padding: 1px 8px; background: var(--badge-bg); color: var(--text-secondary); font-weight: 600; }
+.cp-stage.is-to { background: var(--brand-soft); color: var(--brand); }
+.cp-move-note { font-size: .74rem; color: var(--text-secondary); }
+.cp-move-note i { color: var(--warning); margin-right: 3px; }
+.cp-action-row.is-blocked { opacity: .7; }
+
+/* "Next step" chips under briefs and drafts (actions.py next_actions) */
+.cp-next-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
+.cp-next-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-right: 2px; }
+.cp-next-label i { color: var(--brand); }
+.cp-next-action { border-radius: 0; padding: 5px 12px; font-size: .76rem; border-color: var(--brand-muted); background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.cp-next-action:hover { border-color: var(--brand); }
+@media (max-width: 1023px) { .cp-next-action { min-height: 40px; } }
+
+/* Record lookups and updates (records.py) */
+.cp-record-link { margin-top: 10px; }
+.cp-record-link .cp-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; text-decoration: none; }
+.cp-field-change > span { display: flex; flex-wrap: wrap; gap: 4px; font-weight: 600; }
+.cp-field-change .cp-muted { font-weight: 400; }
+@media (max-width: 1023px) { .cp-record-link .cp-btn { min-height: 44px; } }
