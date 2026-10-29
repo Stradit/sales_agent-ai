@@ -11138,8 +11138,22 @@ $(function () {
       $autoLobBtn.addClass("d-none");
     }
 
-    const unitRateLabel = (entityType === "lob") ? "4 cr / LOB" : (entityType === "persona" ? "1 cr / Person" : "1 cr / Account");
+    const RATE_MAP = {
+      account: 5, // ~3-8 credits across Diffbot, Serper, Firecrawl, Finnhub, FMP, etc. (3 cr baseline verified on Northern Trust)
+      lob: 4,     // 4 credits: Firecrawl (1), Serper (1), Tavily (1), Apify LinkedIn Company (1)
+      persona: 5  // 5 credits: Apollo (1), FullEnrich (1), Exa (1), Serper (1), Gemini LLM (1)
+    };
+    const ratePerEntity = RATE_MAP[entityType] || 4;
+    const unitLabel = (entityType === "lob") ? "LOB" : (entityType === "persona" ? "Person" : "Account");
+    const unitRateLabel = `${ratePerEntity} cr / ${unitLabel}`;
     $("#batchMeteredRateText").text(unitRateLabel);
+
+    const tooltipDescriptions = {
+      account: "Account Metered Rate: ~5 cr (Diffbot 1, Serper 1, Firecrawl 1, Finnhub/FMP 1, SEC 0, GLEIF 0, Wikipedia 0)",
+      lob: "LOB Metered Rate: 4 cr (Firecrawl 1, Serper 1, Tavily 1, Apify Company 1, Google Patents 0)",
+      persona: "Persona Metered Rate: 5 cr (Apollo Monid 1, FullEnrich 1, Exa 1, Serper 1, Gemini LLM 1, OpenAlex 0, SEC 0)"
+    };
+    $("#batchMeteredRatePill").attr("title", tooltipDescriptions[entityType] || unitRateLabel);
 
     // Sync Switcher Tab badges dynamically with active selection scope
     const currentVal = $("#batchCompanySelector").val();
@@ -11679,7 +11693,12 @@ $(function () {
     }
 
     // Dynamic Metered Quota Calculation for Selected Batch (Option 1: Honest Metered Display)
-    const ratePerEntity = (entityType === "lob") ? 4 : 1;
+    const RATE_MAP = {
+      account: 5, // ~3-8 credits across Diffbot, Serper, Firecrawl, Finnhub, FMP, etc. (3 cr baseline verified on Northern Trust)
+      lob: 4,     // 4 credits: Firecrawl (1), Serper (1), Tavily (1), Apify LinkedIn Company (1)
+      persona: 5  // 5 credits: Apollo (1), FullEnrich (1), Exa (1), Serper (1), Gemini LLM (1)
+    };
+    const ratePerEntity = RATE_MAP[entityType] || 4;
     const unitLabel = (entityType === "lob") ? "LOB" : (entityType === "persona" ? "Person" : "Account");
     const reqCredits = count * ratePerEntity;
 
@@ -13159,7 +13178,7 @@ $(function () {
               <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;">
                 <div style="font-size:0.68rem;color:#64748b;text-transform:uppercase;font-weight:700;">Unit Rate</div>
                 <div style="font-size:1.15rem;font-weight:800;color:#475569;">4 cr / LOB</div>
-                <div style="font-size:0.68rem;color:#64748b;">Diffbot &bull; Firecrawl &bull; Serper</div>
+                <div style="font-size:0.68rem;color:#64748b;">Firecrawl &bull; Serper &bull; Tavily &bull; Apify</div>
               </div>
             </div>
 

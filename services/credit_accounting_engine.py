@@ -227,6 +227,15 @@ class CreditAccountingEngine:
             "key_prefix": "data_gov",
             "config_attr": "DATA_GOV_API_KEY",
         },
+        "serper_persona": {
+            "tier": "persona",
+            "name": "Executive OSINT & Biography Search (Google Serper)",
+            "credits_per_unit": 1,
+            "unit_name": "searches",
+            "is_billable": True,
+            "key_prefix": "serp",
+            "config_attr": "SERPER_API_KEY",
+        },
         "gemini_llm": {
             "tier": "persona",
             "name": "Neural Biography & Psychological Synthesis (Gemini LLM)",
@@ -239,6 +248,21 @@ class CreditAccountingEngine:
     }
 
     COST_PER_CREDIT = 0.005  # ~$0.005 USD per real API invocation
+
+    @classmethod
+    def get_tier_unit_rate(cls, tier: str) -> int:
+        """
+        Returns the standard estimated unit rate per entity for dynamic UI meter display.
+        Account: 5 cr (Diffbot, Serper, Firecrawl, Finnhub, FMP, OpenCorporates)
+        LOB: 4 cr (Firecrawl, Serper, Tavily, Apify LinkedIn Company)
+        Persona: 5 cr (Apollo, FullEnrich, Exa, Serper, Gemini LLM)
+        """
+        rates = {
+            "account": 5,
+            "lob": 4,
+            "persona": 5,
+        }
+        return rates.get(tier.lower(), 4)
 
     @classmethod
     def get_masked_key(cls, vendor_key: str) -> str:
@@ -407,7 +431,7 @@ class CreditAccountingEngine:
         resources = []
         total_persona_credits = 0
         effective_personas = max(0, personas_count)
-        active_sources = sources_used or ["monid_apollo", "apify_linkedin_profile", "gemini_llm"]
+        active_sources = sources_used or ["monid_apollo", "fullenrich", "exa", "serper_persona", "gemini_llm"]
 
         for source_key in active_sources:
             meta = cls.RATE_CARD.get(source_key)
