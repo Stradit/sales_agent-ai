@@ -373,3 +373,25 @@ def build_from_raw(raw: List[Dict[str, Any]], now: datetime) -> Dict[str, Any]:
 def generate(session, account_ids: Optional[List[int]], now: Optional[datetime] = None) -> Dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     return build_from_raw(collect_raw_signals(session, account_ids, now), now)
+
+
+SNAPSHOTS_KEPT = 10   # per user: a short history, not an ever-growing table
+
+
+def save_snapshot(session, user_id: int, account_ids: Optional[List[int]], now: Optional[datetime] = None):
+    """Generate the feed for one user's accounts and store it as their latest snapshot, keeping the newest
+    SNAPSHOTS_KEPT. Used by the Generate button and the scheduled refresh (services/scheduler.py).
+    The caller commits."""
+    from db.models import CommandCenterSnapshot
+    now = now or datetime.now(timezone.utc)
+    result = generate(session, account_ids, now)
+    snap = CommandCenterSnapshot(user_id=user_id, generated_at=now, signals=result["signals"], playbook=result["playbook"],
+                                 velocity=result["velocity"], source_counts=result["source_counts"])
+    session.add(snap)
+    session.flush()
+    old = (session.query(CommandCenterSnapshot.id).filter_by(user_id=user_id)
+           .order_by(CommandCenterSnapshot.generated_at.desc()).offset(SNAPSHOTS_KEPT).all())
+    if old:
+        session.query(CommandCenterSnapshot).filter(CommandCenterSnapshot.id.in_([o[0] for o in old])) \
+            .delete(synchronize_session=False)
+    return snap

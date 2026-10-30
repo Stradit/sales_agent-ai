@@ -581,6 +581,36 @@ DEFAULT_SUGGESTIONS = ["What's new at BNY?", "Who are the decision-makers at Bla
 NO_LLM_INTENTS = {"moderated", "smalltalk"}
 
 
+# A bare "yes" / "go ahead" means "do what you just offered"; "no" / "ok thanks" closes the topic. Neither
+# should be searched as words: "yes" matches nothing in particular, so search would return 8 random sources.
+CONFIRM_RE = re.compile(r"^\s*(yes|yeah|yep|yup|ya|sure|ok(ay)?|go ahead|please( do)?|do (it|that|so)|sounds good|absolutely|"
+                        r"definitely|of course|correct|right|y)(\s*[,!.]*\s*(please|thanks|thank you|go ahead|do (it|that)|"
+                        r"sure|yes))*\s*[.!]*\s*$", re.I)
+DECLINE_RE = re.compile(r"^\s*(no|nope|nah|not now|no thanks?( you)?|ok(ay)?,? thanks?( you)?|that'?s all|nothing( else)?|"
+                        r"all good|never ?mind)\s*[.!]*\s*$", re.I)
+OFFER_PREFIX_RE = re.compile(r"^(would you like me to|do you want me to|shall i|should i|want me to|i can|i could)\s+", re.I)
+
+
+def resolve_short_reply(session, sid: str, q: str) -> Optional[Tuple[str, str]]:
+    """("confirm", what the last answer offered) | ("confirm", "") nothing to confirm | ("decline", "") | None."""
+    if DECLINE_RE.match(q):
+        return "decline", ""
+    if not CONFIRM_RE.match(q):
+        return None
+    row = session.execute(text("""SELECT content, extras FROM copilot_messages WHERE session_id = :s AND role = 'assistant'
+                                  ORDER BY id DESC LIMIT 1"""), {"s": sid}).fetchone()
+    if not row:
+        return "confirm", ""
+    content, extras = row[0] or "", row[1] or {}
+    if extras.get("next_actions"):
+        return "confirm", extras["next_actions"][0]
+    plain = re.sub(r"\[(\d+|note)\]", "", re.sub(r"\*\*|__|`", "", content))
+    m = re.search(r"Suggested next step:?\s*(.+)", plain, re.I)
+    offer = m.group(1) if m else next((s for s in reversed(re.split(r"(?<=[.!?])\s+", plain.strip())) if s.endswith("?")), "")
+    offer = OFFER_PREFIX_RE.sub("", offer.strip().rstrip("?").strip())
+    return "confirm", offer[:300]
+
+
 def pre_route(q: str) -> Dict[str, Any]:
     """Pure first step of every turn (no DB): moderation, then small talk.
     → {intent: "moderated" | "smalltalk" | None, smalltalk: kind, q: the real question, stored: text to store, moderation}"""
@@ -625,8 +655,11 @@ def begin_turn(session, user, q: str, session_id: Optional[str], context: Dict[s
         intent = "smalltalk"
     else:
         q = rest                                                              # "Hi, prep me for …" → "prep me for …"
+        short = None if sess["new"] else resolve_short_reply(session, sess["id"], q)
+        if short and short[0] == "confirm" and short[1]:
+            q = short[1]                                                      # "yes" → what the last answer offered
         ents = resolve_entities(session, q, acl, context, sess["focus"])
-        intent = route(q, ents)
+        intent = route(q, ents) if not short or short[1] else ("short_" + short[0])
     return {"t0": datetime.now(timezone.utc), "q": q, "user": user, "acl": acl, "sid": sess["id"], "history": history,
             "summary": summary, "user_msg_id": user_msg_id, "ents": ents, "persona": ents["persona"],
             "accounts": ents["accounts"], "account_ids": [a["id"] for a in ents["accounts"]], "intent": intent,
@@ -650,6 +683,12 @@ def answer_without_llm(session, t: Dict[str, Any]) -> bool:
         if t["smalltalk"] != "bye":
             extras["followups"] = followups("person_brief" if persona else "account_brief", "", persona, accounts, []) \
                 or DEFAULT_SUGGESTIONS
+        return True
+    if t["intent"] in ("short_confirm", "short_decline"):
+        t["answer"] = ("Happy to — what should I do? Ask about a person or account, or pick one of these."
+                       if t["intent"] == "short_confirm" else "No problem. Ask me anything else when you're ready.")
+        extras["followups"] = followups("person_brief" if persona else "account_brief", "", persona, accounts, []) \
+            or DEFAULT_SUGGESTIONS
         return True
     if t["ents"]["ambiguous"] and not persona:
         extras["table"] = {"columns": ["name", "title", "account"], "rows": t["ents"]["ambiguous"], "kind": "people"}

@@ -32,6 +32,22 @@ function weekRangeLabel() {
   return `Week of ${fmt(monday)} – ${fmt(sunday)}`;
 }
 
+// The 6-hourly automatic refresh (services/scheduler.py): "· refreshes every 6 h, next in 4 h"
+let refreshInfo = null;
+async function loadRefreshInfo() {
+  try {
+    const res = await fetch('/api/command-center/refresh-info');
+    if (res.ok) { refreshInfo = await res.json(); renderSubtitle(); }
+  } catch { /* optional: the line is simply left out */ }
+}
+function autoRefreshLabel() {
+  if (!refreshInfo || !refreshInfo.enabled || !refreshInfo.next_refresh_at) return '';
+  const mins = Math.max(0, Math.round((new Date(refreshInfo.next_refresh_at) - Date.now()) / 60000));
+  const next = mins < 2 ? 'soon' : mins < 60 ? `in ${mins} min` : `in ${Math.round(mins / 60)} h`;
+  const h = Number(refreshInfo.interval_hours);
+  return ` · <span class="cc-auto-refresh" title="Refreshed automatically for everyone">auto-refreshes every ${h} h, next ${next}</span>`;
+}
+
 function renderSubtitle() {
   const el = document.getElementById('ccSubtitle');
   if (!el) return;
@@ -48,7 +64,7 @@ function renderSubtitle() {
     const generated = isGenerated()
       ? `generated ${relativeTime(new Date(cc.generated_at))}`
       : 'feed &amp; playbook not generated yet';
-    el.innerHTML = `${esc(weekRangeLabel())} · ${cc.plays.in_motion} open plays · <span class="cc-generated-at">${generated}</span>`;
+    el.innerHTML = `${esc(weekRangeLabel())} · ${cc.plays.in_motion} open plays · <span class="cc-generated-at">${generated}</span>${autoRefreshLabel()}`;
   }
 }
 
@@ -115,6 +131,7 @@ async function init() {
   initAccountsNav();
   initWidgetCustomizer();
   initGenerateButton();
+  loadRefreshInfo();
   document.addEventListener('cc:plays-changed', () => { renderSubtitle(); renderKpi(); });
   await loadCommandCenter();
   await initAccountFilter((accountId, accountObj) => {

@@ -19,6 +19,11 @@ STOP = set("""a an the and or of to in on for with at by from is are was were be
 what which who whom whose how why when where do does did can could should would will shall may might me my
 our your their his her them they he she we you i about tell give show list any some all into than then there
 please""".split())
+# Words that carry no topic: replies ("yes", "ok thanks") and request framing ("latest news", "any updates").
+# As keywords they match almost every document, which filled answers with unrelated sources.
+STOP |= set("""yes yeah yep yup ok okay sure thanks thank thx hi hello hey no nope go ahead do done right correct great
+good fine cool sounds absolutely definitely now just also more again latest news new recent recently update updates
+updated happening going today week month year info information details detail know help need want like get got""".split())
 
 
 def all_account_ids(session) -> List[int]:
@@ -52,6 +57,9 @@ def _keyword(session, q: str, acl: List[int], limit: int, drop: set = frozenset(
     if not tsq:
         return []
     terms = tsq.split(" | ")
+    # Relevance gate: a chunk must contain at least half of the question's words (one word for 1-2 word
+    # questions), so a single common word ("news", "yes") doesn't pull in unrelated documents.
+    min_cov = max(1, math.ceil(len(terms) / 2))
     # Coverage first: a chunk matching more of the distinct query words beats a long chunk that
     # repeats one common word (ts_rank alone favours the latter); ts_rank breaks ties.
     rows = session.execute(text("""
@@ -64,7 +72,7 @@ def _keyword(session, q: str, acl: List[int], limit: int, drop: set = frozenset(
         JOIN rag_document_entities e ON e.canonical_key = d.canonical_key AND e.account_id = ANY(:acl)
         WHERE c.tsv @@ to_tsquery('english', :q)
         GROUP BY c.chunk_hash ORDER BY cov DESC, r DESC LIMIT :lim"""), {"q": tsq, "terms": terms, "acl": acl, "lim": limit}).fetchall()
-    return [bytes(r[0]) for r in rows]
+    return [bytes(r[0]) for r in rows if r[1] >= min_cov]
 
 
 def _vector(q: str, acl: List[int], limit: int, since_ts: Optional[int]) -> List[bytes]:
@@ -72,6 +80,12 @@ def _vector(q: str, acl: List[int], limit: int, since_ts: Optional[int]) -> List
     if since_ts:
         where = {"$and": [where, {"published_ts": {"$gte": int(since_ts)}}]}
     hits = store.query(settings.collection_name(), embed.embed_query(q), limit, where)
+    # Relevance gate: nearest neighbours always exist, so keep only chunks that are actually close to the
+    # question (absolute cap) and not far behind the best match (relative band). Measured on bge-small cosine
+    # distances: on-topic questions start around 0.1-0.26, "yes" / "ok thanks" start at 0.34-0.42.
+    if hits:
+        cutoff = min(settings.VECTOR_MAX_DISTANCE, hits[0]["distance"] + settings.VECTOR_DISTANCE_BAND)
+        hits = [h for h in hits if h["distance"] <= cutoff]
     seen, out = set(), []
     for h in hits:
         if h["chunk_hash"] not in seen:

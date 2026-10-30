@@ -336,7 +336,7 @@ def move_turn(session, t: Dict[str, Any]) -> None:
 # ── Suggested next steps after an answer ──────────────────────────────────────
 
 NO_NEXT = {"create", "move_deal", "export", "moderated", "smalltalk", "clarify", "remember", "list_people", "deals",
-           "deal_info", "intro_info", "update_deal", "update_intro"}
+           "deal_info", "intro_info", "update_deal", "update_intro", "short_confirm", "short_decline"}
 
 
 def next_actions(session, t: Dict[str, Any]) -> List[str]:

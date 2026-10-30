@@ -119,3 +119,29 @@ def test_deal_changes_parse_values():
     assert records.deal_changes("update the next step of the BNY deal to send the SOW") == {"next_step": "send the SOW"}
     assert records.deal_changes("set the close date of the BNY deal to 2026-11-20") == {"expected_close": "2026-11-20"}
     assert records.deal_changes("set the close date of the BNY deal to December") == {"expected_close": ""}   # too vague: user fills it
+
+
+@pytest.mark.parametrize("q", ["yes", "Yes please", "yeah do that", "sure", "go ahead", "ok", "do it", "yes, thanks"])
+def test_short_confirm(q):
+    assert chat.CONFIRM_RE.match(q) and not chat.DECLINE_RE.match(q)
+
+
+@pytest.mark.parametrize("q", ["no", "nope", "no thanks", "ok thanks", "that's all", "never mind"])
+def test_short_decline(q):
+    assert chat.DECLINE_RE.match(q)
+
+
+@pytest.mark.parametrize("q", ["yes I want the BNY list", "what about BNY?", "ok prep me for Robin"])
+def test_not_a_short_reply(q):
+    assert not chat.CONFIRM_RE.match(q) and not chat.DECLINE_RE.match(q)
+
+
+def test_offer_prefix_is_dropped():
+    assert chat.OFFER_PREFIX_RE.sub("", "Would you like me to draft an email to Robin") == "draft an email to Robin"
+
+
+def test_topicless_words_are_not_keywords():
+    from apps.sales_copilot import retrieve
+    assert retrieve._or_tsquery("yes", set()) is None
+    assert retrieve._or_tsquery("ok thanks", set()) is None
+    assert retrieve._or_tsquery("latest news on tokenization", set()) == "tokenization"
