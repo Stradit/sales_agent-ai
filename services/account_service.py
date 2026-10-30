@@ -1437,34 +1437,109 @@ class AccountService:
 
     @staticmethod
     def _fetch_apify_crunchbase(company_name: str, domain: Optional[str]) -> Dict[str, Any]:
-        """Apify Crunchbase Scraper."""
+        """Apify Crunchbase company lookup by domain or name (johnvc/crunchbase-company-api).
+
+        Returns the raw row plus the snake_case keys coalesce() reads.
+        """
         if not config.APIFY_TOKEN:
             return {}
         try:
 
             client = ApifyClient(config.APIFY_TOKEN)
-            run = client.actor("curious_coder/crunchbase-url-scraper").call(
-                run_input={"search": company_name, "maxItems": 1}
+            run = client.actor("johnvc/crunchbase-company-api").call(
+                run_input={"companyNames": [domain or company_name]}
             )
             items = client.dataset(run["defaultDatasetId"]).list_items().items
-            return items[0] if items else {}
+            row = next((i for i in items if i.get("result_type") == "company"), None)
+            if not row:
+                return {}
+
+            def _social(*hosts: str) -> Optional[str]:
+                for url in row.get("socialMediaLinks") or []:
+                    if re.sub(r"^www\.", "", urlparse(url).netloc.lower()) in hosts:
+                        return url
+                return None
+
+            website = row.get("website")
+            rounds = row.get("fundingRounds") or []  # newest first
+            sub_orgs = row.get("subOrganizations")
+            return {
+                **row,
+                "domain": re.sub(r"^www\.", "", urlparse(website).netloc) if website else None,
+                "company_type": row.get("companyType"),
+                "operating_status": row.get("operatingStatus"),
+                "total_funding_usd": row.get("totalFunding"),
+                "last_funding_type": rounds[0].get("round") if rounds else None,
+                "num_funding_rounds": row.get("numFundingRounds"),
+                "stock_symbol": row.get("stockSymbol"),
+                "ipo_status": row.get("ipoStatus"),
+                "phone": row.get("contactPhone"),
+                "email": row.get("contactEmail"),
+                "website_url": website,
+                "crunchbase_url": row.get("companyUrl"),
+                "linkedin_url": _social("linkedin.com"),
+                "twitter_url": _social("twitter.com", "x.com"),
+                "facebook_url": _social("facebook.com"),
+                "monthly_visits": row.get("monthlyVisits"),
+                "it_spend": row.get("itSpendEstimateUsd"),
+                "heat_score": row.get("heatScore"),
+                "num_suborganizations": len(sub_orgs) if sub_orgs else None,
+                "employee_count_range": row.get("employeeCount"),
+                "short_description": row.get("description"),
+                "tech_stack": row.get("techStack"),
+            }
         except Exception as e:
             print(f"[!] Apify Crunchbase warning: {e}")
         return {}
 
     @staticmethod
     def _fetch_apify_glassdoor(company_name: str) -> Dict[str, Any]:
-        """Apify Glassdoor Scraper."""
+        """Apify Glassdoor lookup in two steps.
+
+        A DuckDuckGo search (johnvc/DuckDuckGo-Scraper-for-serp-rankings) finds the
+        company's glassdoor.com page, then johnvc/glassdoor-reviews-api reads its
+        latest reviews. overall_rating is the average of those reviews, not
+        Glassdoor's headline rating.
+        """
         if not config.APIFY_TOKEN:
             return {}
         try:
 
             client = ApifyClient(config.APIFY_TOKEN)
-            run = client.actor("memo23/glassdoor-scraper").call(
-                run_input={"query": company_name, "maxReviews": 5}
+            run = client.actor("johnvc/DuckDuckGo-Scraper-for-serp-rankings").call(
+                run_input={"query": f"{company_name} glassdoor reviews", "max_pages": 1}
             )
-            items = client.dataset(run["defaultDatasetId"]).list_items().items
-            return items[0] if items else {}
+            pages = client.dataset(run["defaultDatasetId"]).list_items().items
+            words = company_name.lower().split()
+            first_word = re.sub(r"[^a-z0-9]", "", words[0]) if words else ""
+            glassdoor_url = next(
+                (
+                    r["link"]
+                    for page in pages
+                    for r in page.get("organic_results") or []
+                    if re.match(r"https://www\.glassdoor\.com/(Reviews|Overview)/[^?#]+\.htm$", r.get("link") or "")
+                    and first_word in r["link"].lower()
+                ),
+                None,
+            )
+            if not glassdoor_url:
+                return {}
+
+            run = client.actor("johnvc/glassdoor-reviews-api").call(
+                run_input={"companyUrls": [glassdoor_url], "maxReviewsPerCompany": 5}
+            )
+            reviews = [
+                i
+                for i in client.dataset(run["defaultDatasetId"]).list_items().items
+                if i.get("result_type") == "review"
+            ]
+            ratings = [r["overallRating"] for r in reviews if isinstance(r.get("overallRating"), (int, float))]
+            return {
+                "glassdoor_url": glassdoor_url,
+                "company_name": reviews[0].get("companyName") if reviews else None,
+                "overall_rating": round(sum(ratings) / len(ratings), 2) if ratings else None,
+                "reviews": reviews,
+            }
         except Exception as e:
             print(f"[!] Apify Glassdoor warning: {e}")
         return {}
