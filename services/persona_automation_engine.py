@@ -469,6 +469,92 @@ class PersonaAutomationEngine:
         return chunks
 
     @classmethod
+    def audit_persona_completeness(
+        cls,
+        dossier: Dict[str, Any],
+        persona_item: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Audits persona completeness across 10 critical & high-value intelligence dimensions.
+        Determines:
+        - score: 0 to 100%
+        - status: 'enriched' | 'partially_enriched' | 'failed' | 'unresolvable'
+        - grade: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F'
+        - missing_fields: list of unpopulated dimensions
+        - delta_sources_needed: targeted connectors for missing data
+        """
+        item = persona_item or {}
+        ext_prof = item.get("extended_profile") if isinstance(item.get("extended_profile"), dict) else {}
+        retry_count = ext_prof.get("retry_count", 0) if ext_prof else item.get("retry_count", 0)
+
+        # Dimension checks
+        fields_to_check = {
+            "name": bool(dossier.get("full_name") or dossier.get("name")),
+            "title": bool(dossier.get("title")),
+            "email": bool(dossier.get("email") or dossier.get("personal_email")),
+            "phone": bool(dossier.get("phone") or dossier.get("direct_mobile_phone")),
+            "linkedin_url": bool(dossier.get("linkedin_url")),
+            "headline": bool(dossier.get("headline")),
+            "employment_history": bool(dossier.get("employment_history") or dossier.get("past_companies")),
+            "education_history": bool(dossier.get("education_history") or dossier.get("degree")),
+            "value_proposition": bool(dossier.get("value_proposition")),
+            "personalized_icebreaker": bool(dossier.get("personalized_icebreaker")),
+        }
+
+        populated = [k for k, v in fields_to_check.items() if v]
+        missing = [k for k, v in fields_to_check.items() if not v]
+        score = int((len(populated) / len(fields_to_check)) * 100)
+
+        # Assign Grade
+        if score >= 90:
+            grade = "A+"
+        elif score >= 75:
+            grade = "A"
+        elif score >= 60:
+            grade = "B"
+        elif score >= 40:
+            grade = "C"
+        elif score >= 20:
+            grade = "D"
+        else:
+            grade = "F"
+
+        # Check status
+        if retry_count >= 3 and score < 50:
+            status = "unresolvable"
+        elif score >= 70 and (fields_to_check["email"] or fields_to_check["linkedin_url"]):
+            status = "enriched"
+        elif score >= 30 or (fields_to_check["title"] and (fields_to_check["linkedin_url"] or fields_to_check["employment_history"] or fields_to_check["email"])):
+            status = "partially_enriched"
+        else:
+            status = "failed"
+
+        # Targeted delta sources needed
+        delta_sources = []
+        if not fields_to_check["email"] or not fields_to_check["phone"]:
+            delta_sources.append("fullenrich")
+            delta_sources.append("apollo")
+        if not fields_to_check["linkedin_url"]:
+            delta_sources.append("serper_persona")
+            delta_sources.append("exa")
+        if not fields_to_check["employment_history"]:
+            delta_sources.append("apify_linkedin_profile")
+        if not fields_to_check["value_proposition"] or not fields_to_check["personalized_icebreaker"]:
+            delta_sources.append("gemini_llm")
+
+        return {
+            "score": score,
+            "grade": grade,
+            "status": status,
+            "retry_count": retry_count,
+            "populated_fields": populated,
+            "missing_fields": missing,
+            "delta_sources_needed": delta_sources,
+            "is_partial": status == "partially_enriched",
+            "is_failed": status in ("failed", "unresolvable"),
+            "can_delta_retry": status == "partially_enriched" and len(delta_sources) > 0,
+        }
+
+    @classmethod
     def execute_persona_batch_phase(
         cls,
         account_id: int,
@@ -501,7 +587,7 @@ class PersonaAutomationEngine:
                 progress_pct=int(20 + ((phase_number - 1) / total_phases) * 60),
             )
 
-        def _enrich_worker(persona_item: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        def _enrich_worker(persona_item: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
             p_name = persona_item.get("full_name") or persona_item.get("name") or "Executive"
             p_title = persona_item.get("title")
             p_linkedin = persona_item.get("linkedin_url")
@@ -522,7 +608,17 @@ class PersonaAutomationEngine:
                     domain=domain,
                     linkedin_url=p_linkedin,
                 )
-                return dossier, failures
+                audit = cls.audit_persona_completeness(dossier, persona_item)
+                ext = dict(dossier.get("extended_profile") or {})
+                ext["enrichment_status"] = audit["status"]
+                ext["completeness_score"] = audit["score"]
+                ext["quality_grade"] = audit["grade"]
+                ext["missing_fields"] = audit["missing_fields"]
+                ext["delta_sources_needed"] = audit["delta_sources_needed"]
+                ext["retry_count"] = audit["retry_count"]
+                dossier["extended_profile"] = ext
+                dossier["_validation_audit"] = audit
+                return dossier, failures, audit
             except Exception as p_err:
                 logger.warning(f"[!] Persona '{p_name}' enrichment encountered fault: {p_err}")
                 failures.append({
@@ -534,20 +630,44 @@ class PersonaAutomationEngine:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "item_data": persona_item,
                 })
-                # Fallback to stub record with partial fault metadata
                 fallback_dossier = dict(persona_item)
-                fallback_dossier["_validation_audit"] = {"score": 45.0, "grade": "D", "status": "partial_fault"}
-                return fallback_dossier, failures
+                audit = cls.audit_persona_completeness(fallback_dossier, persona_item)
+                audit["status"] = "failed"
+                audit["last_error"] = str(p_err)
+                ext = dict(fallback_dossier.get("extended_profile") or {})
+                ext["enrichment_status"] = "failed"
+                ext["completeness_score"] = audit["score"]
+                ext["quality_grade"] = "F"
+                ext["last_error"] = str(p_err)
+                ext["retry_count"] = audit["retry_count"] + 1
+                fallback_dossier["extended_profile"] = ext
+                fallback_dossier["_validation_audit"] = audit
+                return fallback_dossier, failures, audit
 
         # Controlled ThreadPoolExecutor
+        enriched_list: List[Dict[str, Any]] = []
+        partial_list: List[Dict[str, Any]] = []
+        failed_list: List[Dict[str, Any]] = []
+        unresolvable_list: List[Dict[str, Any]] = []
+
         with ThreadPoolExecutor(max_workers=cls.MAX_WORKERS_PER_BATCH) as executor:
             future_map = {executor.submit(_enrich_worker, p_item): p_item for p_item in batch_personas}
             for fut in as_completed(future_map):
                 try:
-                    dossier, fails = fut.result()
+                    dossier, fails, audit = fut.result()
                     enriched_personas.append(dossier)
                     if fails:
                         deferred_failures.extend(fails)
+
+                    st = audit.get("status")
+                    if st == "enriched":
+                        enriched_list.append(dossier)
+                    elif st == "partially_enriched":
+                        partial_list.append(dossier)
+                    elif st == "unresolvable":
+                        unresolvable_list.append(dossier)
+                    else:
+                        failed_list.append(dossier)
 
                     # Connector validation checks
                     p_name = dossier.get("full_name") or dossier.get("name")
@@ -571,9 +691,9 @@ class PersonaAutomationEngine:
                         "item_data": p_item,
                     })
 
-        # Calculate credits for this batch
-        persona_tally = CreditAccountingEngine.tally_persona_telemetry(len(enriched_personas))
-        actual_billable_credits = persona_tally.get("credits", len(enriched_personas) * cls.ESTIMATED_CREDITS_PER_PERSONA)
+        # Calculate credits for this batch:
+        # Full rate (5cr) for complete, Pro-rated (2cr) for partial, ZERO credits for failed/unresolvable!
+        actual_billable_credits = (len(enriched_list) * cls.ESTIMATED_CREDITS_PER_PERSONA) + (len(partial_list) * 2)
         duration_sec = round((datetime.now(timezone.utc) - t0).total_seconds(), 2)
 
         # Immediate DB Persistence for this batch
@@ -603,6 +723,7 @@ class PersonaAutomationEngine:
             session.close()
 
         # Compile run breakdown and log telemetry
+        persona_tally = {"credits": actual_billable_credits, "resources": []}
         credits_breakdown = CreditAccountingEngine.compile_run_breakdown(
             company_name=company_name,
             run_id=f"run_{slugify(company_name)[:18]}_persona_ph{phase_number}_{int(time.time())}",
@@ -615,8 +736,8 @@ class PersonaAutomationEngine:
             persona_tally=persona_tally,
         )
 
-        batch_score = 88.0 if not deferred_failures else 74.0
-        batch_grade = "A" if batch_score >= 85 else "B"
+        batch_score = 90.0 if not failed_list else (75.0 if not unresolvable_list else 60.0)
+        batch_grade = "A" if batch_score >= 85 else ("B" if batch_score >= 70 else "C")
 
         PipelineRunLogger.log_event(
             company_name=company_name,
@@ -634,7 +755,11 @@ class PersonaAutomationEngine:
                 "account_id": account_id,
                 "phase_number": phase_number,
                 "total_phases": total_phases,
-                "batch_personas_count": len(enriched_personas),
+                "total_count": len(enriched_personas),
+                "enriched_count": len(enriched_list),
+                "partial_count": len(partial_list),
+                "failed_count": len(failed_list),
+                "unresolvable_count": len(unresolvable_list),
                 "saved_count": saved_count,
                 "deferred_faults_count": len(deferred_failures),
             },
@@ -645,9 +770,21 @@ class PersonaAutomationEngine:
             "total_phases": total_phases,
             "duration_seconds": duration_sec,
             "credits_used": actual_billable_credits,
-            "enriched_count": len(enriched_personas),
+            "total_count": len(enriched_personas),
+            "enriched_count": len(enriched_list),
+            "partial_count": len(partial_list),
+            "failed_count": len(failed_list),
+            "unresolvable_count": len(unresolvable_list),
+            "breakdown": {
+                "enriched": len(enriched_list),
+                "partial": len(partial_list),
+                "failed": len(failed_list),
+                "unresolvable": len(unresolvable_list),
+            },
             "saved_count": saved_count,
             "deferred_failures": deferred_failures,
+            "partially_enriched_personas": partial_list,
+            "failed_personas": failed_list,
             "enriched_personas": enriched_personas,
         }
 
@@ -728,6 +865,344 @@ class PersonaAutomationEngine:
             session.rollback()
             logger.error(f"Error resolving persona deferred faults: {e}", exc_info=True)
             return {"status": "error", "error": str(e)}
+        finally:
+            session.close()
+
+    @classmethod
+    def enrich_persona_delta(
+        cls,
+        persona_id: int,
+        account_id: int,
+        company_name: str,
+        target_fields: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Cycle 4a: Targeted Delta Micro-Enrichment for half-fetched / partial personas.
+        Queries ONLY missing connectors (e.g. FullEnrich for email/phone, or Gemini for icebreaker),
+        additively merges into existing record via CoalescenceEngine, and updates status.
+        Uses 1-2 credits instead of 5!
+        """
+        t0 = datetime.now(timezone.utc)
+        session = get_session()
+        try:
+            repo = PersonaRepository(session)
+            persona = session.query(Persona).filter_by(id=persona_id).first()
+            if not persona:
+                return {"status": "error", "error": f"Persona ID {persona_id} not found."}
+
+            p_name = persona.full_name or persona.display_name or "Executive"
+            p_title = persona.title
+            p_linkedin = persona.linkedin_url
+
+            # Audit current state
+            current_dict = {
+                "full_name": p_name,
+                "title": p_title,
+                "email": persona.email,
+                "phone": persona.phone,
+                "linkedin_url": p_linkedin,
+                "headline": persona.headline,
+                "employment_history": persona.employment_history,
+                "education_history": persona.education_history,
+                "value_proposition": persona.value_proposition,
+                "personalized_icebreaker": persona.personalized_icebreaker,
+            }
+            audit_before = cls.audit_persona_completeness(current_dict)
+            needed_sources = audit_before["delta_sources_needed"]
+
+            delta_payload: Dict[str, Any] = {}
+            credits_used = 1
+
+            # 1. Targeted FullEnrich waterfall if email or phone missing
+            if ("fullenrich" in needed_sources or "apollo" in needed_sources) and (not persona.email or not persona.phone):
+                try:
+                    fe_res = PersonaService._fetch_fullenrich_waterfall(
+                        full_name=p_name,
+                        company_name=company_name,
+                        domain=persona.account.domain if persona.account else None,
+                        linkedin_url=p_linkedin,
+                    )
+                    if isinstance(fe_res, dict) and fe_res:
+                        if fe_res.get("email"):
+                            delta_payload["email"] = fe_res["email"]
+                        if fe_res.get("phone") or fe_res.get("mobile_phone"):
+                            delta_payload["phone"] = fe_res.get("phone") or fe_res.get("mobile_phone")
+                        if fe_res.get("linkedin_url") and not p_linkedin:
+                            delta_payload["linkedin_url"] = fe_res["linkedin_url"]
+                        credits_used += 1
+                except Exception as fe_err:
+                    logger.warning(f"Delta FullEnrich notice for {p_name}: {fe_err}")
+
+            # 2. Targeted Serper OSINT if LinkedIn missing
+            if "serper_persona" in needed_sources and not delta_payload.get("linkedin_url") and not p_linkedin:
+                try:
+                    serp_res = PersonaService._fetch_serper_executive_osint(p_name, company_name)
+                    if isinstance(serp_res, dict) and serp_res.get("linkedin_url"):
+                        delta_payload["linkedin_url"] = serp_res["linkedin_url"]
+                except Exception as serp_err:
+                    logger.warning(f"Delta Serper notice for {p_name}: {serp_err}")
+
+            # 3. Targeted Gemini synthesis if value proposition missing
+            if "gemini_llm" in needed_sources and (not persona.value_proposition or not persona.personalized_icebreaker):
+                try:
+                    ai_res = PersonaService._synthesize_ai_sales_dossier(
+                        full_name=p_name,
+                        title=p_title or "Executive",
+                        company_name=company_name,
+                    )
+                    if isinstance(ai_res, dict) and ai_res:
+                        for k in ["value_proposition", "personalized_icebreaker", "communication_style", "skills", "target_kpis"]:
+                            if ai_res.get(k):
+                                delta_payload[k] = ai_res[k]
+                except Exception as ai_err:
+                    logger.warning(f"Delta AI synthesis notice for {p_name}: {ai_err}")
+
+            # Additive merge using CoalescenceEngine
+            CoalescenceEngine.coalesce_persona(persona, delta_payload)
+
+            # Re-audit
+            updated_dict = {
+                "full_name": persona.full_name,
+                "title": persona.title,
+                "email": persona.email,
+                "phone": persona.phone,
+                "linkedin_url": persona.linkedin_url,
+                "headline": persona.headline,
+                "employment_history": persona.employment_history,
+                "education_history": persona.education_history,
+                "value_proposition": persona.value_proposition,
+                "personalized_icebreaker": persona.personalized_icebreaker,
+            }
+            audit_after = cls.audit_persona_completeness(updated_dict)
+
+            # Update extended_profile metadata
+            ext = dict(persona.extended_profile or {})
+            ext["enrichment_status"] = audit_after["status"]
+            ext["completeness_score"] = audit_after["score"]
+            ext["quality_grade"] = audit_after["grade"]
+            ext["missing_fields"] = audit_after["missing_fields"]
+            ext["delta_enriched_at"] = datetime.now(timezone.utc).isoformat()
+            persona.extended_profile = ext
+
+            session.commit()
+            duration_sec = round((datetime.now(timezone.utc) - t0).total_seconds(), 2)
+
+            # Telemetry
+            PipelineRunLogger.log_event(
+                company_name=company_name,
+                level="persona",
+                action="pull",
+                status="success",
+                started_at=t0,
+                completed_at=datetime.now(timezone.utc),
+                duration_seconds=duration_sec,
+                total_credits_used=credits_used,
+                quality_score=float(audit_after["score"]),
+                quality_grade=audit_after["grade"],
+                entities_extracted={
+                    "persona_id": persona.id,
+                    "delta_fields_added": list(delta_payload.keys()),
+                    "score_before": audit_before["score"],
+                    "score_after": audit_after["score"],
+                    "new_status": audit_after["status"],
+                },
+            )
+
+            return {
+                "status": "success",
+                "persona_id": persona.id,
+                "full_name": p_name,
+                "score_before": audit_before["score"],
+                "score_after": audit_after["score"],
+                "new_status": audit_after["status"],
+                "new_grade": audit_after["grade"],
+                "fields_recovered": list(delta_payload.keys()),
+                "credits_used": credits_used,
+                "duration_seconds": duration_sec,
+                "message": f"Delta micro-retry completed for {p_name}: Score increased from {audit_before['score']}% to {audit_after['score']}%.",
+            }
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error in enrich_persona_delta for persona {persona_id}: {e}", exc_info=True)
+            return {"status": "error", "error": str(e)}
+        finally:
+            session.close()
+
+    @classmethod
+    def retry_single_failed_persona(
+        cls,
+        persona_id: int,
+        account_id: int,
+        company_name: str,
+    ) -> Dict[str, Any]:
+        """Cycle 4b: Priority Single Retry for completely failed personas (with backoff & DLQ check)."""
+        t0 = datetime.now(timezone.utc)
+        session = get_session()
+        try:
+            repo = PersonaRepository(session)
+            persona = session.query(Persona).filter_by(id=persona_id).first()
+            if not persona:
+                return {"status": "error", "error": f"Persona ID {persona_id} not found."}
+
+            ext = dict(persona.extended_profile or {})
+            curr_retries = ext.get("retry_count", 0)
+
+            # Circuit Breaker: Max 3 Retries
+            if curr_retries >= 3:
+                ext["enrichment_status"] = "unresolvable"
+                ext["last_error"] = "Max automated retries (3) reached across connectors."
+                persona.extended_profile = ext
+                session.commit()
+                return {
+                    "status": "unresolvable",
+                    "persona_id": persona.id,
+                    "full_name": persona.full_name,
+                    "retry_count": curr_retries,
+                    "message": f"Executive {persona.full_name} marked as unresolvable (3 retries exhausted). Please edit or verify manually.",
+                }
+
+            # Adaptive cooling backoff
+            time.sleep(2.0)
+
+            p_name = persona.full_name or persona.display_name or "Executive"
+            p_title = persona.title
+            p_linkedin = persona.linkedin_url
+            domain = persona.account.domain if persona.account else None
+
+            # Attempt full enrichment
+            try:
+                dossier = PersonaService.enrich_single_persona(
+                    full_name=p_name,
+                    company_name=company_name,
+                    title=p_title,
+                    account_id=account_id,
+                    domain=domain,
+                    linkedin_url=p_linkedin,
+                )
+                audit = cls.audit_persona_completeness(dossier)
+                schema = PersonaSchema.from_enriched_json(dossier)
+                repo.upsert(schema)
+
+                # Re-fetch and update extended metadata
+                updated_p = session.query(Persona).filter_by(id=persona.id).first()
+                if updated_p:
+                    u_ext = dict(updated_p.extended_profile or {})
+                    u_ext["enrichment_status"] = audit["status"]
+                    u_ext["completeness_score"] = audit["score"]
+                    u_ext["quality_grade"] = audit["grade"]
+                    u_ext["retry_count"] = curr_retries + 1
+                    updated_p.extended_profile = u_ext
+                session.commit()
+
+                credits = 5 if audit["status"] == "enriched" else (2 if audit["status"] == "partially_enriched" else 0)
+                return {
+                    "status": "success",
+                    "persona_id": persona.id,
+                    "full_name": p_name,
+                    "new_status": audit["status"],
+                    "completeness_score": audit["score"],
+                    "retry_count": curr_retries + 1,
+                    "credits_used": credits,
+                    "message": f"Retry succeeded for {p_name}: status is now {audit['status']} ({audit['score']}%).",
+                }
+            except Exception as retry_err:
+                ext["retry_count"] = curr_retries + 1
+                ext["enrichment_status"] = "unresolvable" if (curr_retries + 1) >= 3 else "failed"
+                ext["last_error"] = str(retry_err)
+                persona.extended_profile = ext
+                session.commit()
+                return {
+                    "status": ext["enrichment_status"],
+                    "persona_id": persona.id,
+                    "full_name": p_name,
+                    "retry_count": curr_retries + 1,
+                    "error": str(retry_err),
+                    "message": f"Retry failed for {p_name}: {retry_err}",
+                }
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error in retry_single_failed_persona: {e}", exc_info=True)
+            return {"status": "error", "error": str(e)}
+        finally:
+            session.close()
+
+    @classmethod
+    def get_account_personas_triage(cls, account_id: int) -> Dict[str, Any]:
+        """Categorized status audit of personas for account: enriched, partial, failed, unresolvable."""
+        session = get_session()
+        try:
+            personas = session.query(Persona).filter_by(account_id=account_id).all()
+            total = len(personas)
+            enriched = []
+            partial = []
+            failed = []
+            unresolvable = []
+            stubs = []
+
+            for p in personas:
+                ext = p.extended_profile if isinstance(p.extended_profile, dict) else {}
+                status = ext.get("enrichment_status")
+                score = ext.get("completeness_score")
+
+                # Fallback to computing score if not yet set
+                if score is None:
+                    p_dict = {
+                        "full_name": p.full_name,
+                        "title": p.title,
+                        "email": p.email,
+                        "phone": p.phone,
+                        "linkedin_url": p.linkedin_url,
+                        "headline": p.headline,
+                        "employment_history": p.employment_history,
+                        "education_history": p.education_history,
+                        "value_proposition": p.value_proposition,
+                        "personalized_icebreaker": p.personalized_icebreaker,
+                    }
+                    audit = cls.audit_persona_completeness(p_dict)
+                    score = audit["score"]
+                    if not status:
+                        status = audit["status"]
+
+                status = status or "discovered_stub"
+                p_summary = {
+                    "id": p.id,
+                    "name": p.full_name or p.display_name,
+                    "title": p.title,
+                    "tier": p.tier,
+                    "status": status,
+                    "score": score,
+                    "email": p.email,
+                    "phone": p.phone,
+                    "linkedin_url": p.linkedin_url,
+                    "missing_fields": ext.get("missing_fields", []),
+                    "last_error": ext.get("last_error"),
+                    "retry_count": ext.get("retry_count", 0),
+                }
+
+                if status == "enriched":
+                    enriched.append(p_summary)
+                elif status == "partially_enriched":
+                    partial.append(p_summary)
+                elif status == "unresolvable":
+                    unresolvable.append(p_summary)
+                elif status == "failed":
+                    failed.append(p_summary)
+                else:
+                    stubs.append(p_summary)
+
+            return {
+                "account_id": account_id,
+                "total": total,
+                "enriched_count": len(enriched),
+                "partial_count": len(partial),
+                "failed_count": len(failed),
+                "unresolvable_count": len(unresolvable),
+                "stubs_count": len(stubs),
+                "enriched": enriched,
+                "partial": partial,
+                "failed": failed,
+                "unresolvable": unresolvable,
+                "stubs": stubs,
+            }
         finally:
             session.close()
 

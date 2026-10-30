@@ -74,6 +74,7 @@
 })();
 
 $(function () {
+  var _hubRenderPending = false;
   // ─── Sidebar Shrink / Expand Toggle ──────────────────────────────────────
   let sidebarCollapsed = false;
   try {
@@ -5239,7 +5240,7 @@ $(function () {
   }
   window.changePeoplePage = changePeoplePage;
 
-  let _hubRenderPending = false;
+  _hubRenderPending = false;
   async function renderEmptyStateHub() {
     const $hub = $("#emptyState");
     if (!$hub.length) return;
@@ -14625,6 +14626,92 @@ $(function () {
       console.warn("Failed to reload Personas for account", accountId, err);
     }
   }
+
+  // Delta Micro-Enrichment for Partial Persona
+  $(document).on("click", ".btn-persona-delta-enrich", async function (e) {
+    e.stopPropagation();
+    const $btn = $(this);
+    const personaId = $btn.data("persona-id");
+    const pName = $btn.data("name") || "Executive";
+    if (!activeAccount) {
+      showNotification("Please select an active account first.", "warning");
+      return;
+    }
+
+    const origHtml = $btn.html();
+    $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm" role="status" style="width:0.65rem;height:0.65rem;"></span> Completing...');
+
+    try {
+      showNotification(`Executing targeted delta micro-enrichment for <strong>${esc(pName)}</strong>...`, "info", 3000);
+      const res = await fetch(`${API_BASE}/api/personas/delta-enrich`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          persona_id: personaId,
+          account_id: activeAccount.id,
+          company_name: activeAccount.display_name || activeAccount.name || "",
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Server returned HTTP ${res.status}`);
+      }
+
+      const result = await res.json();
+      showNotification(`✅ Successfully completed delta enrichment for <strong>${esc(pName)}</strong>! Completeness: ${result.score_after}%.`, "success", 5000);
+      reloadAccountPersonas(activeAccount.id);
+    } catch (err) {
+      console.error("Delta enrichment error", err);
+      showNotification(`Delta enrichment failed: ${esc(err.message)}`, "error", 6000);
+      $btn.prop("disabled", false).html(origHtml);
+    }
+  });
+
+  // Priority Single Retry for Failed Persona
+  $(document).on("click", ".btn-persona-retry-single", async function (e) {
+    e.stopPropagation();
+    const $btn = $(this);
+    const personaId = $btn.data("persona-id");
+    const pName = $btn.data("name") || "Executive";
+    if (!activeAccount) {
+      showNotification("Please select an active account first.", "warning");
+      return;
+    }
+
+    const origHtml = $btn.html();
+    $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm" role="status" style="width:0.65rem;height:0.65rem;"></span> Retrying...');
+
+    try {
+      showNotification(`Executing priority retry with cooling backoff for <strong>${esc(pName)}</strong>...`, "info", 4000);
+      const res = await fetch(`${API_BASE}/api/personas/retry-failed`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          persona_id: personaId,
+          account_id: activeAccount.id,
+          company_name: activeAccount.display_name || activeAccount.name || "",
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Server returned HTTP ${res.status}`);
+      }
+
+      const result = await res.json();
+      if (result.status === "unresolvable") {
+        showNotification(`⚠ Executive <strong>${esc(pName)}</strong> reached max retries. Marked as needs manual review.`, "warning", 6000);
+      } else {
+        showNotification(`✅ Successfully recovered and enriched <strong>${esc(pName)}</strong>!`, "success", 5000);
+      }
+      reloadAccountPersonas(activeAccount.id);
+    } catch (err) {
+      console.error("Retry failed", err);
+      showNotification(`Retry failed: ${esc(err.message)}`, "error", 6000);
+      $btn.prop("disabled", false).html(origHtml);
+    }
+  });
 
   // Hook up Persona modal action buttons
   $(document).on("click", "#btnStartAutomatedPersonaPipeline", function () {
