@@ -5,6 +5,7 @@ import { initTopbarAuth } from './topbar-auth.js';
 import { initThemeToggle } from './theme.js';
 import { showToast } from './toast.js';
 import { mountCrmSettings } from './admin-crm-settings.js';
+import { mountJobs } from './admin-jobs.js';
 
 initThemeToggle();
 initTopbarAuth();
@@ -483,6 +484,9 @@ function renderAdminTabsNav() {
       </button>
       <button type="button" class="admin-tab-btn ${activeAdminTab === 'audit' ? 'active' : ''}" data-admin-tab="audit">
         <i class="bi bi-shield-check"></i> Security & Audit Trail
+      </button>
+      <button type="button" class="admin-tab-btn ${activeAdminTab === 'jobs' ? 'active' : ''}" data-admin-tab="jobs">
+        <i class="fa-solid fa-clock-rotate-left"></i> Scheduled jobs
       </button>
     </div>
   `;
@@ -1134,6 +1138,8 @@ async function loadAndRender() {
     tabContentHtml = renderRolesPanel();
   } else if (activeAdminTab === 'api-config') {
     tabContentHtml = renderApiConfigPanel();
+  } else if (activeAdminTab === 'jobs') {
+    tabContentHtml = '<div id="adminJobsMount"></div>';   // admin-jobs.js
   } else if (activeAdminTab === 'audit') {
     tabContentHtml = `
       <div class="admin-grid" style="grid-template-columns: 1fr;">
@@ -1159,6 +1165,7 @@ async function loadAndRender() {
   `;
   wireEvents();
   mountCrmSettings(document.getElementById('crmSettingsMount'));
+  if (activeAdminTab === 'jobs') mountJobs(document.getElementById('adminJobsMount'));
   if (activeAdminTab === 'users' || activeAdminTab === 'audit') {
     loadAuditLogs(true);
   }

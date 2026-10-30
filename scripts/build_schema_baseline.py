@@ -95,7 +95,7 @@ def build() -> tuple:
     psql = tool("psql")
     subprocess.run([psql, admin, "-qc", f'create database "{tmp}"'], check=True)
     try:
-        child_env = {**os.environ, "DATABASE_URL": with_db(url, tmp), "COPILOT_AUTOSYNC": "0", "CRM_BACKGROUND": "0",
+        child_env = {**os.environ, "DATABASE_URL": with_db(url, tmp), "COPILOT_AUTOSYNC": "0", "CRM_BACKGROUND": "0", "SCHEDULER_ENABLED": "0",
                      "CRM_NOTIFY_SUPPRESS": "1", "SEED_ADMIN_EMAIL": "", "SEED_ADMIN_PASSWORD": ""}
         r = subprocess.run([sys.executable, "-c", STARTUP_SCHEMA], cwd=ROOT, env=child_env, capture_output=True, text=True)
         print((r.stdout + r.stderr).strip()[-2000:])

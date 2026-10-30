@@ -51,6 +51,7 @@ jobs:
       PG_BIN: /usr/lib/postgresql/18/bin
       COPILOT_AUTOSYNC: "0"
       CRM_BACKGROUND: "0"
+      SCHEDULER_ENABLED: "0"
       CRM_NOTIFY_SUPPRESS: "1"
     steps:
       - uses: actions/checkout@v4
@@ -121,7 +122,7 @@ jobs:
             -e JWT_SECRET_KEY="$(openssl rand -hex 32)" \
             -e CONFIG_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
             -e COOKIE_SECURE=false \
-            -e COPILOT_AUTOSYNC=0 -e CRM_BACKGROUND=0 -e CRM_NOTIFY_SUPPRESS=1 \
+            -e COPILOT_AUTOSYNC=0 -e CRM_BACKGROUND=0 -e SCHEDULER_ENABLED=0 -e CRM_NOTIFY_SUPPRESS=1 \
             -e SEED_ADMIN_EMAIL=smoke-admin@example.invalid \
             -e SEED_ADMIN_PASSWORD=smoke-test-password-123 \
             salesai:smoke

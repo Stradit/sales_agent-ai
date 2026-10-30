@@ -16,6 +16,7 @@ import sys
 
 os.environ.setdefault("COPILOT_AUTOSYNC", "0")
 os.environ.setdefault("CRM_BACKGROUND", "0")
+os.environ.setdefault("SCHEDULER_ENABLED", "0")
 os.environ["CRM_NOTIFY_SUPPRESS"] = "1"        # never email real people from a test run
 
 PUBLIC = {

@@ -4414,6 +4414,10 @@ if FASTAPI_AVAILABLE:
     from apps.sales_search.api import install as install_search
     install_search(app)
 
+    # Scheduled jobs (6-hourly Command Center refresh, source refresh) + the admin "Scheduled jobs" tab
+    from services.scheduler import install as install_scheduler
+    install_scheduler(app)
+
     # ══════════════════════════════════════════════════════
     # SOLID REST API ENDPOINTS
     # ══════════════════════════════════════════════════════
@@ -6633,13 +6637,7 @@ if FASTAPI_AVAILABLE:
                     .first())
             if not snap or not snap.signals:
                 # Auto-generate snapshot on-demand if user has no snapshot yet
-                result = command_center_service.generate(session, _command_center_scope(session, user))
-                snap = CommandCenterSnapshot(
-                    user_id=user.id, generated_at=datetime.now(timezone.utc),
-                    signals=result["signals"], playbook=result["playbook"],
-                    velocity=result["velocity"], source_counts=result["source_counts"],
-                )
-                session.add(snap)
+                snap = command_center_service.save_snapshot(session, user.id, _command_center_scope(session, user))
                 session.commit()
                 session.refresh(snap)
             return _command_center_payload(session, user, snap)
@@ -6654,23 +6652,7 @@ if FASTAPI_AVAILABLE:
         and saves the result as the caller's latest snapshot."""
         session = get_session()
         try:
-            result = command_center_service.generate(session, _command_center_scope(session, user))
-            snap = CommandCenterSnapshot(
-                user_id=user.id, generated_at=datetime.now(timezone.utc),
-                signals=result["signals"], playbook=result["playbook"],
-                velocity=result["velocity"], source_counts=result["source_counts"],
-            )
-            session.add(snap)
-            session.flush()
-            # Keep a short history per user, not an ever-growing table.
-            old = (session.query(CommandCenterSnapshot.id)
-                   .filter_by(user_id=user.id)
-                   .order_by(CommandCenterSnapshot.generated_at.desc())
-                   .offset(10).all())
-            if old:
-                session.query(CommandCenterSnapshot).filter(
-                    CommandCenterSnapshot.id.in_([o[0] for o in old])
-                ).delete(synchronize_session=False)
+            snap = command_center_service.save_snapshot(session, user.id, _command_center_scope(session, user))
             session.commit()
             session.refresh(snap)
             return _command_center_payload(session, user, snap)
