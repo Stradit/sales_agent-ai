@@ -74,6 +74,9 @@ NOTE_SIMILARITY_MIN = 0.55
 
 # ── Retrieval / prompt budget ──
 EVIDENCE_TOKENS = 2800
-MAX_EVIDENCE_ITEMS = 8
+MAX_EVIDENCE_ITEMS = 8              # an upper limit, not a target: only sources that pass the gates below count
+# Vector relevance gate (retrieve._vector): cosine distance cap, and how far behind the best match a hit may be
+VECTOR_MAX_DISTANCE = float(_env("COPILOT_VECTOR_MAX_DISTANCE", "0.33"))
+VECTOR_DISTANCE_BAND = float(_env("COPILOT_VECTOR_DISTANCE_BAND", "0.10"))
 RECENT_TURNS = 6
 MAX_NOTES_IN_PROMPT = 5
