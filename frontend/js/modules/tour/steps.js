@@ -1,5 +1,5 @@
 /**
- * Complete Tour Step Definitions for Every Page and Widget in Doshin Sales AI
+ * Complete Tour Step Definitions for Every Page and Widget in Sales AI Agent
  * Covers all widgets, primary action buttons, filters, and the Copilot assistant.
  */
 
