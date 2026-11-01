@@ -18,7 +18,7 @@ function markCurrent() {
   document.querySelectorAll('[data-app-nav]').forEach((a) => {
     if (a.getAttribute('href') === here) a.setAttribute('aria-current', 'page');
   });
-  // Phone/tablet: the page's own name next to the logo ("Deals Pipeline | Doshin" → "Deals Pipeline")
+  // Phone/tablet: the page's own name next to the logo ("Deals Pipeline | Sales AI Agent" → "Deals Pipeline")
   const page = $('topbarPage');
   if (page) page.textContent = document.title.split('|')[0].trim();
 }

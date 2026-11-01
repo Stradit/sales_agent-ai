@@ -1,6 +1,6 @@
 /**
  * Interactive User Manual & Guided Tour Engine
- * Lightweight, zero-dependency spotlight and walkthrough engine for Doshin Sales AI.
+ * Lightweight, zero-dependency spotlight and walkthrough engine for Sales AI Agent.
  */
 import { TOUR_PAGES } from './steps.js';
 import { getCurrentUser } from '../auth-client.js';
