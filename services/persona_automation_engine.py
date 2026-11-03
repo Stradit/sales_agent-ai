@@ -70,6 +70,64 @@ class PersonaAutomationEngine:
     DEFAULT_BATCH_SIZE: int = 20
     MAX_WORKERS_PER_BATCH: int = 3
 
+    def __init__(
+        self,
+        persona_id: Optional[int] = None,
+        account_id: Optional[int] = None,
+        client_slug: Optional[str] = None,
+        company_name: Optional[str] = None,
+        domain: Optional[str] = None,
+        batch_size: int = 20,
+    ):
+        self.persona_id = persona_id
+        self.account_id = account_id
+        self.client_slug = client_slug or "stradit_india"
+        self.company_name = company_name
+        self.domain = domain
+        self.batch_size = batch_size
+
+    @classmethod
+    def _get_session(cls, client_slug: Optional[str] = None):
+        """All internal DB access goes through client-scoped session (architecture doc Section 10.3)."""
+        from sqlalchemy import text
+        from db.connection import SessionLocal
+        from db.routing import get_client_slug, DEFAULT_CLIENT_SLUG, set_client_schema
+        slug = client_slug or get_client_slug() or DEFAULT_CLIENT_SLUG
+        schema_name = f"client_{slug}" if not slug.startswith("client_") else slug
+        set_client_schema(schema_name)
+        session = SessionLocal()
+        session.execute(text(f'SET search_path = "{schema_name}", public'))
+        return session
+
+    def get_session(self):
+        return self._get_session(client_slug=self.client_slug)
+
+    def run(self, job_id: Optional[str] = None) -> Dict[str, Any]:
+        """Instance execution entry point as defined in architecture document Section 10.3."""
+        if self.persona_id and not self.account_id:
+            session = self.get_session()
+            try:
+                p_record = session.query(Persona).filter_by(id=self.persona_id).first()
+                if p_record:
+                    self.account_id = p_record.account_id
+                    acct = session.query(Account).filter_by(id=p_record.account_id).first()
+                    if acct and not self.company_name:
+                        self.company_name = getattr(acct, 'legal_name', None) or getattr(acct, 'display_name', None) or getattr(acct, 'key', '')
+                        self.domain = getattr(acct, 'domain', None) or getattr(acct, 'primary_domain', None)
+            finally:
+                session.close()
+
+        if self.account_id:
+            return self.execute_full_persona_automation(
+                account_id=self.account_id,
+                company_name=self.company_name or "",
+                domain=self.domain,
+                batch_size=self.batch_size,
+                job_id=job_id,
+                client_slug=self.client_slug,
+            )
+        return {"status": "error", "error": "Missing account_id or persona_id for PersonaAutomationEngine run"}
+
     @classmethod
     def get_persona_tier_resources(cls) -> List[Dict[str, Any]]:
         """Audits billable and public connectors configured for Persona tier."""
@@ -108,7 +166,11 @@ class PersonaAutomationEngine:
         company_name: Optional[str] = None,
         persona_count: Optional[int] = None,
         batch_size: int = 20,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         """Pre-Flight Resource & Credit Gatekeeper for Persona Level.
 
         Estimates total required credits based on persona count, audits configured API keys,
@@ -119,7 +181,7 @@ class PersonaAutomationEngine:
         domain = None
 
         if account_id:
-            session = get_session()
+            session = cls._get_session(client_slug=client_slug)
             try:
                 acct = session.query(Account).filter_by(id=account_id).first()
                 if acct:
@@ -156,9 +218,9 @@ class PersonaAutomationEngine:
         per_batch_credits = min(effective_count, batch_size) * rate_per_persona
 
         balance_info = AccountAutomationEngine.get_workspace_credit_balance()
-        available_credits = balance_info.get("available_credits", 0)
+        available_credits = balance_info.get("available_credits")
 
-        is_sufficient = available_credits >= total_required_credits
+        is_sufficient = (available_credits >= total_required_credits) if (available_credits is not None) else True
         allowed = is_sufficient
 
         message = (
@@ -193,6 +255,7 @@ class PersonaAutomationEngine:
         account_id: int,
         company_name: str,
         domain: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Cycle 1: Lightweight Name & Title/Seniority Discovery.
 
@@ -200,8 +263,11 @@ class PersonaAutomationEngine:
         expensive deep bio search, Exa, or FullEnrich waterfall. Commits stubs to DB (0 credits).
         """
         t0 = datetime.now(timezone.utc)
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         discovered_people: List[Dict[str, Any]] = []
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
 
         try:
             acct = session.query(Account).filter_by(id=account_id).first()
@@ -478,7 +544,11 @@ class PersonaAutomationEngine:
         total_phases: int = 1,
         domain: Optional[str] = None,
         job_id: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         """Cycle 3: Controlled Sequential Batch Execution with Deferred Fault Logging.
 
         Executes multi-source enrichment with worker pool capped at 3 concurrent threads.
@@ -577,7 +647,7 @@ class PersonaAutomationEngine:
         duration_sec = round((datetime.now(timezone.utc) - t0).total_seconds(), 2)
 
         # Immediate DB Persistence for this batch
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
         saved_count = 0
         try:
             repo = PersonaRepository(session)
@@ -658,7 +728,11 @@ class PersonaAutomationEngine:
         company_name: str,
         deferred_failures: List[Dict[str, Any]],
         job_id: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         """Cycle 4: Consolidated Post-Batch Self-Healing Resolution.
 
         Executes targeted micro-retries on failed personas with cooling backoff.
@@ -667,7 +741,7 @@ class PersonaAutomationEngine:
         t0 = datetime.now(timezone.utc)
         resolved_count = 0
         total_retry_credits = 0
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
 
         try:
             repo = PersonaRepository(session)
@@ -739,7 +813,11 @@ class PersonaAutomationEngine:
         domain: Optional[str] = None,
         batch_size: int = 20,
         job_id: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         """End-to-End Autonomous Persona Orchestrator with Priority Re-Queueing.
 
         Executes:
@@ -759,7 +837,7 @@ class PersonaAutomationEngine:
             )
 
         # 1. Pre-Flight Credit Gatekeeper Check
-        preflight = cls.preflight_persona_check(account_id=account_id, company_name=company_name, batch_size=batch_size)
+        preflight = cls.preflight_persona_check(account_id=account_id, company_name=company_name, batch_size=batch_size, client_slug=client_slug)
         if not preflight["allowed"]:
             msg = f"Halted: {preflight['message']}"
             if job_id:
@@ -769,7 +847,7 @@ class PersonaAutomationEngine:
         # 2. Cycle 1: Stub Discovery
         if job_id:
             _jreg_update(job_id, progress_pct=15, message="Cycle 1: Discovering executive names, positions & seniority tiers...")
-        stubs_res = cls.discover_persona_stubs(account_id=account_id, company_name=company_name, domain=domain)
+        stubs_res = cls.discover_persona_stubs(account_id=account_id, company_name=company_name, domain=domain, client_slug=client_slug)
         stubs = stubs_res.get("stubs", [])
         if not stubs:
             msg = f"No executive leadership personas discovered for '{company_name}'."
@@ -815,6 +893,7 @@ class PersonaAutomationEngine:
                 total_phases=total_estimated_phases,
                 domain=domain,
                 job_id=job_id,
+                client_slug=client_slug,
             )
 
             all_enriched_personas.extend(batch_result.get("enriched_personas", []))
@@ -842,6 +921,7 @@ class PersonaAutomationEngine:
                 company_name=company_name,
                 deferred_failures=all_deferred_failures,
                 job_id=job_id,
+                client_slug=client_slug,
             )
             total_credits += healing_res.get("retry_credits_used", 0)
 

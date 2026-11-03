@@ -6,6 +6,7 @@ Reads DATABASE_URL from the pipeline .env configuration.
 import sys
 from pathlib import Path
 from sqlalchemy import create_engine
+from sqlalchemy.pool import QueuePool
 from sqlalchemy.orm import sessionmaker, Session
 
 # Ensure pipeline root is on path for config import
@@ -15,8 +16,9 @@ import config
 
 engine = create_engine(
     config.DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
+    poolclass=QueuePool,
+    pool_size=20,
+    max_overflow=30,
     pool_timeout=30,
     pool_recycle=1800,
     pool_pre_ping=True,
@@ -28,8 +30,17 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
 def get_session() -> Session:
-    """Returns a new database session."""
-    return SessionLocal()
+    """Returns a new database session, automatically scoped to current client schema if set."""
+    session = SessionLocal()
+    try:
+        from db.routing import get_client_schema
+        schema = get_client_schema()
+        if schema and schema != "public":
+            from sqlalchemy import text
+            session.execute(text(f'SET search_path = "{schema}", public'))
+    except Exception:
+        pass
+    return session
 
 
 # ── JSONB Auto-Flag Listener (inline — replaces a separate listeners.py) ────

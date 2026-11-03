@@ -60,6 +60,68 @@ class LobAutomationEngine:
     DEFAULT_BATCH_SIZE: int = 10
     MAX_WORKERS_PER_BATCH: int = 3
 
+    def __init__(
+        self,
+        lob_id: Optional[int] = None,
+        account_id: Optional[int] = None,
+        client_slug: Optional[str] = None,
+        company_name: Optional[str] = None,
+        domain: Optional[str] = None,
+        sec_cik: Optional[str] = None,
+        batch_size: int = 10,
+    ):
+        self.lob_id = lob_id
+        self.account_id = account_id
+        self.client_slug = client_slug or "stradit_india"
+        self.company_name = company_name
+        self.domain = domain
+        self.sec_cik = sec_cik
+        self.batch_size = batch_size
+
+    @classmethod
+    def _get_session(cls, client_slug: Optional[str] = None):
+        """All internal DB access goes through client-scoped session (architecture doc Section 10.3)."""
+        from sqlalchemy import text
+        from db.connection import SessionLocal
+        from db.routing import get_client_slug, DEFAULT_CLIENT_SLUG, set_client_schema
+        slug = client_slug or get_client_slug() or DEFAULT_CLIENT_SLUG
+        schema_name = f"client_{slug}" if not slug.startswith("client_") else slug
+        set_client_schema(schema_name)
+        session = SessionLocal()
+        session.execute(text(f'SET search_path = "{schema_name}", public'))
+        return session
+
+    def get_session(self):
+        return self._get_session(client_slug=self.client_slug)
+
+    def run(self, job_id: Optional[str] = None) -> Dict[str, Any]:
+        """Instance execution entry point as defined in architecture document Section 10.3."""
+        if self.lob_id and not self.account_id:
+            session = self.get_session()
+            try:
+                lob = session.query(Lob).filter_by(id=self.lob_id).first()
+                if lob:
+                    self.account_id = lob.account_id
+                    acct = session.query(Account).filter_by(id=lob.account_id).first()
+                    if acct and not self.company_name:
+                        self.company_name = getattr(acct, 'legal_name', None) or getattr(acct, 'display_name', None) or getattr(acct, 'key', '')
+                        self.domain = getattr(acct, 'domain', None) or getattr(acct, 'primary_domain', None)
+                        self.sec_cik = getattr(acct, 'sec_cik', None)
+            finally:
+                session.close()
+
+        if self.account_id:
+            return self.execute_full_lob_automation(
+                account_id=self.account_id,
+                company_name=self.company_name or "",
+                domain=self.domain,
+                sec_cik=self.sec_cik,
+                batch_size=self.batch_size,
+                job_id=job_id,
+                client_slug=self.client_slug,
+            )
+        return {"status": "error", "error": "Missing account_id or lob_id for LobAutomationEngine run"}
+
     @classmethod
     def get_lob_tier_resources(cls) -> List[Dict[str, Any]]:
         """Audits billable and public connectors configured for LOB tier."""
@@ -98,12 +160,17 @@ class LobAutomationEngine:
         company_name: Optional[str] = None,
         lob_count: Optional[int] = None,
         batch_size: int = 10,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Pre-Flight Resource & Credit Gatekeeper for LOB Level.
 
         Estimates total required credits based on LOB count, audits configured API keys,
         and verifies available balance before initiating expensive multi-source runs.
         """
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
+
         # If lob_count not provided, inspect existing stubs in DB for this account
         effective_count = lob_count or 0
         effective_company = company_name or "Unknown Company"
@@ -111,7 +178,7 @@ class LobAutomationEngine:
         domain = None
 
         if account_id:
-            session = get_session()
+            session = cls._get_session(client_slug=client_slug)
             try:
                 acct = session.query(Account).filter_by(id=account_id).first()
                 if acct:
@@ -194,6 +261,7 @@ class LobAutomationEngine:
         company_name: str,
         domain: Optional[str] = None,
         sec_cik: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Cycle 1: Lightweight Name & Stub Discovery.
 
@@ -201,9 +269,12 @@ class LobAutomationEngine:
         the expensive deep web scraper or LLM calls. Commits initial stubs to DB.
         """
         t0 = datetime.now(timezone.utc)
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         discovered_names: List[str] = []
         discovered_divisions_meta: Dict[str, Dict[str, Any]] = {}
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
 
         try:
             acct = session.query(Account).filter_by(id=account_id).first()
@@ -508,6 +579,7 @@ class LobAutomationEngine:
         total_phases: int,
         sec_cik: Optional[str] = None,
         job_id: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Cycle 3: Controlled Sequential Batch Execution with Deferred Fault Logging.
 
@@ -516,6 +588,9 @@ class LobAutomationEngine:
         Immediately commits enriched LOBs to PostgreSQL via LobRepository.
         """
         t0 = datetime.now(timezone.utc)
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         enriched_lobs: List[Dict[str, Any]] = []
         deferred_failures: List[Dict[str, Any]] = []
         actual_billable_credits: int = 0
@@ -631,7 +706,7 @@ class LobAutomationEngine:
         duration_sec = round((datetime.now(timezone.utc) - t0).total_seconds(), 2)
 
         # Immediate DB Persistence for this batch
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
         saved_count = 0
         try:
             acct = session.query(Account).filter_by(id=account_id).first()
@@ -715,7 +790,11 @@ class LobAutomationEngine:
         company_name: str,
         deferred_failures: List[Dict[str, Any]],
         job_id: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         """Cycle 4: Consolidated Post-Batch Self-Healing Resolution.
 
         Executes targeted micro-retries ONLY for failed connectors with adaptive cooling backoff (2.5s).
@@ -751,7 +830,7 @@ class LobAutomationEngine:
 
         resolved_count = 0
         total_retry_credits = 0
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
 
         try:
             acct = session.query(Account).filter_by(id=account_id).first()
@@ -871,7 +950,11 @@ class LobAutomationEngine:
         sec_cik: Optional[str] = None,
         batch_size: int = 10,
         job_id: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         """End-to-End Autonomous LOB Orchestrator.
 
         Executes:
@@ -886,7 +969,7 @@ class LobAutomationEngine:
             _jreg_update(job_id, status="running", progress_pct=5, message=f"Starting LOB Automation for {company_name}...")
 
         # 1. Pre-Flight Credit Check
-        preflight = cls.preflight_lob_check(account_id=account_id, company_name=company_name, batch_size=batch_size)
+        preflight = cls.preflight_lob_check(account_id=account_id, company_name=company_name, batch_size=batch_size, client_slug=client_slug)
         if not preflight["allowed"]:
             msg = f"Halted: {preflight['message']}"
             if job_id:
@@ -897,7 +980,7 @@ class LobAutomationEngine:
         if job_id:
             _jreg_update(job_id, progress_pct=15, message="Cycle 1: Discovering LOB names & corporate stubs...")
         stubs_res = cls.discover_lob_stubs(
-            account_id=account_id, company_name=company_name, domain=domain, sec_cik=sec_cik
+            account_id=account_id, company_name=company_name, domain=domain, sec_cik=sec_cik, client_slug=client_slug
         )
         stubs = stubs_res.get("stubs", [])
         if not stubs:
@@ -985,6 +1068,7 @@ class LobAutomationEngine:
                 total_phases=total_estimated_phases,
                 sec_cik=sec_cik,
                 job_id=job_id,
+                client_slug=client_slug,
             )
 
             all_enriched_lobs.extend(batch_result.get("enriched_lobs", []))
@@ -1030,6 +1114,7 @@ class LobAutomationEngine:
                 company_name=company_name,
                 deferred_failures=all_deferred_failures,
                 job_id=job_id,
+                client_slug=client_slug,
             )
             total_credits += healing_res.get("retry_credits_used", 0)
 

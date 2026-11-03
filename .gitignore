@@ -71,3 +71,8 @@ skills/
 *SKILL.md
 *skill.md
 
+
+# Database backup dumps
+*.dump
+*.bak
+*.sql.gz

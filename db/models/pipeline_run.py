@@ -1,7 +1,7 @@
 """PipelineRun ORM Model — Audit table for execution telemetry, credits, and run logs."""
 
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, Numeric, DateTime
+from sqlalchemy import Column, Integer, String, Text, Numeric, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import JSON
 from db.models.base import Base
@@ -11,6 +11,7 @@ class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True, index=True)
     run_id = Column(String(100), unique=True, nullable=False, index=True)
     company_name = Column(String(255), nullable=False, index=True)
     target_url = Column(String(500))

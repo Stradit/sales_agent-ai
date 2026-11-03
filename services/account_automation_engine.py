@@ -49,8 +49,72 @@ class AccountAutomationEngine:
     DEFAULT_WORKSPACE_BUDGET: int = 50000
     DEFAULT_STANDALONE_BALANCE: int = 1000
 
+    def __init__(
+        self,
+        account_id: Optional[int] = None,
+        company_name: Optional[str] = None,
+        domain: Optional[str] = None,
+        client_slug: Optional[str] = None,
+        stock_symbol: Optional[str] = None,
+        sec_cik: Optional[str] = None,
+        industry: Optional[str] = None,
+        hq_location: Optional[str] = None,
+        company_type: Optional[str] = None,
+    ):
+        self.account_id = account_id
+        self.company_name = company_name
+        self.domain = domain
+        self.client_slug = client_slug or "stradit_india"
+        self.stock_symbol = stock_symbol
+        self.sec_cik = sec_cik
+        self.industry = industry
+        self.hq_location = hq_location
+        self.company_type = company_type
+
     @classmethod
-    def get_workspace_credit_balance(cls) -> Dict[str, Any]:
+    def _get_session(cls, client_slug: Optional[str] = None):
+        """All internal DB access goes through client-scoped session (architecture doc Section 10.3)."""
+        from sqlalchemy import text
+        from db.connection import SessionLocal
+        from db.routing import get_client_slug, DEFAULT_CLIENT_SLUG, set_client_schema
+        slug = client_slug or get_client_slug() or DEFAULT_CLIENT_SLUG
+        schema_name = f"client_{slug}" if not slug.startswith("client_") else slug
+        set_client_schema(schema_name)
+        session = SessionLocal()
+        session.execute(text(f'SET search_path = "{schema_name}", public'))
+        return session
+
+    def get_session(self):
+        return self._get_session(client_slug=self.client_slug)
+
+    def run(self, job_id: Optional[str] = None) -> Dict[str, Any]:
+        """Instance execution entry point as defined in architecture document Section 10.3."""
+        if self.account_id and not self.company_name:
+            session = self.get_session()
+            try:
+                acct = session.query(Account).filter_by(id=self.account_id).first()
+                if acct:
+                    self.company_name = getattr(acct, 'legal_name', None) or getattr(acct, 'display_name', None) or getattr(acct, 'key', '')
+                    self.domain = getattr(acct, 'domain', None) or getattr(acct, 'primary_domain', None)
+                    self.stock_symbol = getattr(acct, 'stock_symbol', None) or getattr(acct, 'ticker', None) or self.stock_symbol
+                    self.sec_cik = getattr(acct, 'sec_cik', None) or self.sec_cik
+            finally:
+                session.close()
+
+        return self.execute_account_automation(
+            company_name=self.company_name or "",
+            domain=self.domain,
+            stock_symbol=self.stock_symbol,
+            sec_cik=self.sec_cik,
+            industry=self.industry,
+            headquarters_location=self.hq_location,
+            company_type=self.company_type,
+            job_id=job_id,
+            client_slug=self.client_slug,
+        )
+
+    @classmethod
+    def get_workspace_credit_balance(cls, client_slug: Optional[str] = None) -> Dict[str, Any]:
         """Calculates current available credit balance and lifetime consumption.
 
         Checks environment / system configs:
@@ -70,7 +134,7 @@ class AccountAutomationEngine:
             except ValueError:
                 pass
 
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
         try:
             repo = PipelineRunRepository(session)
             summary = repo.get_credits_summary()
@@ -153,12 +217,16 @@ class AccountAutomationEngine:
         cls,
         company_name: str,
         domain: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Pre-Flight Resource & Credit Gatekeeper for Account Level.
 
         Audits required resources, tallies expected credits against rate cards,
         and verifies that sufficient credit balance is available.
         """
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         clean_name = company_name.strip() if company_name else ""
         if not clean_name:
             return {
@@ -186,9 +254,9 @@ class AccountAutomationEngine:
                 unconfigured_billable.append(res)
 
         balance_info = cls.get_workspace_credit_balance()
-        available_credits = balance_info.get("available_credits", 0)
+        available_credits = balance_info.get("available_credits")
 
-        is_sufficient = available_credits >= required_credits
+        is_sufficient = (available_credits >= required_credits) if (available_credits is not None) else True
         allowed = is_sufficient
 
         message = (
@@ -332,7 +400,11 @@ class AccountAutomationEngine:
         account_id: int,
         specific_sources: Optional[List[str]] = None,
         include_empty: bool = True,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         """Selectively re-runs only failed or empty sources for an existing account.
 
         1. Loads account from PostgreSQL.
@@ -341,7 +413,7 @@ class AccountAutomationEngine:
         4. Additively coalesces recovered data using CoalescenceEngine.
         5. Commits to database and logs chronological event to pipeline_runs.
         """
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
         try:
             acct = session.query(Account).filter_by(id=account_id).first()
             if not acct:
@@ -496,6 +568,7 @@ class AccountAutomationEngine:
         headquarters_location: Optional[str] = None,
         company_type: Optional[str] = None,
         job_id: Optional[str] = None,
+        client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
         """End-to-End Autonomous Execution for Account Level.
 
@@ -508,6 +581,9 @@ class AccountAutomationEngine:
         7. Returns final enriched entity and updates background job status.
         """
         t0 = datetime.now(timezone.utc)
+        if client_slug:
+            from db.routing import set_client_schema
+            set_client_schema(f"client_{client_slug}")
         clean_name = company_name.strip()
         chronology_logs: List[Dict[str, Any]] = []
         clean_dom = (
@@ -523,7 +599,7 @@ class AccountAutomationEngine:
             update_job(job_id, status=STATUS_RUNNING, progress_pct=5,
                        message="Running pre-flight resource & credit gatekeeper audit...")
 
-        preflight = cls.preflight_account_check(clean_name, clean_dom)
+        preflight = cls.preflight_account_check(clean_name, clean_dom, client_slug=client_slug)
         if not preflight["allowed"]:
             err_msg = f"Credit Gatekeeper Block: {preflight['message']}"
             if job_id:
@@ -552,7 +628,7 @@ class AccountAutomationEngine:
             update_job(job_id, progress_pct=15,
                        message=f"Verifying corporate entity stub in database for '{clean_name}'...")
 
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
         account_id = None
         account_key = None
         try:
@@ -734,7 +810,7 @@ class AccountAutomationEngine:
             update_job(job_id, progress_pct=75,
                        message="Applying Master Data Management (MDM) Coalescence Engine & persisting Golden Record...")
 
-        session = get_session()
+        session = cls._get_session(client_slug=client_slug)
         saved_acct = None
         try:
             wrapper_doc = {"account": account_dossier}

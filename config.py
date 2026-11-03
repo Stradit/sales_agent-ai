@@ -26,6 +26,10 @@ for _prefix in ("postgresql://", "postgres://"):
         DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len(_prefix):]
         break
 
+# Multi-Tenant Architecture Configuration (Phase 6 Cutover §11.4 & §14)
+MULTITENANT_ENABLED = os.getenv("MULTITENANT_ENABLED", "true").lower() in ("true", "1", "yes")
+DEFAULT_CLIENT_SLUG = os.getenv("DEFAULT_CLIENT_SLUG", "stradit_india")
+
 # Monid.ai Gateway
 MONID_API_KEY = os.getenv("MONID_API_KEY", "")
 MONID_BASE_URL = os.getenv("MONID_BASE_URL", "https://api.monid.ai/v1")
@@ -88,7 +92,15 @@ RAW_APIFY_DIR = OUTPUT_DIR / "raw" / "apify"
 RAW_APIFY_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def get_run_output_dirs(company_name: str, run_dt: datetime = None):
+def get_client_output_dir(client_slug: str = None) -> Path:
+    """Returns the dedicated output directory for a specific client tenant."""
+    slug = client_slug or os.getenv("ACTIVE_CLIENT_SLUG", "stradit_india")
+    client_dir = OUTPUT_DIR / slug
+    client_dir.mkdir(parents=True, exist_ok=True)
+    return client_dir
+
+
+def get_run_output_dirs(company_name: str, run_dt: datetime = None, client_slug: str = None):
     """
     Generates date-partitioned, source-categorized directory paths for a pipeline run.
     Structure:
@@ -108,8 +120,11 @@ def get_run_output_dirs(company_name: str, run_dt: datetime = None):
     timestamp_str = f"{date_str.replace('-', '')}_{time_str}"
     safe_name = company_name.lower().replace(" ", "_").replace(".", "").replace(",", "")
 
-    # Base date folder
-    date_dir = OUTPUT_DIR / date_str
+    effective_slug = client_slug or os.getenv("ACTIVE_CLIENT_SLUG") or "stradit_india"
+
+    # Base client & date folder
+    client_dir = OUTPUT_DIR / effective_slug
+    date_dir = client_dir / date_str
     run_dir = date_dir / f"{safe_name}_{time_str}"
 
     # Raw source directories

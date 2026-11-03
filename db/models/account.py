@@ -140,6 +140,10 @@ class Account(Base):
     raw_data = Column(JSONB)
     osint_feed_manifest = Column(JSONB)
 
+    # ── Credits & Usage ──
+    api_credits_total = Column(Integer, default=0, nullable=False)
+    api_credits_used = Column(Integer, default=0, nullable=False)
+
     # ── Relationships ──
     lobs = relationship("Lob", back_populates="account", cascade="all, delete-orphan")
     personas = relationship("Persona", back_populates="account", cascade="all, delete-orphan")

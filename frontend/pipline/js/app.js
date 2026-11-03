@@ -1,4 +1,6 @@
 // ─── Global /api/ Auth Interceptor for Pipeline Console ──────────────────
+var API_BASE = window.API_BASE || "";
+window.API_BASE = API_BASE;
 (function () {
   if (window.__pipelineFetchWrapped) return;
   window.__pipelineFetchWrapped = true;
@@ -38,6 +40,39 @@
     return refreshPromise;
   }
 
+  function getActiveClientSlug() {
+    let slug = localStorage.getItem("active_client_slug") || localStorage.getItem("activeClientSlug") || "stradit_india";
+    if (slug === "stradit") slug = "stradit_india";
+    return slug.trim().toLowerCase();
+  }
+
+  function setActiveClientSlug(slug) {
+    if (slug) {
+      let clean = slug.trim().toLowerCase();
+      if (clean === "stradit") clean = "stradit_india";
+      localStorage.setItem("active_client_slug", clean);
+      localStorage.setItem("activeClientSlug", clean);
+    }
+  }
+
+  window.getActiveClientSlug = getActiveClientSlug;
+  window.setActiveClientSlug = setActiveClientSlug;
+
+  // Architecture Section 12.5 apiFetch wrapper
+  async function apiFetch(url, options = {}) {
+    const clientSlug = getActiveClientSlug();
+    const token = getStoredToken();
+    const headers = {
+      ...(options.body && typeof options.body === "string" ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+      ...(clientSlug ? { "X-Client-Slug": clientSlug } : {}),
+      ...(options.headers || {}),
+    };
+    return fetch(url, { ...options, headers });
+  }
+
+  window.apiFetch = apiFetch;
+
   function withApiAuth(input, init) {
     const token = getStoredToken();
     const headers = new Headers(
@@ -45,6 +80,10 @@
     );
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
+    }
+    const clientSlug = getActiveClientSlug();
+    if (clientSlug) {
+      headers.set("X-Client-Slug", clientSlug);
     }
     return {
       ...init,
@@ -84,9 +123,11 @@ $(function () {
     if (collapsed) {
       $("#sidebar").addClass("collapsed");
       $("#sidebarCollapseBtn").html('<i class="bi bi-chevron-bar-right"></i>').attr("title", "Expand sidebar");
+      $("#sidebarClientScope").hide();
     } else {
       $("#sidebar").removeClass("collapsed");
       $("#sidebarCollapseBtn").html('<i class="bi bi-layout-sidebar-inset"></i>').attr("title", "Shrink sidebar");
+      $("#sidebarClientScope").show();
     }
   }
 
@@ -344,7 +385,8 @@ $(function () {
       try {
         sessionStorage.removeItem("pipeline_accounts_cache");
         sessionStorage.removeItem("pipeline_accounts_cache_v2");
-        const cached = sessionStorage.getItem("pipeline_accounts_cache_v3");
+        const cacheKey = "pipeline_accounts_cache_v3_" + (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : "stradit_india");
+        const cached = sessionStorage.getItem(cacheKey);
         if (cached) {
           const parsed = JSON.parse(cached);
           if (parsed && Array.isArray(parsed.accounts) && parsed.accounts.length > 0) {
@@ -386,6 +428,14 @@ $(function () {
             }
           }
         } catch (_) {}
+
+        if (response.status === 401) {
+          console.warn("[loadData] Session expired or unauthenticated. Redirecting to /login...");
+          if (typeof window !== "undefined" && window.location) {
+            window.location.href = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+            return;
+          }
+        }
       }
 
       // Check pipeline access permission
@@ -398,7 +448,7 @@ $(function () {
               `<div style="padding:16px 12px;font-size:.84rem;color:#e11d48;line-height:1.5">` +
                 `<strong>Access Restricted</strong><br>` +
                 `<span style="font-size:.78rem;color:#64748b;display:block;margin-top:4px;">Your account does not have access to the Data Pipeline Console. Contact a Super Admin to request access.</span>` +
-                `<a href="/command-center" style="margin-top:12px;display:inline-block;padding:5px 12px;font-size:.78rem;border-radius:6px;background:#0ea5e9;color:#fff;text-decoration:none;font-weight:600;">Go to Command Center</a>` +
+                `<a href="/command-center" style="margin-top:12px;display:inline-block;padding:5px 12px;font-size:.78rem;border-radius:6px;background:#8A6248;color:#fff;text-decoration:none;font-weight:600;">Go to Command Center</a>` +
               `</div>`
             );
             return;
@@ -432,7 +482,8 @@ $(function () {
 
       MOCK_DATA = data;
       try {
-        sessionStorage.setItem("pipeline_accounts_cache_v3", JSON.stringify(data));
+        const cacheKey = "pipeline_accounts_cache_v3_" + (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : "stradit_india");
+        sessionStorage.setItem(cacheKey, JSON.stringify(data));
       } catch (e) {}
 
       updateGlobalTelemetry();
@@ -988,6 +1039,9 @@ $(function () {
 
     // Update real accounts counter badge in sidebar header
     $("#sidebarAccountsCount").text(filtered.length);
+    if (typeof ClientWorkspaceManager !== "undefined") {
+      $("#sidebarAccountsLabel").text("Accounts");
+    }
 
     if (filtered.length === 0) {
       $list.append(
@@ -1040,7 +1094,927 @@ $(function () {
     });
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // CLIENT MULTI-TENANT WORKSPACE MANAGER (Enterprise Enhanced)
+  // ══════════════════════════════════════════════════════════════════
+  const ClientWorkspaceManager = {
+    clients: [],
+    platformUsers: [],
+    activeSlug: (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : "stradit_india"),
+    activeUsersSlug: null,
+    activeDiagnosticsSlug: null,
+    activeAccountsSlug: null,
+
+    init: function () {
+      const self = this;
+      this.bindEvents();
+      this.loadClients();
+      this.loadKpis();
+
+      // Cross-tab synchronization for multi-tenant workspace switching
+      window.addEventListener("storage", function (e) {
+        if ((e.key === "active_client_slug" || e.key === "activeClientSlug") && e.newValue && e.newValue !== self.activeSlug) {
+          self.switchToClient(e.newValue);
+        }
+      });
+    },
+
+    bindEvents: function () {
+      const self = this;
+
+      // Auto-slugify when typing Client Name in Add Client modal
+      $(document).on("input", "#newClientName", function () {
+        const val = $(this).val();
+        const slug = val
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+          .substring(0, 50);
+        $("#newClientSlug").val(slug);
+      });
+
+      // Add Client modal triggers
+      $(document).on("click", "#topbarAddClientBtn, #hubAddClientBtn, #sidebarAddClientBtn, #btnOpenAddClientFromManage", function (e) {
+        e.preventDefault();
+        $("#manageClientsModal").modal("hide");
+        $("#addClientForm")[0].reset();
+        $("#newClientMaxAccounts").val("30");
+        $("#newClientCredits").val("100000");
+        $("#addClientErrorAlert").addClass("d-none").text("");
+        const modal = new bootstrap.Modal(document.getElementById("addClientModal"));
+        modal.show();
+      });
+
+      // Manage Clients modal triggers (Top bar, Hub, and Sidebar — §12.1)
+      $(document).on("click", "#topbarManageClientsBtn, #hubManageClientsBtn, #sidebarClientManagementBtn, #sidebarManageClientsDropdownBtn", function (e) {
+        e.preventDefault();
+        self.loadKpis();
+        self.renderManageModal();
+        const modal = new bootstrap.Modal(document.getElementById("manageClientsModal"));
+        modal.show();
+      });
+
+      // Filter & Search inside Manage Clients panel
+      $(document).on("input", "#manageClientsSearchInput", function () {
+        self.renderManageModal();
+      });
+      $(document).on("change", "#manageClientsPlanFilter", function () {
+        self.renderManageModal();
+      });
+      $(document).on("click", "#btnRefreshManageClients", function () {
+        const $btn = $(this);
+        $btn.find("i").addClass("spin-icon");
+        Promise.all([self.loadClients(), self.loadKpis()]).finally(() => {
+          $btn.find("i").removeClass("spin-icon");
+          self.renderManageModal();
+        });
+      });
+
+      // Submit Add Client
+      $(document).on("click", "#btnSubmitAddClient", function () {
+        self.submitAddClient();
+      });
+
+      // Switch client from dropdown or manage table
+      $(document).on("click", "[data-client-switch]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("client-switch");
+        if (slug && slug !== self.activeSlug) {
+          self.switchToClient(slug);
+        }
+      });
+
+      // Populate target client workspace selector when Add Account modal opens (§12.6)
+      $(document).on("click", "#addNewAccountBtn, #btnHubNewTarget", function () {
+        self.populateNewAccountClientSelector();
+      });
+
+      // Edit Client Settings triggers
+      $(document).on("click", "[data-edit-client]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("edit-client");
+        if (slug) self.openEditClient(slug);
+      });
+      $(document).on("click", "#btnSubmitEditClient", function () {
+        self.submitEditClient();
+      });
+
+      // Schema Health & Diagnostics triggers
+      $(document).on("click", "[data-schema-health]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("schema-health");
+        if (slug) self.openSchemaDiagnostics(slug);
+      });
+      $(document).on("click", "#btnRunSchemaRepair", function () {
+        if (self.activeDiagnosticsSlug) {
+          self.runSchemaRepair(self.activeDiagnosticsSlug);
+        }
+      });
+
+      // Adjust Credits triggers
+      $(document).on("click", "[data-adjust-credits]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("adjust-credits");
+        if (slug) self.openAdjustCredits(slug);
+      });
+      $(document).on("click", "#btnSubmitAdjustCredits", function () {
+        self.submitAdjustCredits();
+      });
+
+      // Client Accounts Explorer triggers
+      $(document).on("click", "[data-client-accounts]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("client-accounts");
+        if (slug) self.openClientAccounts(slug);
+      });
+
+      // Client Users Management triggers (§12.3 & §12.4)
+      $(document).on("click", "[data-client-users]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("client-users");
+        if (slug) self.openClientUsers(slug);
+      });
+      $(document).on("click", "#btnSubmitAddClientUser", function () {
+        self.submitAddClientUser();
+      });
+      $(document).on("change", ".client-user-role-select", function () {
+        const userId = $(this).data("user-id");
+        const role = $(this).val();
+        self.updateUserRole(userId, role);
+      });
+      $(document).on("click", "[data-revoke-user]", function (e) {
+        e.preventDefault();
+        const userId = $(this).data("revoke-user");
+        const slug = $(this).data("client-slug") || self.activeUsersSlug;
+        if (userId && slug) {
+          self.revokeClientUser(slug, userId);
+        }
+      });
+    },
+
+    loadClients: async function () {
+      const self = this;
+      try {
+        const fetchFn = typeof apiFetch === "function" ? apiFetch : fetch;
+        const res = await fetchFn("/api/clients");
+        if (res.ok) {
+          const data = await res.json();
+          self.clients = Array.isArray(data.clients) && data.clients.length > 0 ? data.clients : [];
+          self.renderDropdowns();
+          self.populateNewAccountClientSelector();
+          return;
+        }
+      } catch (err) {
+        console.warn("[ClientWorkspaceManager] Could not load clients from API:", err);
+      }
+
+      // Safe fallback when unauthenticated or during initial session boot
+      if (!self.clients || self.clients.length === 0) {
+        self.clients = [
+          {
+            id: 1,
+            name: "Stradit India PVT LTD",
+            slug: "stradit_india",
+            client_id: "stradit_india",
+            client_slug: "stradit_india",
+            client_name: "Stradit India PVT LTD",
+            schema_name: "client_stradit_india",
+            plan_tier: "enterprise",
+            accounts_count: 6,
+            is_active: true,
+            max_accounts: 50,
+            api_credits_total: 100000,
+            api_credits_used: 0
+          }
+        ];
+        self.renderDropdowns();
+        self.populateNewAccountClientSelector();
+      }
+    },
+
+    loadKpis: async function () {
+      try {
+        const fetchFn = typeof apiFetch === "function" ? apiFetch : fetch;
+        const res = await fetchFn("/api/clients/overview-kpis");
+        if (res.ok) {
+          const data = await res.json();
+          $("#kpiTotalClients").text(data.total_clients || 1);
+          $("#kpiActiveClients").text(`${data.active_clients || 1} Active`);
+          $("#kpiTotalAccounts").text(data.total_accounts || 0);
+          $("#kpiCreditsUsed").text(`${((data.total_credits_used || 0) / 1000).toFixed(1)}k cr`);
+          $("#kpiCreditsAlloc").text(`${((data.total_credits_allocated || 0) / 1000).toFixed(0)}k cr`);
+          $("#kpiCreditPct").text(`${data.credit_utilization_pct || 0}%`);
+        }
+      } catch (err) {
+        console.warn("[ClientWorkspaceManager] Could not load KPIs:", err);
+      }
+    },
+
+    populateNewAccountClientSelector: function () {
+      const self = this;
+      const $select = $("#newAccountClientSlug");
+      if (!$select.length) return;
+      $select.empty();
+      if (!self.clients || self.clients.length === 0) {
+        $select.append(`<option value="stradit_india" selected>Stradit India PVT LTD (client_stradit_india &bull; 6 accounts)</option>`);
+        return;
+      }
+      self.clients.forEach(c => {
+        if (!c) return;
+        const cSlug = (c.slug || c.client_slug || "stradit_india").toLowerCase();
+        const isCurrent = cSlug === self.activeSlug;
+        const cName = (c.name && c.name !== "undefined") ? c.name :
+                      (c.client_name && c.client_name !== "undefined") ? c.client_name :
+                      (cSlug === "stradit_india" ? "Stradit India PVT LTD" : cSlug);
+        $select.append(`
+          <option value="${cSlug}" ${isCurrent ? 'selected' : ''}>
+            ${cName} (${c.schema_name || 'client_' + cSlug} &bull; ${c.accounts_count || 0} accounts)
+          </option>
+        `);
+      });
+    },
+
+    renderDropdowns: function () {
+      const self = this;
+      self.activeSlug = (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : "stradit_india");
+      const active = (self.clients || []).find(c => c && (c.slug === self.activeSlug || c.client_slug === self.activeSlug)) || {
+        name: "Stradit India PVT LTD",
+        slug: "stradit_india",
+        schema_name: "client_stradit_india",
+        plan_tier: "enterprise",
+        accounts_count: 6,
+        api_credits_total: 100000
+      };
+
+      let activeDisplayName = active.name || active.client_name || active.display_name || active.legal_name || active.slug;
+      if (!activeDisplayName || activeDisplayName === "undefined" || activeDisplayName === "null") {
+        activeDisplayName = self.activeSlug === "stradit_india" ? "Stradit India PVT LTD" : self.activeSlug.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+      }
+
+      // Top Bar active indicators
+      $("#topbarActiveClientName").text(activeDisplayName);
+      $("#topbarActiveClientBadge").text(`${active.accounts_count || 0} Accts`);
+      $("#topbarClientTotalBadge").text(`${(self.clients || []).length} Total`);
+
+      // Sidebar active indicators
+      $("#sidebarActiveClientName").text(activeDisplayName);
+      $("#sidebarActiveClientPlan").text((active.plan_tier || "enterprise").toUpperCase());
+      $("#sidebarAccountsLabel").text("Accounts");
+      $("#sidebarAccountsCount").text(active.accounts_count || 0);
+
+      // Hero Card active indicators
+      $("#hubHeroClientName").text(activeDisplayName);
+      $("#hubHeroPlanBadge").text(`${(active.plan_tier || "enterprise").toUpperCase()} PLAN`);
+      $("#hubHeroSchemaBadge").text(active.schema_name || `client_${self.activeSlug}`);
+
+      // Top Bar dropdown list
+      let listHtml = "";
+      if (!self.clients || self.clients.length === 0) {
+        listHtml = `<li class="dropdown-item text-muted py-2"><em>Stradit India PVT LTD (Default)</em></li>`;
+      } else {
+        self.clients.forEach(c => {
+          if (!c) return;
+          const clientSlug = (c.slug || c.client_slug || c.client_id || "stradit_india").toLowerCase();
+          const isCurrent = clientSlug === self.activeSlug;
+          let displayName = c.name || c.client_name || c.display_name || c.legal_name || clientSlug;
+          if (!displayName || displayName === "undefined" || displayName === "null") {
+            displayName = clientSlug === "stradit_india" ? "Stradit India PVT LTD" : clientSlug.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+          }
+          listHtml += `
+            <li>
+              <a class="dropdown-item d-flex align-items-center justify-content-between py-2 ${isCurrent ? 'active' : ''}" href="#" data-client-switch="${clientSlug}">
+                <div>
+                  <i class="bi bi-${isCurrent ? 'check2 text-primary' : 'building text-muted'} me-2"></i>
+                  <strong style="font-size:0.82rem;">${displayName}</strong>
+                  <div style="font-size:0.7rem;color:${isCurrent ? '#fff' : '#64748b'};margin-left:22px;">schema: ${c.schema_name || ('client_' + clientSlug)}</div>
+                </div>
+                <span class="badge ${isCurrent ? 'bg-light text-dark' : 'bg-secondary-subtle text-secondary'} ms-2" style="font-size:0.68rem;">${c.accounts_count || 0} accts</span>
+              </a>
+            </li>`;
+        });
+      }
+
+      $("#topbarClientListContainer").html(listHtml);
+      $("#hubClientListContainer").html(listHtml);
+      $("#sidebarClientListContainer").html(listHtml);
+    },
+
+    renderManageModal: function () {
+      const self = this;
+      const query = ($("#manageClientsSearchInput").val() || "").toLowerCase().trim();
+      const planFilter = $("#manageClientsPlanFilter").val() || "all";
+
+      const filtered = self.clients.filter(c => {
+        const matchesQuery = !query ||
+          (c.name || "").toLowerCase().includes(query) ||
+          (c.slug || "").toLowerCase().includes(query) ||
+          (c.legal_name || "").toLowerCase().includes(query);
+        const matchesPlan = planFilter === "all" || (c.plan_tier || "").toLowerCase() === planFilter.toLowerCase();
+        return matchesQuery && matchesPlan;
+      });
+
+      let rowsHtml = "";
+      if (filtered.length === 0) {
+        rowsHtml = `<tr><td colspan="8" class="text-center py-4 text-muted"><em>No client workspaces match the filter criteria.</em></td></tr>`;
+      } else {
+        filtered.forEach(c => {
+          const clientSlug = c.slug || c.client_slug || c.client_id || "stradit_india";
+          const clientName = c.name || c.client_name || clientSlug;
+          const legalName = c.legal_name || clientName;
+          const maxAccts = c.max_accounts || 30;
+          const creditsTotal = (c.api_credits_total !== undefined && c.api_credits_total !== null) ? c.api_credits_total : 100000;
+          const creditsUsed = c.api_credits_used || 0;
+
+          const isCurrent = clientSlug === self.activeSlug;
+          const total = Math.max(creditsTotal, 1);
+          const pct = Math.min(Math.round((creditsUsed / total) * 100), 100);
+          const barColor = pct > 90 ? "bg-danger" : pct > 70 ? "bg-warning" : "bg-primary";
+
+          rowsHtml += `
+            <tr class="${isCurrent ? 'table-primary-subtle' : ''}">
+              <td style="padding:12px 14px;">
+                <div class="d-flex align-items-center gap-2">
+                  <div style="width:32px;height:32px;border-radius:8px;background:#F3E7DA;display:flex;align-items:center;justify-content:center;color:#8A6248;font-weight:700;font-size:0.8rem;">
+                    ${(clientName || "C").substring(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <strong style="color:#0f172a;font-size:0.84rem;">${clientName}</strong>
+                    ${isCurrent ? '<span class="badge bg-primary ms-1" style="font-size:0.64rem;">Current</span>' : ''}
+                    <div style="font-size:0.71rem;color:#64748b;">${legalName}</div>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="d-flex align-items-center gap-1">
+                  <code>${c.schema_name || "client_" + clientSlug}</code>
+                  <a href="#" class="text-decoration-none ms-1" data-schema-health="${clientSlug}" title="View Schema Health Diagnostics">
+                    <span class="badge bg-success-subtle text-success" style="font-size:0.68rem;cursor:pointer;">
+                      <i class="bi bi-shield-check me-1"></i>16/16
+                    </span>
+                  </a>
+                </div>
+              </td>
+              <td>
+                <span class="badge ${c.plan_tier === 'enterprise' ? 'bg-primary-subtle text-primary' : 'bg-info-subtle text-info'} text-capitalize" style="font-size:0.72rem;font-weight:700;">
+                  ${c.plan_tier}
+                </span>
+              </td>
+              <td>
+                <button type="button" class="btn btn-link btn-xs p-0 text-decoration-none fw-semibold" data-client-accounts="${clientSlug}" title="Click to view client targets">
+                  <span class="badge bg-light text-dark border" style="font-size:0.74rem;">
+                    <i class="bi bi-crosshair me-1 text-primary"></i>${c.accounts_count || 0} / ${maxAccts}
+                  </span>
+                </button>
+              </td>
+              <td>
+                <button type="button" class="btn btn-xs btn-outline-secondary" data-client-users="${clientSlug}" title="Manage Client Users">
+                  <i class="bi bi-people-fill me-1 text-primary"></i>${c.users_count || 1}
+                </button>
+              </td>
+              <td style="min-width:140px;">
+                <div class="d-flex justify-content-between align-items-center mb-1" style="font-size:0.72rem;">
+                  <span><strong>${creditsUsed.toLocaleString()}</strong> / ${creditsTotal.toLocaleString()}</span>
+                  <a href="#" class="text-decoration-none text-warning fw-semibold ms-1" data-adjust-credits="${clientSlug}" title="Adjust Credits">
+                    <i class="bi bi-pencil-fill" style="font-size:0.65rem;"></i>
+                  </a>
+                </div>
+                <div class="progress" style="height:5px;border-radius:4px;background:#e2e8f0;">
+                  <div class="progress-bar ${barColor}" style="width:${pct}%;"></div>
+                </div>
+              </td>
+              <td>
+                <span class="badge ${c.is_active ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'}" style="font-size:0.7rem;">
+                  ${c.is_active ? 'Active' : 'Deactivated'}
+                </span>
+              </td>
+              <td style="text-align:right;white-space:nowrap;padding-right:14px;">
+                <div class="btn-group btn-group-xs">
+                  ${!isCurrent ? `
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-client-switch="${clientSlug}" data-bs-dismiss="modal" title="Switch to this Workspace">
+                      <i class="bi bi-box-arrow-in-right me-1"></i> Switch
+                    </button>` : `
+                    <button type="button" class="btn btn-sm btn-light text-primary fw-semibold" disabled>
+                      <i class="bi bi-check-circle-fill me-1"></i> Active
+                    </button>
+                  `}
+                  <button type="button" class="btn btn-sm btn-outline-secondary" data-edit-client="${clientSlug}" title="Edit Organization & Quotas">
+                    <i class="bi bi-pencil"></i>
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-success" data-schema-health="${clientSlug}" title="Schema Health & Self-Healing">
+                    <i class="bi bi-shield-shaded"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>`;
+        });
+      }
+
+      $("#manageClientsTableBody").html(rowsHtml);
+    },
+
+    openEditClient: function (slug) {
+      const self = this;
+      const client = self.clients.find(c => c.slug === slug);
+      if (!client) return;
+
+      $("#editClientSlug").val(client.slug);
+      $("#editClientName").val(client.name || "");
+      $("#editClientLegalName").val(client.legal_name || client.name || "");
+      $("#editClientPlan").val(client.plan_tier || "enterprise");
+      $("#editClientMaxAccounts").val(client.max_accounts || 30);
+      $("#editClientIsActive").prop("checked", client.is_active !== false);
+      $("#editClientModalSubtitle").text(`Organization: ${client.name} (${client.schema_name})`);
+      $("#editClientErrorAlert").addClass("d-none").text("");
+
+      const modal = new bootstrap.Modal(document.getElementById("editClientModal"));
+      modal.show();
+    },
+
+    submitEditClient: async function () {
+      const self = this;
+      const slug = $("#editClientSlug").val();
+      const name = $("#editClientName").val().trim();
+      const legalName = $("#editClientLegalName").val().trim();
+      const plan = $("#editClientPlan").val();
+      const maxAccounts = parseInt($("#editClientMaxAccounts").val(), 10) || 30;
+      const isActive = $("#editClientIsActive").is(":checked");
+
+      if (!slug || !name) {
+        $("#editClientErrorAlert").removeClass("d-none").text("Please provide an organization name.");
+        return;
+      }
+
+      const $btn = $("#btnSubmitEditClient");
+      $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm me-1"></span> Saving...');
+
+      try {
+        const res = await fetch(`/api/clients/${slug}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name,
+            legal_name: legalName,
+            plan_tier: plan,
+            max_accounts: maxAccounts,
+            is_active: isActive,
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Server returned ${res.status}`);
+        }
+
+        $("#editClientModal").modal("hide");
+        if (typeof showToast === "function") {
+          showToast(`Client "${name}" settings updated successfully!`, "success");
+        }
+        await self.loadClients();
+        await self.loadKpis();
+        self.renderManageModal();
+      } catch (err) {
+        $("#editClientErrorAlert").removeClass("d-none").text(err.message || "Failed to update client.");
+      } finally {
+        $btn.prop("disabled", false).html('<i class="bi bi-check2 me-1"></i> Save Changes');
+      }
+    },
+
+    openSchemaDiagnostics: async function (slug) {
+      const self = this;
+      self.activeDiagnosticsSlug = slug;
+      const client = self.clients.find(c => c.slug === slug) || { name: slug, schema_name: `client_${slug}` };
+
+      $("#schemaDiagnosticsSubtitle").text(`Client: ${client.name} (${client.schema_name})`);
+      $("#schemaRepairFeedback").addClass("d-none").empty();
+      $("#schemaTablesTableBody").html(`<tr><td colspan="4" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div> Inspecting schema tables...</td></tr>`);
+
+      const modal = new bootstrap.Modal(document.getElementById("schemaDiagnosticsModal"));
+      modal.show();
+
+      try {
+        const res = await fetch(`/api/clients/${slug}/health`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // Update summary card
+        const isHealthy = data.is_healthy;
+        $("#schemaHealthSummaryCard")
+          .removeClass("bg-success-subtle bg-danger-subtle")
+          .addClass(isHealthy ? "bg-success-subtle" : "bg-danger-subtle");
+        $("#schemaHealthIcon")
+          .removeClass("bi-check-circle-fill bi-exclamation-triangle-fill text-success text-danger")
+          .addClass(isHealthy ? "bi-check-circle-fill text-success" : "bi-exclamation-triangle-fill text-danger");
+        $("#schemaHealthStatusText")
+          .text(isHealthy ? `100% Healthy — All ${data.tables_total} Schema Tables Verified` : `Schema Drift Detected (${data.tables_found}/${data.tables_total} Tables Found)`);
+        $("#schemaHealthMeta")
+          .html(`Total Records: <strong>${(data.total_rows || 0).toLocaleString()}</strong> &bull; Verified Tables: <strong>${data.tables_found || 0}/${data.tables_total || 0}</strong>`);
+
+        // Populate tables breakdown
+        let tblHtml = "";
+        const detail = data.tables_detail || {};
+        Object.keys(detail).forEach(tbl => {
+          const tInfo = detail[tbl];
+          tblHtml += `
+            <tr>
+              <td><code>${tbl}</code></td>
+              <td>
+                <span class="badge ${tInfo.exists ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'}">
+                  ${tInfo.exists ? 'Exists' : 'Missing'}
+                </span>
+              </td>
+              <td><strong>${(tInfo.rows || 0).toLocaleString()}</strong> rows</td>
+              <td class="text-muted">${tInfo.size || '0 kB'}</td>
+            </tr>`;
+        });
+        $("#schemaTablesTableBody").html(tblHtml);
+      } catch (err) {
+        $("#schemaTablesTableBody").html(`<tr><td colspan="4" class="text-danger py-2">Diagnostics error: ${err.message}</td></tr>`);
+      }
+    },
+
+    runSchemaRepair: async function (slug) {
+      const self = this;
+      const $btn = $("#btnRunSchemaRepair");
+      $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm me-1"></span> Repairing...');
+
+      try {
+        const res = await fetch(`/api/clients/${slug}/repair`, { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const rep = data.repair || {};
+
+        $("#schemaRepairFeedback")
+          .removeClass("d-none")
+          .html(`
+            <div class="alert alert-success py-2 mb-0" style="font-size:0.75rem;">
+              <i class="bi bi-check2-circle me-1"></i> Schema repair completed! Repaired tables: ${rep.repaired_tables?.length || 0}, Sequences: ${rep.repaired_sequences?.length || 0}.
+            </div>
+          `);
+
+        if (typeof showToast === "function") {
+          showToast(`Schema for ${slug} self-healed successfully!`, "success");
+        }
+        await self.openSchemaDiagnostics(slug);
+      } catch (err) {
+        $("#schemaRepairFeedback")
+          .removeClass("d-none")
+          .html(`<div class="alert alert-danger py-2 mb-0" style="font-size:0.75rem;">Repair failed: ${err.message}</div>`);
+      } finally {
+        $btn.prop("disabled", false).html('<i class="bi bi-tools me-1"></i> Verify &amp; Repair');
+      }
+    },
+
+    openAdjustCredits: function (slug) {
+      const self = this;
+      const client = self.clients.find(c => c.slug === slug);
+      if (!client) return;
+
+      $("#adjustCreditSlug").val(client.slug);
+      $("#adjustCreditCurrentAlloc").text(`${(client.api_credits_total || 0).toLocaleString()} cr`);
+      $("#adjustCreditCurrentUsed").text(`${(client.api_credits_used || 0).toLocaleString()} cr`);
+      const rem = Math.max((client.api_credits_total || 0) - (client.api_credits_used || 0), 0);
+      $("#adjustCreditCurrentRemaining").text(`${rem.toLocaleString()} cr`);
+      $("#adjustCreditsModalSubtitle").text(`Client: ${client.name} (${client.slug})`);
+      $("#adjustCreditErrorAlert").addClass("d-none").text("");
+      $("#adjustCreditAmount").val(50000);
+      $("#adjustCreditReason").val("Administrative budget top-up");
+
+      const modal = new bootstrap.Modal(document.getElementById("adjustCreditsModal"));
+      modal.show();
+    },
+
+    submitAdjustCredits: async function () {
+      const self = this;
+      const slug = $("#adjustCreditSlug").val();
+      const action = $("input[name='creditActionRadio']:checked").val() || "add";
+      const amount = parseInt($("#adjustCreditAmount").val(), 10);
+      const reason = $("#adjustCreditReason").val().trim();
+
+      if (!slug || isNaN(amount) || amount < 0) {
+        $("#adjustCreditErrorAlert").removeClass("d-none").text("Please specify a valid credit amount.");
+        return;
+      }
+
+      const $btn = $("#btnSubmitAdjustCredits");
+      $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm me-1"></span> Applying...');
+
+      try {
+        const res = await fetch(`/api/clients/${slug}/credits/adjust`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: amount, action: action, reason: reason })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Server returned ${res.status}`);
+        }
+
+        $("#adjustCreditsModal").modal("hide");
+        if (typeof showToast === "function") {
+          showToast(`Credit budget for "${slug}" updated successfully!`, "success");
+        }
+        await self.loadClients();
+        await self.loadKpis();
+        self.renderManageModal();
+      } catch (err) {
+        $("#adjustCreditErrorAlert").removeClass("d-none").text(err.message || "Failed to adjust credits.");
+      } finally {
+        $btn.prop("disabled", false).html('<i class="bi bi-coin me-1"></i> Apply Credits');
+      }
+    },
+
+    openClientAccounts: async function (slug) {
+      const self = this;
+      self.activeAccountsSlug = slug;
+      const client = self.clients.find(c => c.slug === slug) || { name: slug, schema_name: `client_${slug}` };
+
+      $("#clientAccountsModalSubtitle").text(`Client: ${client.name} (${client.schema_name})`);
+      $("#clientAccountsTableBody").html(`<tr><td colspan="5" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div> Loading client targets...</td></tr>`);
+
+      const modal = new bootstrap.Modal(document.getElementById("clientAccountsModal"));
+      modal.show();
+
+      try {
+        const res = await fetch(`/api/clients/${slug}/accounts`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const accounts = data.accounts || [];
+        $("#clientAccountsModalCount").text(accounts.length);
+
+        if (accounts.length === 0) {
+          $("#clientAccountsTableBody").html(`<tr><td colspan="5" class="text-center text-muted py-3"><em>No target accounts found in this client's schema.</em></td></tr>`);
+          return;
+        }
+
+        let html = "";
+        accounts.forEach(a => {
+          html += `
+            <tr>
+              <td>
+                <strong>${a.display_name}</strong>
+                <div style="font-size:0.7rem;color:#64748b;">${a.legal_name || a.display_name}</div>
+              </td>
+              <td><code>${a.primary_domain || '-'}</code></td>
+              <td><span class="badge bg-primary-subtle text-primary">${a.lobs_count || 0} LOBs</span></td>
+              <td><span class="badge bg-info-subtle text-info">${a.personas_count || 0} Contacts</span></td>
+              <td class="text-muted" style="font-size:0.72rem;">${a.created_at ? a.created_at.substring(0, 10) : '-'}</td>
+            </tr>`;
+        });
+        $("#clientAccountsTableBody").html(html);
+      } catch (err) {
+        $("#clientAccountsTableBody").html(`<tr><td colspan="5" class="text-danger py-2">Error loading accounts: ${err.message}</td></tr>`);
+      }
+    },
+
+    openClientUsers: async function (slug) {
+      const self = this;
+      self.activeUsersSlug = slug;
+      const client = self.clients.find(c => c.slug === slug) || { name: slug, slug: slug };
+
+      $("#clientUsersModalSubtitle").text(`Client: ${client.name} (${slug})`);
+      $("#clientUserErrorAlert").addClass("d-none").text("");
+      $("#clientUsersTableBody").html(`<tr><td colspan="4" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div> Loading workspace users...</td></tr>`);
+
+      const modal = new bootstrap.Modal(document.getElementById("clientUsersModal"));
+      modal.show();
+
+      // Load platform users for dropdown + assigned users for table in parallel
+      await Promise.all([
+        self.loadPlatformUsersDropdown(),
+        self.loadClientUsersList(slug)
+      ]);
+    },
+
+    loadPlatformUsersDropdown: async function () {
+      const self = this;
+      const $select = $("#newClientUserSelect");
+      $select.empty().append('<option value="" disabled selected>Loading registered platform users...</option>');
+
+      try {
+        const res = await fetch("/api/clients/platform-users");
+        if (res.ok) {
+          const data = await res.json();
+          self.platformUsers = data.users || [];
+          $select.empty().append('<option value="" disabled selected>Select registered platform user...</option>');
+          self.platformUsers.forEach(u => {
+            $select.append(`<option value="${u.id}">${u.full_name} (${u.email} &bull; ${u.role})</option>`);
+          });
+        }
+      } catch (err) {
+        $select.empty().append('<option value="" disabled>Could not load platform users</option>');
+      }
+    },
+
+    loadClientUsersList: async function (slug) {
+      const self = this;
+      try {
+        const res = await fetch(`/api/clients/${slug}/users`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const members = data.members || [];
+        $("#clientUsersCount").text(members.length);
+
+        if (members.length === 0) {
+          $("#clientUsersTableBody").html(`<tr><td colspan="4" class="text-center text-muted py-3"><em>No users assigned to this client organization yet.</em></td></tr>`);
+          return;
+        }
+
+        let html = "";
+        members.forEach(m => {
+          html += `
+            <tr>
+              <td>
+                <strong>${m.full_name || m.email}</strong>
+                <div style="font-size:0.7rem;color:#64748b;">${m.email} &bull; ID: ${m.user_id}</div>
+              </td>
+              <td><span class="badge bg-secondary-subtle text-secondary" style="font-size:0.7rem;">${m.platform_role}</span></td>
+              <td>
+                <select class="form-select form-select-xs client-user-role-select" data-user-id="${m.user_id}" style="font-size:0.75rem;padding:2px 6px;width:120px;border-radius:6px;">
+                  <option value="analyst" ${m.client_role === 'analyst' ? 'selected' : ''}>Analyst</option>
+                  <option value="client_admin" ${m.client_role === 'client_admin' ? 'selected' : ''}>Client Admin</option>
+                  <option value="viewer" ${m.client_role === 'viewer' ? 'selected' : ''}>Viewer</option>
+                </select>
+              </td>
+              <td style="text-align:right;">
+                <button type="button" class="btn btn-xs btn-outline-danger" data-revoke-user="${m.user_id}" data-client-slug="${slug}" title="Revoke access">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </td>
+            </tr>`;
+        });
+        $("#clientUsersTableBody").html(html);
+      } catch (err) {
+        $("#clientUsersTableBody").html(`<tr><td colspan="4" class="text-danger py-2">Error: ${err.message}</td></tr>`);
+      }
+    },
+
+    submitAddClientUser: async function () {
+      const self = this;
+      const slug = self.activeUsersSlug;
+      const userId = parseInt($("#newClientUserSelect").val(), 10);
+      const role = $("#newClientUserRole").val();
+
+      if (!slug || isNaN(userId)) {
+        $("#clientUserErrorAlert").removeClass("d-none").text("Please select a platform user from the dropdown.");
+        return;
+      }
+
+      const $btn = $("#btnSubmitAddClientUser");
+      $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm"></span>');
+      $("#clientUserErrorAlert").addClass("d-none").text("");
+
+      try {
+        const res = await fetch(`/api/clients/${slug}/users`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId, role: role })
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server returned ${res.status}`);
+        }
+        $("#newClientUserSelect").val("");
+        if (typeof showToast === "function") {
+          showToast(`User assigned successfully with role "${role}"!`, "success");
+        }
+        await self.loadClientUsersList(slug);
+        await self.loadClients();
+        self.renderManageModal();
+      } catch (err) {
+        $("#clientUserErrorAlert").removeClass("d-none").text(err.message || "Failed to assign user access.");
+      } finally {
+        $btn.prop("disabled", false).html('<i class="bi bi-check-lg"></i> Grant');
+      }
+    },
+
+    updateUserRole: async function (userId, role) {
+      const self = this;
+      const slug = self.activeUsersSlug;
+      if (!slug || !userId) return;
+
+      try {
+        const res = await fetch(`/api/clients/${slug}/users/${userId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: role })
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server returned ${res.status}`);
+        }
+        if (typeof showToast === "function") {
+          showToast(`Role updated to "${role}".`, "success");
+        }
+      } catch (err) {
+        alert(err.message || "Failed to update user role.");
+        await self.loadClientUsersList(slug);
+      }
+    },
+
+    revokeClientUser: async function (slug, userId) {
+      const self = this;
+      if (!confirm(`Are you sure you want to revoke workspace access for User ID ${userId}?`)) {
+        return;
+      }
+      try {
+        const res = await fetch(`/api/clients/${slug}/users/${userId}`, { method: "DELETE" });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server returned ${res.status}`);
+        }
+        if (typeof showToast === "function") {
+          showToast(`Access revoked for User ID ${userId}.`, "info");
+        }
+        await self.loadClientUsersList(slug);
+        await self.loadClients();
+        self.renderManageModal();
+      } catch (err) {
+        alert(err.message || "Failed to revoke user access.");
+      }
+    },
+
+    switchToClient: function (slug) {
+      const self = this;
+      self.activeSlug = slug;
+      if (typeof setActiveClientSlug === "function") {
+        setActiveClientSlug(slug);
+      } else {
+        sessionStorage.setItem("active_client_slug", slug);
+      }
+      sessionStorage.removeItem("pipeline_accounts_cache_v3");
+      sessionStorage.removeItem("pipeline_accounts_cache_v3_" + slug);
+      if (typeof showToast === "function") {
+        showToast(`Switched workspace to ${slug}. Loading tenant data...`, "info");
+      }
+      self.renderDropdowns();
+      if (typeof loadData === "function") {
+        MOCK_DATA = { accounts: [] };
+        activeAccount = null;
+        activeLob = null;
+        activePersona = null;
+        $("#accountList").html('<div class="spinner-wrap"><div class="spinner"></div></div>');
+        loadData(true);
+      } else {
+        window.location.reload();
+      }
+    },
+
+    submitAddClient: async function () {
+      const self = this;
+      const name = $("#newClientName").val().trim();
+      const slug = $("#newClientSlug").val().trim().toLowerCase();
+      const plan = $("#newClientPlan").val();
+      const maxAccounts = parseInt($("#newClientMaxAccounts").val(), 10) || 30;
+      const credits = parseInt($("#newClientCredits").val(), 10) || 100000;
+
+      if (!name || !slug) {
+        $("#addClientErrorAlert").removeClass("d-none").text("Please provide both a client name and workspace slug.");
+        return;
+      }
+
+      const btn = $("#btnSubmitAddClient");
+      btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm me-1"></span> Provisioning...');
+
+      try {
+        const res = await fetch("/api/clients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name,
+            slug: slug,
+            plan_tier: plan,
+            max_accounts: maxAccounts,
+            api_credits_total: credits,
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Server returned ${res.status}`);
+        }
+
+        const created = await res.json();
+        $("#addClientModal").modal("hide");
+        if (typeof showToast === "function") {
+          showToast(`Client "${name}" provisioned successfully with schema "${created.schema_name}"!`, "success");
+        }
+
+        await self.loadClients();
+        await self.loadKpis();
+        self.switchToClient(slug);
+      } catch (err) {
+        $("#addClientErrorAlert").removeClass("d-none").text(err.message || "Failed to provision client workspace.");
+      } finally {
+        btn.prop("disabled", false).html('<i class="bi bi-plus-circle me-1"></i> Provision Workspace');
+      }
+    }
+  };
+
+  window.ClientWorkspaceManager = ClientWorkspaceManager;
+
   // Initial load
+  ClientWorkspaceManager.init();
   loadData();
   initSpotlight();
 
@@ -1225,7 +2199,7 @@ $(function () {
     } else if (opts.url && value) {
       const normHref = normalizeUrl(String(value));
       const display = opts.urlLabel || (typeof value === "string" && value.length > 55 ? value.substring(0, 52) + "..." : value);
-      renderedValHtml = `<a href="${esc(normHref)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;font-weight:600;word-break:break-all;text-decoration:none;">${esc(display)} <i class="bi bi-box-arrow-up-right" style="font-size:.7rem;"></i></a>`;
+      renderedValHtml = `<a href="${esc(normHref)}" target="_blank" rel="noopener noreferrer" style="color:#8A6248;font-weight:600;word-break:break-all;text-decoration:none;">${esc(display)} <i class="bi bi-box-arrow-up-right" style="font-size:.7rem;"></i></a>`;
       rawValStr = String(value);
     } else if (opts.chips && Array.isArray(value)) {
       const maxInitial = opts.maxChips || (label.toLowerCase().includes("keyword") ? 6 : null);
@@ -1233,7 +2207,7 @@ $(function () {
         if (typeof v === 'object' && v !== null) {
           const mainText = v.name || v.title || v.label || v.term || v.company || Object.values(v)[0];
           const subText = v.relationship || v.domain || v.category || "";
-          return `<span class="data-tag" style="display:inline-flex;align-items:center;gap:4px;" title="${esc(JSON.stringify(v))}"><i class="bi bi-tag" style="font-size:0.65rem;color:#0284c7;"></i> ${esc(mainText)}${subText ? ` <span style="color:#64748b;font-size:0.68rem;">(${esc(subText)})</span>` : ''}</span>`;
+          return `<span class="data-tag" style="display:inline-flex;align-items:center;gap:4px;" title="${esc(JSON.stringify(v))}"><i class="bi bi-tag" style="font-size:0.65rem;color:#8A6248;"></i> ${esc(mainText)}${subText ? ` <span style="color:#64748b;font-size:0.68rem;">(${esc(subText)})</span>` : ''}</span>`;
         }
         return `<span class="data-tag">${esc(String(v))}</span>`;
       };
@@ -1249,7 +2223,7 @@ $(function () {
             <span class="chips-extra-container" style="display:none;gap:5px;flex-wrap:wrap;">
               ${hiddenChips}
             </span>
-            <button type="button" class="btn btn-sm btn-toggle-chips-expand" data-expanded="false" style="padding:2px 10px;font-size:0.72rem;border-radius:14px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;border:1px solid #cbd5e1;color:#0284c7;background:#f8fafc;font-weight:600;">
+            <button type="button" class="btn btn-sm btn-toggle-chips-expand" data-expanded="false" style="padding:2px 10px;font-size:0.72rem;border-radius:14px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;border:1px solid #cbd5e1;color:#8A6248;background:#f8fafc;font-weight:600;">
               <span>+${remainingCount} more</span> <i class="bi bi-chevron-down" style="font-size:0.68rem;"></i>
             </button>
           </div>
@@ -1390,7 +2364,7 @@ $(function () {
       return `
         <div class="lob-structured-card">
           <div class="lob-structured-header">
-            <span class="lob-structured-title"><i class="bi bi-patch-check" style="color:#0284c7;"></i> Intellectual Property &amp; Patents</span>
+            <span class="lob-structured-title"><i class="bi bi-patch-check" style="color:#8A6248;"></i> Intellectual Property &amp; Patents</span>
             <span class="badge" style="background:#f1f5f9;color:#64748b;">No Separate Patents</span>
           </div>
           <div style="color:#94a3b8;font-size:0.8rem;font-style:italic;">No dedicated patents registered directly under this operating division.</div>
@@ -1404,7 +2378,7 @@ $(function () {
     return `
       <div class="lob-structured-card">
         <div class="lob-structured-header">
-          <span class="lob-structured-title"><i class="bi bi-patch-check-fill" style="color:#0284c7;"></i> Intellectual Property &amp; Patent Portfolio</span>
+          <span class="lob-structured-title"><i class="bi bi-patch-check-fill" style="color:#8A6248;"></i> Intellectual Property &amp; Patent Portfolio</span>
           <span class="badge-solid-green">${esc(status)}</span>
         </div>
         <div class="lob-disclosure-grid">
@@ -1474,7 +2448,7 @@ $(function () {
             <div class="lob-disclosure-cell" style="grid-column: span 2;">
               <div class="lob-disclosure-label">REGISTERED LEI IDENTIFIER</div>
               <div class="lob-disclosure-val">
-                <a href="https://search.gleif.org/#/record/${esc(lei)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:none;font-family:monospace;">
+                <a href="https://search.gleif.org/#/record/${esc(lei)}" target="_blank" rel="noopener noreferrer" style="color:#8A6248;text-decoration:none;font-family:monospace;">
                   ${esc(lei)} <i class="bi bi-box-arrow-up-right" style="font-size:0.7rem;"></i>
                 </a>
               </div>
@@ -1523,7 +2497,7 @@ $(function () {
           <div class="section-title-row">
             <div class="section-title-left">
               <span class="section-title-dot"></span>
-              <i class="bi bi-shield-shaded" style="color:#0284c7;"></i>
+              <i class="bi bi-shield-shaded" style="color:#8A6248;"></i>
               <span>${sectionPrefix}Direct Peer Competitors &amp; Market Alternatives</span>
             </div>
             <span class="badge" style="background:#f1f5f9;color:#64748b;">None Tracked</span>
@@ -1538,10 +2512,10 @@ $(function () {
         <div class="section-title-row" style="margin-bottom:10px;">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-shield-shaded" style="color:#0284c7;"></i>
+            <i class="bi bi-shield-shaded" style="color:#8A6248;"></i>
             <span>${sectionPrefix}Direct Peer Competitors &amp; Market Alternatives</span>
           </div>
-          <span class="badge" style="background:#e0f2fe;color:#0369a1;font-weight:700;padding:2px 8px;font-size:0.72rem;">${list.length} Peers Tracked</span>
+          <span class="badge" style="background:#F3E7DA;color:#4A3528;font-weight:700;padding:2px 8px;font-size:0.72rem;">${list.length} Peers Tracked</span>
         </div>
 
         <div class="competitor-horizontal-grid">
@@ -1582,7 +2556,7 @@ $(function () {
               <div class="competitor-compact-card">
                 <div class="competitor-card-head">
                   <div class="competitor-card-title">
-                    <i class="bi bi-shield-check" style="color:#0284c7;font-size:0.9rem;flex-shrink:0;"></i>
+                    <i class="bi bi-shield-check" style="color:#8A6248;font-size:0.9rem;flex-shrink:0;"></i>
                     <span class="competitor-card-name" title="${esc(name)}">${esc(name)}</span>
                   </div>
                   <span class="competitor-rel-badge" style="flex-shrink:0;">${esc(rel)}</span>
@@ -1625,7 +2599,7 @@ $(function () {
       return `
         <div class="lob-structured-card" style="grid-column: 1 / -1;">
           <div style="display:flex;align-items:center;gap:10px;padding:8px;color:#64748b;">
-            <i class="bi bi-info-circle-fill" style="color:#0284c7;font-size:1.1rem;"></i>
+            <i class="bi bi-info-circle-fill" style="color:#8A6248;font-size:1.1rem;"></i>
             <div>
               <div style="font-weight:600;color:#334155;font-size:0.85rem;">No Direct Child Divisions Registered</div>
               <div style="font-size:0.75rem;margin-top:2px;">This operating division operates as a direct consolidated unit without secondary nested subsidiaries under the current corporate registry filing.</div>
@@ -1667,7 +2641,7 @@ $(function () {
                     <div class="sublob-meta-label">LEI CODE (GLEIF)</div>
                     <div class="sublob-meta-val">
                       ${lei ? `
-                        <a href="https://search.gleif.org/#/record/${esc(lei)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;font-family:monospace;" onclick="event.stopPropagation();">
+                        <a href="https://search.gleif.org/#/record/${esc(lei)}" target="_blank" rel="noopener noreferrer" style="color:#8A6248;font-family:monospace;" onclick="event.stopPropagation();">
                           ${esc(lei.length > 14 ? lei.substring(0, 12) + '...' : lei)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;"></i>
                         </a>
                       ` : '<span style="color:#94a3b8;">Pending LEI</span>'}
@@ -1765,7 +2739,7 @@ $(function () {
         <div class="hierarchy-explainer-text">
           <div class="hierarchy-explainer-title">
             <span>Corporate Ownership &amp; Subsidiary Hierarchy Explorer</span>
-            <span class="badge" style="background:#0284c7;color:#fff;font-size:0.68rem;font-weight:600;">GLEIF ISO 17442 &amp; SEC Exhibit 21</span>
+            <span class="badge" style="background:#8A6248;color:#fff;font-size:0.68rem;font-weight:600;">GLEIF ISO 17442 &amp; SEC Exhibit 21</span>
           </div>
           <p class="hierarchy-explainer-desc">
             GLEIF (Global Legal Entity Identifier Foundation) and SEC Form 10-K Exhibit 21 establish verified multi-jurisdictional legal entity ownership.
@@ -1773,10 +2747,10 @@ $(function () {
           </p>
           <div class="hierarchy-stats-bar">
             <span class="hierarchy-stat-chip"><i class="bi bi-shield-check" style="color:#059669;"></i> Parent LEI: <strong>${esc(parentLei)}</strong></span>
-            <span class="hierarchy-stat-chip"><i class="bi bi-diagram-2" style="color:#0284c7;"></i> <strong>${totalCount}</strong> Total Global Entities</span>
-            <span class="hierarchy-stat-chip"><i class="bi bi-building" style="color:#0ea5e9;"></i> <strong>${directCount}</strong> Direct LOBs</span>
+            <span class="hierarchy-stat-chip"><i class="bi bi-diagram-2" style="color:#8A6248;"></i> <strong>${totalCount}</strong> Total Global Entities</span>
+            <span class="hierarchy-stat-chip"><i class="bi bi-building" style="color:#8A6248;"></i> <strong>${directCount}</strong> Direct LOBs</span>
             <span class="hierarchy-stat-chip"><i class="bi bi-diagram-3" style="color:#d97706;"></i> <strong>${sublobCount}</strong> Operating Sub-LOBs</span>
-            <span class="hierarchy-stat-chip"><i class="bi bi-globe" style="color:#6366f1;"></i> <strong>${countries.length}</strong> Global Jurisdictions (${countries.slice(0, 6).join(", ")})</span>
+            <span class="hierarchy-stat-chip"><i class="bi bi-globe" style="color:#8A6248;"></i> <strong>${countries.length}</strong> Global Jurisdictions (${countries.slice(0, 6).join(", ")})</span>
             ${mappedCount > 0 ? `<span class="hierarchy-stat-chip" style="background:#ecfdf5;border-color:#a7f3d0;color:#047857;"><i class="bi bi-check-circle-fill"></i> <strong>${mappedCount}</strong> Mapped to Pipeline LOBs</span>` : ""}
           </div>
         </div>
@@ -1786,7 +2760,7 @@ $(function () {
       <div class="hierarchy-root-node">
         <div class="hierarchy-root-header">
           <div>
-            <div style="font-size:0.68rem;font-weight:700;color:#0284c7;letter-spacing:0.05em;text-transform:uppercase;">
+            <div style="font-size:0.68rem;font-weight:700;color:#8A6248;letter-spacing:0.05em;text-transform:uppercase;">
               <i class="bi bi-award-fill"></i> ULTIMATE PARENT HOLDING ENTITY (LEVEL 1)
             </div>
             <div class="hierarchy-root-title">
@@ -1796,7 +2770,7 @@ $(function () {
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span class="badge-solid-green">ACTIVE &amp; VERIFIED</span>
             <a href="https://search.gleif.org/#/record/${esc(parentLei)}" target="_blank" rel="noopener noreferrer" class="hierarchy-root-lei" title="View official GLEIF Golden Copy registry record">
-              <i class="bi bi-box-arrow-up-right" style="color:#0284c7;"></i> LEI: ${esc(parentLei)}
+              <i class="bi bi-box-arrow-up-right" style="color:#8A6248;"></i> LEI: ${esc(parentLei)}
             </a>
             <button type="button" class="btn btn-sm btn-light copy-lei-btn" data-lei="${esc(parentLei)}" title="Copy LEI to clipboard" style="font-size:0.7rem;padding:3px 8px;border:1px solid #cbd5e1;">
               <i class="bi bi-clipboard"></i> Copy
@@ -1861,7 +2835,7 @@ $(function () {
                       <i class="bi bi-diagram-3"></i> Level 3: Sub-LOB
                     </span>
                   ` : `
-                    <span class="jurisdiction-tag" style="background:#e0f2fe;color:#0284c7;font-weight:700;">
+                    <span class="jurisdiction-tag" style="background:#F3E7DA;color:#8A6248;font-weight:700;">
                       <i class="bi bi-building"></i> Level 2: Direct LOB
                     </span>
                   `}
@@ -1892,7 +2866,7 @@ $(function () {
       ${secSubs.length ? `
         <div style="margin-top:20px;padding-top:14px;border-top:1px solid #e2e8f0;">
           <div style="font-size:0.82rem;font-weight:700;color:#0f172a;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
-            <i class="bi bi-file-earmark-spreadsheet" style="color:#0284c7;"></i> SEC Form 10-K Exhibit 21 Disclosed Subsidiaries (${secSubs.length})
+            <i class="bi bi-file-earmark-spreadsheet" style="color:#8A6248;"></i> SEC Form 10-K Exhibit 21 Disclosed Subsidiaries (${secSubs.length})
           </div>
           <div class="subsidiaries-grid">
             ${secSubs.map(sub => `
@@ -1935,7 +2909,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-building" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-building" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>1. Corporate Identity &amp; Legal Registration</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -1959,7 +2933,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-geo-alt" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-geo-alt" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>2. Location &amp; Corporate Contact</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -1981,7 +2955,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-share" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-share" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>3. Social Media &amp; Developer Footprint</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2001,7 +2975,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-currency-dollar" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-currency-dollar" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>4. Financial Valuation &amp; Securities</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2026,7 +3000,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-shield-check" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-shield-check" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>5. Regulatory Compliance &amp; SEC EDGAR</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2044,7 +3018,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-cpu" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-cpu" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>6. Web Traffic, IT Spend &amp; IP Assets</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2069,7 +3043,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-broadcast" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-broadcast" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>7. 15 OSINT Scraping Launchpad Feeds</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2093,7 +3067,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-tags" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-tags" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>8. Industry Classifications &amp; Hierarchy Metrics</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2118,7 +3092,7 @@ $(function () {
           <div class="section-title-row">
             <div class="section-title-left">
               <span class="section-title-dot"></span>
-              <i class="bi bi-diagram-3-fill" style="color:#0284c7;font-size:0.95rem;"></i>
+              <i class="bi bi-diagram-3-fill" style="color:#8A6248;font-size:0.95rem;"></i>
               <span>9. Corporate Regulatory &amp; Legal Registry Summary</span>
             </div>
             <span class="section-subtitle-hint">GLEIF ISO 17442 &amp; SEC Form 10-K Exhibit 21</span>
@@ -2130,7 +3104,7 @@ $(function () {
                 <span class="snapshot-field-label">ULTIMATE PARENT LEI</span>
               </div>
               <div class="snapshot-field-value">
-                <a href="https://search.gleif.org/#/record/${esc(account.organisational_hierarchy_tree.gleif_lei || account.sec_cik || '')}" target="_blank" style="color:#0284c7;text-decoration:none;">
+                <a href="https://search.gleif.org/#/record/${esc(account.organisational_hierarchy_tree.gleif_lei || account.sec_cik || '')}" target="_blank" style="color:#8A6248;text-decoration:none;">
                   ${esc(account.organisational_hierarchy_tree.gleif_lei || 'Verified in Registry')} <i class="bi bi-box-arrow-up-right" style="font-size:.7rem;"></i>
                 </a>
               </div>
@@ -2151,7 +3125,7 @@ $(function () {
               </div>
               <div class="snapshot-field-value">
                 ${account.sec_edgar_url ? `
-                  <a href="${esc(account.sec_edgar_url)}" target="_blank" style="color:#0284c7;text-decoration:none;">
+                  <a href="${esc(account.sec_edgar_url)}" target="_blank" style="color:#8A6248;text-decoration:none;">
                     SEC Form 10-K Exhibit 21 <i class="bi bi-box-arrow-up-right" style="font-size:.7rem;"></i>
                   </a>
                 ` : 'SEC Exhibit 21 Indexed'}
@@ -2161,10 +3135,10 @@ $(function () {
 
           <div style="margin-top:12px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:0.78rem;color:#64748b;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div>
-              <i class="bi bi-info-circle-fill" style="color:#0284c7;"></i>
+              <i class="bi bi-info-circle-fill" style="color:#8A6248;"></i>
               Active operating business units, divisional heads, and technology stacks are organized under the <strong>Lines of Business (${(account.lobs || []).length})</strong> tab.
             </div>
-            <button type="button" class="crumb-lobs" style="font-size:0.74rem;padding:4px 12px;background:#0284c7;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+            <button type="button" class="crumb-lobs" style="font-size:0.74rem;padding:4px 12px;background:#8A6248;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
               Explore ${(account.lobs || []).length} Operating LOBs &rarr;
             </button>
           </div>
@@ -2184,7 +3158,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-building" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-building" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>1. Corporate Identity &amp; Legal Structure</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2208,7 +3182,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-bar-chart" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-bar-chart" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>2. Financial Metrics &amp; Executive Leadership</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2225,7 +3199,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-cpu" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-cpu" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>3. Technology Stack &amp; Infrastructure</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2243,7 +3217,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-journal-text" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-journal-text" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>5. Patents &amp; Financial Disclosures</span>
           </div>
           <span class="section-subtitle-hint">Regulatory Disclosures &amp; IP Holdings</span>
@@ -2259,7 +3233,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-broadcast-pin" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-broadcast-pin" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>6. OSINT Stream Feed Endpoints &amp; Tracking Queries</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to configure stream endpoints inline</span>
@@ -2354,7 +3328,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-person-vcard" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-person-vcard" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>1. Executive Profile &amp; Demographics</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2375,7 +3349,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-envelope" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-envelope" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>2. Verified Contact Coordinates</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2398,7 +3372,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-briefcase" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-briefcase" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>3. Career &amp; Employment History</span>
           </div>
           <span class="section-subtitle-hint">Executive Career Journey &amp; Corporate Background</span>
@@ -2420,7 +3394,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-mortarboard" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-mortarboard" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>4. Academic Background &amp; Education Credentials</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2437,7 +3411,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-stars" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-stars" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>5. AI Sales Dossier &amp; Behavioral Tone</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2457,7 +3431,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-bullseye" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-bullseye" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>6. Skills, Operational Pain Points &amp; Buying Authority</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline</span>
@@ -2478,7 +3452,7 @@ $(function () {
         <div class="section-title-row">
           <div class="section-title-left">
             <span class="section-title-dot"></span>
-            <i class="bi bi-shield-check" style="color:#0284c7;font-size:0.95rem;"></i>
+            <i class="bi bi-shield-check" style="color:#8A6248;font-size:0.95rem;"></i>
             <span>7. Verified Executive Intelligence (${activeStreams.length} Active Streams)</span>
           </div>
           <span class="section-subtitle-hint">Click pencil icon to edit inline &bull; Verified live feeds</span>
@@ -2492,7 +3466,7 @@ $(function () {
         ${activeStreams.length > 0 ? `
           <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-              <span style="font-size:0.75rem;font-weight:700;color:#0284c7;text-transform:uppercase;letter-spacing:0.5px;">
+              <span style="font-size:0.75rem;font-weight:700;color:#8A6248;text-transform:uppercase;letter-spacing:0.5px;">
                 <i class="bi bi-cpu-fill"></i> Active OSINT Streams Manifest (${activeStreams.length} verified channels)
               </span>
               <span style="font-size:0.68rem;color:#64748b;">Key: ${esc(p.osint_feed_manifest && p.osint_feed_manifest.key ? p.osint_feed_manifest.key : (p.key || ''))}</span>
@@ -2501,7 +3475,7 @@ $(function () {
               ${activeStreams.map(s => {
                 const badgeClass = s.isBespoke ? 'badge-solid-purple' : s.isManifest ? 'badge-solid-blue' : 'badge-solid-green';
                 const iconClass  = s.isBespoke ? 'bi-patch-check-fill' : s.isManifest ? 'bi-rss-fill' : 'bi-check-circle-fill';
-                const iconColor  = s.isBespoke ? '#a855f7' : s.isManifest ? '#0284c7' : '#10b981';
+                const iconColor  = s.isBespoke ? '#B88A64' : s.isManifest ? '#8A6248' : '#10b981';
                 return `
                 <a href="${esc(normalizeUrl(String(s.val)))}" target="_blank" rel="noopener noreferrer"
                    class="${badgeClass}"
@@ -2524,7 +3498,7 @@ $(function () {
           <div class="section-title-row">
             <div class="section-title-left">
               <span class="section-title-dot"></span>
-              <i class="bi bi-code-square" style="color:#0284c7;font-size:0.95rem;"></i>
+              <i class="bi bi-code-square" style="color:#8A6248;font-size:0.95rem;"></i>
               <span>8. Ingestion Audit Payload (JSON)</span>
             </div>
             <span class="section-subtitle-hint">Technical Ingestion Audit</span>
@@ -2955,13 +3929,13 @@ $(function () {
     // Taxonomy Category Badge Colors & Iconography
     const TAXONOMY_CONFIG = {
       "Commercial brand/platform": { color: "#059669", bg: "#ecfdf5", border: "#a7f3d0", label: "Commercial Platform", icon: "bi-stars" },
-      "Acquired operating company": { color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", label: "Acquired Brand / OpCo", icon: "bi-building-up" },
-      "Regulated advisory entity": { color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe", label: "Regulated Advisor", icon: "bi-shield-check" },
-      "Regional operating company": { color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc", label: "Regional OpCo", icon: "bi-globe" },
+      "Acquired operating company": { color: "#4A3528", bg: "#F3E7DA", border: "#F3E7DA", label: "Acquired Brand / OpCo", icon: "bi-building-up" },
+      "Regulated advisory entity": { color: "#4A3528", bg: "#F3E7DA", border: "#D3C2B1", label: "Regulated Advisor", icon: "bi-shield-check" },
+      "Regional operating company": { color: "#8A6248", bg: "#F3ECE2", border: "#F3E7DA", label: "Regional OpCo", icon: "bi-globe" },
       "Holding company": { color: "#d97706", bg: "#fffbeb", border: "#fde68a", label: "Holding Company", icon: "bi-layers" },
       "Financing entity/SPV": { color: "#ea580c", bg: "#fff7ed", border: "#fed7aa", label: "Financing / SPV", icon: "bi-bank" },
       "Legal subsidiary": { color: "#475569", bg: "#f8fafc", border: "#e2e8f0", label: "Legal Subsidiary", icon: "bi-briefcase" },
-      "Fund/GP structure": { color: "#4f46e5", bg: "#eef2ff", border: "#c7d2fe", label: "Fund / GP Structure", icon: "bi-diagram-3" },
+      "Fund/GP structure": { color: "#4A3528", bg: "#F3E7DA", border: "#D3C2B1", label: "Fund / GP Structure", icon: "bi-diagram-3" },
       "Unclassified - Requires Review": { color: "#64748b", bg: "#f1f5f9", border: "#cbd5e1", label: "Requires Review", icon: "bi-question-circle" }
     };
 
@@ -2989,7 +3963,7 @@ $(function () {
     let filterHtml = `
       <div class="lob-taxonomy-filter-bar" style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
         <span style="font-size:0.75rem;font-weight:700;color:#64748b;margin-right:4px;text-transform:uppercase;letter-spacing:0.5px;">Taxonomy:</span>
-        <button type="button" class="btn-lob-filter active" data-category="ALL" style="background:#0284c7;color:#fff;border:1px solid #0284c7;font-size:0.75rem;font-weight:600;padding:4px 12px;border-radius:14px;cursor:pointer;transition:all .15s ease;">
+        <button type="button" class="btn-lob-filter active" data-category="ALL" style="background:#8A6248;color:#fff;border:1px solid #8A6248;font-size:0.75rem;font-weight:600;padding:4px 12px;border-radius:14px;cursor:pointer;transition:all .15s ease;">
           All (${lobs.length})
         </button>
     `;
@@ -3036,7 +4010,7 @@ $(function () {
                 <span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:0.68rem;font-weight:700;background:${cfg.bg};color:${cfg.color};border:1px solid ${cfg.border};line-height:1.2;">
                   ${esc(cfg.label)}
                 </span>
-                ${lob.revenue ? `<span style="font-size:0.7rem;color:#0284c7;font-weight:600;">${esc(lob.revenue)}</span>` : ''}
+                ${lob.revenue ? `<span style="font-size:0.7rem;color:#8A6248;font-weight:600;">${esc(lob.revenue)}</span>` : ''}
                 ${(lob.status === 'partial_fault' || (lob._validation_audit && lob._validation_audit.status === 'partial_fault')) ? `
                   <span class="badge" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;font-size:0.65rem;padding:2px 6px;border-radius:4px;display:inline-flex;align-items:center;gap:3px;" title="Degraded connector harvest: Click to self-heal or re-enrich">
                     <i class="bi bi-exclamation-triangle-fill" style="font-size:0.65rem;"></i> Partial Fault
@@ -3052,7 +4026,7 @@ $(function () {
         const extraCount = filteredLobs.length - limit;
         $container.after(`
           <div class="lob-toggle-footer" style="grid-column: 1 / -1; width: 100%; text-align: center; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
-            <button type="button" class="btn-toggle-lobs-expand" data-expanded="false" style="background:#f8fafc;border:1px solid #cbd5e1;color:#0284c7;font-size:0.8rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:6px 16px;border-radius:20px;transition:all .15s ease;">
+            <button type="button" class="btn-toggle-lobs-expand" data-expanded="false" style="background:#f8fafc;border:1px solid #cbd5e1;color:#8A6248;font-size:0.8rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:6px 16px;border-radius:20px;transition:all .15s ease;">
               <span>View all ${filteredLobs.length} entities (+${extraCount} more)</span> <i class="bi bi-chevron-down" style="font-size:0.75rem;"></i>
             </button>
           </div>
@@ -3067,7 +4041,7 @@ $(function () {
       const $btn = $(this);
       const cat = $btn.data("category");
       $("#lobSection").find(".btn-lob-filter").removeClass("active").css({ background: "#f8fafc", color: "#475569", borderColor: "#cbd5e1" });
-      $btn.addClass("active").css({ background: "#0284c7", color: "#fff", borderColor: "#0284c7" });
+      $btn.addClass("active").css({ background: "#8A6248", color: "#fff", borderColor: "#8A6248" });
       renderFilteredCards(cat);
     });
 
@@ -3158,7 +4132,7 @@ $(function () {
         <div class="completeness-left">
           <div class="completeness-heading">
             <span>DATA HEALTH &amp; COMPLETENESS</span>
-            <span style="font-size:0.75rem;font-weight:700;color:#0284c7;text-transform:none;letter-spacing:0;margin-left:6px;">
+            <span style="font-size:0.75rem;font-weight:700;color:#8A6248;text-transform:none;letter-spacing:0;margin-left:6px;">
               &bull; <strong>${comp.percentage}% Data Filled</strong> &bull; ${comp.populatedCount}/${comp.totalFields} Attributes &bull; ${comp.sourcesHit}/${comp.totalSources} Live Gateways
             </span>
           </div>
@@ -3188,7 +4162,7 @@ $(function () {
           <div class="completeness-left">
             <div class="completeness-heading">
               <span>DIVISION DATA HEALTH &amp; COMPLETENESS</span>
-              <span style="font-size:0.75rem;font-weight:700;color:#0284c7;text-transform:none;letter-spacing:0;margin-left:6px;">
+              <span style="font-size:0.75rem;font-weight:700;color:#8A6248;text-transform:none;letter-spacing:0;margin-left:6px;">
                 &bull; <strong>${comp.completenessPct}% Data Filled</strong> &bull; ${comp.populatedCount}/${comp.totalFields} Attributes &bull; ${comp.sourcesHit}/${comp.totalSources} Streams Active
               </span>
             </div>
@@ -3380,7 +4354,7 @@ $(function () {
       const extraCount = totalCount - 3;
       const toggleBtnHtml = extraCount > 0
         ? `<div class="activity-toggle-footer" style="padding-top:10px;border-top:1px dashed #e2e8f0;margin-top:10px;text-align:center;">
-             <button type="button" class="btn-toggle-activity-expand" data-expanded="${wasExpanded ? 'true' : 'false'}" style="background:none;border:none;color:#0284c7;font-size:0.78rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:6px;transition:all .15s ease;">
+             <button type="button" class="btn-toggle-activity-expand" data-expanded="${wasExpanded ? 'true' : 'false'}" style="background:none;border:none;color:#8A6248;font-size:0.78rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:6px;transition:all .15s ease;">
                ${wasExpanded 
                  ? `<span>Show latest 3 only</span> <i class="bi bi-chevron-up" style="font-size:0.72rem;"></i>`
                  : `<span>View full run history (${extraCount} more)</span> <i class="bi bi-chevron-down" style="font-size:0.72rem;"></i>`
@@ -3525,15 +4499,15 @@ $(function () {
               </div>
               <div class="activity-card-right">
                 <span class="activity-timestamp"><i class="bi bi-clock"></i> ${esc(ev.time)}</span>
-                <button type="button" class="btn btn-xs btn-outline-primary btn-run-credits" data-action="view-credits" title="View credits & API telemetry for this run" style="font-size:0.68rem;padding:2px 8px;border-radius:4px;color:#4f46e5;border:1px solid #c7d2fe;background:#eef2ff;display:inline-flex;align-items:center;gap:3px;cursor:pointer;">
-                  <i class="bi bi-lightning-charge-fill" style="color:#6366f1;"></i> <span>Credits</span>
+                <button type="button" class="btn btn-xs btn-outline-primary btn-run-credits" data-action="view-credits" title="View credits & API telemetry for this run" style="font-size:0.68rem;padding:2px 8px;border-radius:4px;color:#4A3528;border:1px solid #D3C2B1;background:#F3E7DA;display:inline-flex;align-items:center;gap:3px;cursor:pointer;">
+                  <i class="bi bi-lightning-charge-fill" style="color:#8A6248;"></i> <span>Credits</span>
                 </button>
               </div>
             </div>
           `;
         }).join("") + (hasExtraEvents ? `
           <div class="activity-toggle-footer" style="padding-top:10px;border-top:1px dashed #e2e8f0;margin-top:10px;text-align:center;">
-            <button type="button" class="btn-toggle-activity-expand" data-expanded="false" style="background:none;border:none;color:#0284c7;font-size:0.78rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:6px;transition:all .15s ease;">
+            <button type="button" class="btn-toggle-activity-expand" data-expanded="false" style="background:none;border:none;color:#8A6248;font-size:0.78rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:6px;transition:all .15s ease;">
               <span>View full run history (${extraEventsCount} more)</span> <i class="bi bi-chevron-down" style="font-size:0.72rem;"></i>
             </button>
           </div>
@@ -3546,10 +4520,10 @@ $(function () {
         
         <!-- Corporate Description & Executive Overview Horizontal Banner -->
         ${fullDesc !== "—" ? `
-        <div class="pipeline-section-card fade-in" style="margin-bottom:14px;padding:16px 20px;border-left:4px solid #0284c7;">
+        <div class="pipeline-section-card fade-in" style="margin-bottom:14px;padding:16px 20px;border-left:4px solid #8A6248;">
           <div class="section-title-row" style="margin-bottom:8px;">
             <div class="section-title-left">
-              <span class="section-title-dot" style="background:#0284c7;"></span>
+              <span class="section-title-dot" style="background:#8A6248;"></span>
               <span style="font-weight:700;font-size:0.85rem;color:#1e293b;letter-spacing:0.04em;">EXECUTIVE OVERVIEW</span>
             </div>
             <span class="section-subtitle-hint">Verified Corporate Synopsis</span>
@@ -3637,7 +4611,7 @@ $(function () {
               <div class="snapshot-field-value">
                 ${domain !== "—" ? `
                   <a href="${account.website_url || 'https://' + domain}" target="_blank" style="color:var(--text-primary);text-decoration:none;">
-                    ${esc(domain)} <i class="bi bi-box-arrow-up-right" style="font-size:.7rem;color:#0284c7;"></i>
+                    ${esc(domain)} <i class="bi bi-box-arrow-up-right" style="font-size:.7rem;color:#8A6248;"></i>
                   </a>
                 ` : `<span style="color:#94a3b8;">—</span>`}
               </div>
@@ -3701,7 +4675,7 @@ $(function () {
           </div>
 
           <div style="margin-top:10px;padding-top:8px;border-top:1px solid #f1f5f9;display:flex;justify-content:flex-end;">
-            <a href="javascript:void(0)" id="btnViewAllActiveFeeds" style="font-size:.74rem;color:#0284c7;text-decoration:none;font-weight:600;display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+            <a href="javascript:void(0)" id="btnViewAllActiveFeeds" style="font-size:.74rem;color:#8A6248;text-decoration:none;font-weight:600;display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
               View All OSINT Channels &rarr;
             </a>
           </div>
@@ -3716,8 +4690,8 @@ $(function () {
               <span class="badge-solid-gray" id="activityCountBadge" style="font-size:.68rem;padding:2px 7px;margin-left:6px;font-weight:600;">${timelineEvents.length} runs</span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
-              <button type="button" class="btn btn-xs btn-outline-primary" id="btnOpenCreditUsageModal" style="display:inline-flex;align-items:center;gap:5px;font-size:0.75rem;padding:3px 10px;border-radius:6px;font-weight:600;background:rgba(99,102,241,0.06);border-color:#6366f1;color:#4f46e5;cursor:pointer;">
-                <i class="bi bi-lightning-charge-fill" style="color:#6366f1;"></i> <span>Credits Usage</span>
+              <button type="button" class="btn btn-xs btn-outline-primary" id="btnOpenCreditUsageModal" style="display:inline-flex;align-items:center;gap:5px;font-size:0.75rem;padding:3px 10px;border-radius:6px;font-weight:600;background:rgba(99,102,241,0.06);border-color:#8A6248;color:#4A3528;cursor:pointer;">
+                <i class="bi bi-lightning-charge-fill" style="color:#8A6248;"></i> <span>Credits Usage</span>
               </button>
               <span class="section-subtitle-hint" id="activityShowingHint">Showing latest 3</span>
             </div>
@@ -3756,7 +4730,7 @@ $(function () {
           <div class="section-title-row">
             <div class="section-title-left">
               <span class="section-title-dot"></span>
-              <i class="bi bi-diagram-3-fill" style="color:#0284c7;font-size:0.95rem;"></i>
+              <i class="bi bi-diagram-3-fill" style="color:#8A6248;font-size:0.95rem;"></i>
               <span>Operating Sub-LOBs &amp; Child Divisions (${subLobs.length})</span>
             </div>
             <span class="section-subtitle-hint">Level 3 Grandchild Subsidiaries &amp; Specialized Operating Units</span>
@@ -4036,7 +5010,7 @@ $(function () {
                   <span class="snapshot-field-label">PARENT ACCOUNT</span>
                 </div>
                 <div class="snapshot-field-value">
-                  <a href="javascript:void(0)" class="crumb-account" style="color:#0284c7;text-decoration:none;">${esc(activeAccount.name)}</a>
+                  <a href="javascript:void(0)" class="crumb-account" style="color:#8A6248;text-decoration:none;">${esc(activeAccount.name)}</a>
                 </div>
               </div>
 
@@ -4126,10 +5100,10 @@ $(function () {
             <div class="section-title-row" style="margin-bottom:12px;">
               <div class="section-title-left">
                 <span class="section-title-dot"></span>
-                <i class="bi bi-broadcast-pin" style="color:#0284c7;font-size:0.95rem;"></i>
+                <i class="bi bi-broadcast-pin" style="color:#8A6248;font-size:0.95rem;"></i>
                 <span>Live OSINT &amp; Public Intelligence Streams</span>
               </div>
-              <span class="badge" style="background:#e0f2fe;color:#0369a1;font-weight:700;padding:3px 10px;font-size:0.72rem;border-radius:12px;">
+              <span class="badge" style="background:#F3E7DA;color:#4A3528;font-weight:700;padding:3px 10px;font-size:0.72rem;border-radius:12px;">
                 ${lobStreams.filter(s => s.active).length} of ${lobStreams.length} Verified Channels
               </span>
             </div>
@@ -4250,7 +5224,7 @@ $(function () {
                       title="Permanently delete this persona">
                 <i class="bi bi-trash3"></i> Delete
               </button>
-              <button type="button" class="action-btn-pill btn-persona-download-pdf" data-persona-id="${p.id}" style="background:#0284c7;color:#fff;border-color:#0284c7;display:inline-flex;align-items:center;gap:5px;font-weight:600;" title="Download full executive dossier as PDF">
+              <button type="button" class="action-btn-pill btn-persona-download-pdf" data-persona-id="${p.id}" style="background:#8A6248;color:#fff;border-color:#8A6248;display:inline-flex;align-items:center;gap:5px;font-weight:600;" title="Download full executive dossier as PDF">
                 <i class="bi bi-file-earmark-pdf-fill"></i> Download PDF
               </button>
             </div>
@@ -4579,8 +5553,12 @@ $(function () {
   }
 
   // ── Pipeline Overview Home Page Renderers (Reference Image 1 Layout) ──
-  function renderOverviewRunsTable(runs, filter) {
-    filter = filter || "all";
+  function renderOverviewRunsTable(runs, filter, accountFilter) {
+    filter = filter || window._activeHubRunFilter || "all";
+    accountFilter = accountFilter || window._activeHubAccountFilter || "all";
+    window._activeHubRunFilter = filter;
+    window._activeHubAccountFilter = accountFilter;
+
     const $tbody = $("#hubOverviewRunsBody");
     if (!$tbody.length) {
       console.warn("[renderOverviewRunsTable] #hubOverviewRunsBody not found in DOM");
@@ -4593,14 +5571,28 @@ $(function () {
     }
 
     let filtered = runs;
+    if (accountFilter && accountFilter !== "all") {
+      filtered = filtered.filter(r => {
+        if (r.account_id !== undefined && r.account_id !== null) {
+          return String(r.account_id) === String(accountFilter);
+        }
+        const targetAcct = (window._cachedClientAccounts || []).find(a => String(a.id) === String(accountFilter));
+        if (targetAcct && r.target) {
+          const tName = String(targetAcct.display_name || targetAcct.name || "").toLowerCase();
+          return String(r.target).toLowerCase().includes(tName);
+        }
+        return false;
+      });
+    }
+
     if (filter === "running") {
-      filtered = runs.filter(r => String(r.status).toLowerCase().includes("run"));
+      filtered = filtered.filter(r => String(r.status).toLowerCase().includes("run"));
     } else if (filter === "failed") {
-      filtered = runs.filter(r => String(r.status).toLowerCase().includes("fail") || String(r.status).toLowerCase().includes("err"));
+      filtered = filtered.filter(r => String(r.status).toLowerCase().includes("fail") || String(r.status).toLowerCase().includes("err"));
     }
 
     if (!filtered.length) {
-      $tbody.html(`<tr><td colspan="7" class="text-center py-4 text-muted">No runs matching filter "${esc(filter)}".</td></tr>`);
+      $tbody.html(`<tr><td colspan="7" class="text-center py-4 text-muted">No runs matching filter "${esc(filter)}" for selected account scope.</td></tr>`);
       return;
     }
 
@@ -4612,13 +5604,13 @@ $(function () {
       } else if (statusLower.includes("part")) {
         statusBadge = '<span class="badge" style="background:#fffbeb;color:#b45309;border:1px solid #fde68a;font-weight:700;font-size:0.72rem;padding:3px 8px;">partial</span>';
       } else if (statusLower.includes("run")) {
-        statusBadge = '<span class="badge" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-weight:700;font-size:0.72rem;padding:3px 8px;"><span class="spinner-grow spinner-grow-sm me-1" style="width:0.55rem;height:0.55rem;"></span>running</span>';
+        statusBadge = '<span class="badge" style="background:#F3E7DA;color:#2B241F;border:1px solid #D3C2B1;font-weight:700;font-size:0.72rem;padding:3px 8px;"><span class="spinner-grow spinner-grow-sm me-1" style="width:0.55rem;height:0.55rem;"></span>running</span>';
       }
 
       let triggerBadge = `<span class="badge" style="background:#f8fafc;color:#475569;border:1px solid #e2e8f0;font-size:0.7rem;font-weight:600;">${esc(r.trigger || "manual")}</span>`;
-      if (r.trigger === "news") triggerBadge = `<span class="badge" style="background:#f0f9ff;color:#0284c7;border:1px solid #bae6fd;font-size:0.7rem;font-weight:700;"><i class="bi bi-newspaper me-1"></i>news</span>`;
-      else if (r.trigger === "lob_batch") triggerBadge = `<span class="badge" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-size:0.7rem;font-weight:700;"><i class="bi bi-diagram-3 me-1"></i>lob_batch</span>`;
-      else if (r.trigger === "persona") triggerBadge = `<span class="badge" style="background:#faf5ff;color:#7e22ce;border:1px solid #e9d5ff;font-size:0.7rem;font-weight:700;"><i class="bi bi-person me-1"></i>persona</span>`;
+      if (r.trigger === "news") triggerBadge = `<span class="badge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.7rem;font-weight:700;"><i class="bi bi-newspaper me-1"></i>news</span>`;
+      else if (r.trigger === "lob_batch") triggerBadge = `<span class="badge" style="background:#F3E7DA;color:#2B241F;border:1px solid #D3C2B1;font-size:0.7rem;font-weight:700;"><i class="bi bi-diagram-3 me-1"></i>lob_batch</span>`;
+      else if (r.trigger === "persona") triggerBadge = `<span class="badge" style="background:#F3E7DA;color:#8A6248;border:1px solid #D3C2B1;font-size:0.7rem;font-weight:700;"><i class="bi bi-person me-1"></i>persona</span>`;
       else if (r.trigger === "retry") triggerBadge = `<span class="badge" style="background:#fffbeb;color:#b45309;border:1px solid #fde68a;font-size:0.7rem;font-weight:700;"><i class="bi bi-arrow-repeat me-1"></i>retry</span>`;
 
       // Channels Breakdown & Non-Wrapping Badge
@@ -4697,6 +5689,143 @@ $(function () {
   }
   window.renderOverviewRunsTable = renderOverviewRunsTable;
 
+  // ── Client Target Accounts Quick Launcher Grid ──
+  function renderHubTargetAccounts(accounts) {
+    const $grid = $("#hubTargetAccountsGrid");
+    if (!$grid.length) return;
+
+    if (!accounts || !accounts.length) {
+      $grid.html(`
+        <div style="grid-column: 1/-1;text-align:center;padding:32px 16px;background:#f8fafc;border-radius:10px;border:1px dashed #cbd5e1;color:#64748b;">
+          <i class="bi bi-buildings" style="font-size:2rem;color:#94a3b8;display:block;margin-bottom:8px;"></i>
+          <strong style="color:#0f172a;">No Target Accounts Enrolled in this Client Tenant</strong>
+          <div style="font-size:0.75rem;margin-top:4px;">Enroll your first enterprise account using the "New Target" button above.</div>
+        </div>
+      `);
+      $("#hubTargetAccountsBadgeCount").text("0 Targets");
+      return;
+    }
+
+    $("#hubTargetAccountsBadgeCount").text(`${accounts.length} Targets`);
+
+    const gradients = [
+      "linear-gradient(135deg, #4A3528, #8A6248)",
+      "linear-gradient(135deg, #8A6248, #B88A64)",
+      "linear-gradient(135deg, #2B241F, #4A3528)",
+      "linear-gradient(135deg, #4A3528, #B88A64)",
+      "linear-gradient(135deg, #8A6248, #2B241F)",
+      "linear-gradient(135deg, #B88A64, #8A6248)"
+    ];
+
+    const cardsHtml = accounts.map((a, idx) => {
+      const grad = gradients[idx % gradients.length];
+      const name = a.display_name || a.legal_name || a.name || "Enterprise Target";
+      const initials = name.split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase() || "TA";
+      const domain = a.primary_domain || "internal domain";
+      const lobs = a.lobs_count || 0;
+      const personas = a.personas_count || 0;
+      const score = Math.round(a.completeness_score || 85);
+      
+      let scoreColor = "#10b981";
+      let scoreBg = "linear-gradient(90deg, #10b981, #059669)";
+      if (score < 50) {
+        scoreColor = "#ef4444";
+        scoreBg = "linear-gradient(90deg, #ef4444, #dc2626)";
+      } else if (score < 80) {
+        scoreColor = "#f59e0b";
+        scoreBg = "linear-gradient(90deg, #f59e0b, #d97706)";
+      }
+
+      return `
+        <div class="hub-target-card" data-account-card-id="${a.id}">
+          <div>
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <div class="hub-target-card-avatar" style="background:${grad};">
+                  ${esc(initials)}
+                </div>
+                <div>
+                  <h4 style="font-size:0.92rem;font-weight:800;color:#0f172a;margin:0 0 2px 0;">${esc(name)}</h4>
+                  <div style="font-size:0.73rem;color:#64748b;display:flex;align-items:center;gap:4px;">
+                    <i class="bi bi-globe2" style="font-size:0.7rem;"></i> ${esc(domain)}
+                  </div>
+                </div>
+              </div>
+              <span class="badge" style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;font-size:0.68rem;font-weight:700;padding:3px 7px;">
+                Active
+              </span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap;">
+              <span class="hub-target-meta-pill">
+                <i class="bi bi-diagram-3 text-primary"></i> <strong>${lobs}</strong> LOBs
+              </span>
+              <span class="hub-target-meta-pill">
+                <i class="bi bi-people-fill text-indigo" style="color:#8A6248;"></i> <strong>${personas}</strong> Personas
+              </span>
+              <span class="hub-target-meta-pill" style="margin-left:auto;color:${scoreColor};font-weight:700;">
+                ${score}% Readiness
+              </span>
+            </div>
+
+            <div class="hub-target-progress-track">
+              <div class="hub-target-progress-fill" style="width:${score}%;background:${scoreBg};"></div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:8px;margin-top:4px;border-top:1px solid #f1f5f9;padding-top:12px;">
+            <button type="button" class="btn btn-sm btn-primary w-100 btn-hub-explore-acct" data-account-id="${a.id}" style="font-size:0.75rem;font-weight:700;border-radius:8px;padding:6px 12px;background:linear-gradient(135deg,#4A3528,#8A6248);color:#F3E7DA;border:1px solid #B88A64;">
+              Explore Intelligence <i class="bi bi-arrow-right ms-1"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary btn-hub-crawl-acct" data-account-id="${a.id}" title="Launch targeted scraper" style="font-size:0.75rem;font-weight:700;border-radius:8px;padding:6px 10px;background:#fff;border-color:#cbd5e1;">
+              <i class="bi bi-play-fill"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    $grid.html(cardsHtml);
+  }
+  window.renderHubTargetAccounts = renderHubTargetAccounts;
+
+  function populateHubRunsAccountFilter(accounts) {
+    const $select = $("#hubRunsAccountFilter");
+    if (!$select.length) return;
+    
+    let opts = `<option value="all">All Target Accounts (${accounts.length})</option>`;
+    accounts.forEach(a => {
+      opts += `<option value="${a.id}">${esc(a.display_name || a.name || 'Account ' + a.id)}</option>`;
+    });
+    $select.html(opts);
+    if (window._activeHubAccountFilter) {
+      $select.val(window._activeHubAccountFilter);
+    }
+  }
+  window.populateHubRunsAccountFilter = populateHubRunsAccountFilter;
+
+  function filterHubTargetAccounts(query) {
+    query = (query || "").trim().toLowerCase();
+    const cards = document.querySelectorAll("#hubTargetAccountsGrid .hub-target-card");
+    cards.forEach(c => {
+      const text = c.innerText.toLowerCase();
+      if (!query || text.includes(query)) {
+        c.style.display = "flex";
+      } else {
+        c.style.display = "none";
+      }
+    });
+  }
+  window.filterHubTargetAccounts = filterHubTargetAccounts;
+
+  function filterHubRunsByAccount(accountId) {
+    window._activeHubAccountFilter = accountId;
+    if (window._cachedPipelineOverview && window._cachedPipelineOverview.recent_runs) {
+      renderOverviewRunsTable(window._cachedPipelineOverview.recent_runs, window._activeHubRunFilter || "all", accountId);
+    }
+  }
+  window.filterHubRunsByAccount = filterHubRunsByAccount;
+
   function toggleRunChannelsDrawer(runId) {
     const $drawer = $(`#runChannelsDrawer_${runId}`);
     const $row = $(`#runRow_${runId}`);
@@ -4706,7 +5835,7 @@ $(function () {
       $row.css({ background: "", borderLeft: "" });
     } else {
       $drawer.show();
-      $row.css({ background: "#f8fafc", borderLeft: "3.5px solid #6366f1" });
+      $row.css({ background: "#f8fafc", borderLeft: "3.5px solid #8A6248" });
     }
   }
   window.toggleRunChannelsDrawer = toggleRunChannelsDrawer;
@@ -4884,19 +6013,19 @@ $(function () {
     // Update active tab buttons
     $(".hub-subnav-btn").removeClass("active").css({ background: "#fff", color: "#475569", borderColor: "#e2e8f0", boxShadow: "none" });
     if (_currentHubView === "overview") {
-      $("#hubTabOverviewBtn").addClass("active").css({ background: "#eef2ff", color: "#4338ca", borderColor: "#c7d2fe", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
+      $("#hubTabOverviewBtn").addClass("active").css({ background: "#F3E7DA", color: "#2B241F", borderColor: "#D3C2B1", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
       $("#hubViewOverview").show();
       $("#hubViewCrm").hide();
       $("#hubViewPeople").hide();
       renderEmptyStateHub();
     } else if (_currentHubView === "crm") {
-      $("#hubTabCrmBtn").addClass("active").css({ background: "#eef2ff", color: "#4338ca", borderColor: "#c7d2fe", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
+      $("#hubTabCrmBtn").addClass("active").css({ background: "#F3E7DA", color: "#2B241F", borderColor: "#D3C2B1", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
       $("#hubViewOverview").hide();
       $("#hubViewCrm").show();
       $("#hubViewPeople").hide();
       loadHubCrmView();
     } else if (_currentHubView === "people") {
-      $("#hubTabPeopleBtn").addClass("active").css({ background: "#eef2ff", color: "#4338ca", borderColor: "#c7d2fe", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
+      $("#hubTabPeopleBtn").addClass("active").css({ background: "#F3E7DA", color: "#2B241F", borderColor: "#D3C2B1", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
       $("#hubViewOverview").hide();
       $("#hubViewCrm").hide();
       $("#hubViewPeople").show();
@@ -4953,7 +6082,7 @@ $(function () {
             <div style="font-size:0.7rem;color:#94a3b8;">ID: #${it.id} &bull; ${it.channels_available} Connectors</div>
           </td>
           <td style="padding:12px 12px;">
-            <a href="https://${esc(it.domain)}" target="_blank" rel="noopener" style="color:#4f46e5;font-weight:600;text-decoration:none;">
+            <a href="https://${esc(it.domain)}" target="_blank" rel="noopener" style="color:#4A3528;font-weight:600;text-decoration:none;">
               <i class="bi bi-globe2 me-1"></i>${esc(it.domain)}
             </a>
           </td>
@@ -4963,14 +6092,14 @@ $(function () {
             </span>
           </td>
           <td style="padding:12px 12px;">
-            <span class="badge bg-purple-subtle text-purple border" style="background:#f3e8ff;color:#7e22ce;font-weight:700;font-size:0.75rem;">
+            <span class="badge border" style="background:#F3E7DA;color:#8A6248;border-color:#D3C2B1 !important;font-weight:700;font-size:0.75rem;">
               <i class="bi bi-people me-1"></i>${it.personas_count} Personas
             </span>
           </td>
           <td style="padding:12px 12px;">${statusBadge}</td>
           <td style="padding:12px 12px;color:#64748b;font-size:0.75rem;">${esc(lastScrapedStr)}</td>
           <td style="padding:12px 16px;text-align:right;white-space:nowrap;">
-            <button type="button" class="btn btn-sm btn-primary" style="font-weight:700;font-size:0.74rem;border-radius:6px;padding:5px 12px;background:linear-gradient(135deg,#6366f1,#4f46e5);border:none;color:#fff;" onclick="openAccountFromHub(${it.id}, 'lobs')">
+            <button type="button" class="btn btn-sm btn-primary" style="font-weight:700;font-size:0.74rem;border-radius:6px;padding:5px 12px;background:linear-gradient(135deg,#8A6248,#4A3528);border:none;color:#fff;" onclick="openAccountFromHub(${it.id}, 'lobs')">
               <i class="bi bi-diagram-3 me-1"></i>Explore LOBs
             </button>
             <button type="button" class="btn btn-sm btn-outline-secondary ms-1" style="font-weight:700;font-size:0.74rem;border-radius:6px;padding:5px 10px;" onclick="openAccountFromHub(${it.id}, 'overview')">
@@ -5159,7 +6288,7 @@ $(function () {
         badges.push('<span class="badge" style="background:#ff4500;color:#fff;font-size:0.67rem;padding:3px 7px;font-weight:700;border-radius:4px;"><i class="bi bi-reddit me-1"></i>reddit</span>');
       }
       if (ch.patents) {
-        badges.push('<span class="badge" style="background:#2563eb;color:#fff;font-size:0.67rem;padding:3px 7px;font-weight:700;border-radius:4px;"><i class="bi bi-patch-check me-1"></i>patents</span>');
+        badges.push('<span class="badge" style="background:#4A3528;color:#fff;font-size:0.67rem;padding:3px 7px;font-weight:700;border-radius:4px;"><i class="bi bi-patch-check me-1"></i>patents</span>');
       }
       if (ch.web) {
         badges.push('<span class="badge" style="background:#059669;color:#fff;font-size:0.67rem;padding:3px 7px;font-weight:700;border-radius:4px;"><i class="bi bi-globe me-1"></i>web</span>');
@@ -5198,7 +6327,7 @@ $(function () {
           <td style="padding:10px 12px;">${contactPills.join(" ")}</td>
           <td style="padding:10px 12px;white-space:nowrap;">${statusBadge}</td>
           <td style="padding:10px 16px;text-align:right;white-space:nowrap;">
-            <button type="button" class="btn btn-sm btn-primary" style="font-weight:700;font-size:0.73rem;border-radius:6px;padding:5px 12px;background:linear-gradient(135deg,#6366f1,#4f46e5);border:none;color:#fff;box-shadow:0 1px 2px rgba(99,102,241,0.25);" onclick="openPersonaFromHub(${p.account_id}, ${p.id})">
+            <button type="button" class="btn btn-sm btn-primary" style="font-weight:700;font-size:0.73rem;border-radius:6px;padding:5px 12px;background:linear-gradient(135deg,#8A6248,#4A3528);border:none;color:#fff;box-shadow:0 1px 2px rgba(99,102,241,0.25);" onclick="openPersonaFromHub(${p.account_id}, ${p.id})">
               <i class="bi bi-person-lines-fill me-1"></i>View Dossier
             </button>
           </td>
@@ -5280,15 +6409,43 @@ $(function () {
           $("#hubFunnelPostsVal").text((f.posts_stored || 0).toLocaleString());
           $("#hubFunnelDigestsVal").text(f.digests_count || 12);
 
-          // C. Client Workspace Context
+          // C. Client Workspace Context & Hero Card Population
           const cw = ov.client_workspace || {};
-          $("#hubActiveClientName").text(cw.client_name ? cw.client_name.split(" ")[0] : "Stradit");
-          $("#hubActiveClientBadge").text(`${cw.accounts_count || 6} Accounts`);
+          const clientName = cw.client_name || cw.legal_name || "Stradit India";
+          $("#hubHeroClientName").text(clientName);
+          $("#hubHeroPlanBadge").text(`${(cw.plan_tier || "enterprise").toUpperCase()} PLAN`);
+          $("#hubHeroSchemaBadge").text(cw.schema_name || `client_${cw.client_slug || "stradit_india"}`);
+          $("#hubHeroAccountsCount").text(cw.accounts_count !== undefined ? cw.accounts_count : 0);
+          $("#hubHeroMaxAccounts").text(cw.max_accounts || 50);
+          
+          const quotaPct = Math.min(100, Math.round(((cw.accounts_count || 0) / (cw.max_accounts || 50)) * 100));
+          $("#hubHeroQuotaBar").css("width", `${Math.max(5, quotaPct)}%`);
+          
+          const creditsRem = cw.api_credits_remaining !== undefined ? cw.api_credits_remaining : ((cw.api_credits_total || 100000) - (cw.api_credits_used || 0));
+          $("#hubHeroCreditsRemaining").text(Number(creditsRem).toLocaleString());
+          
+          const heroInitials = clientName.split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase() || "SI";
+          $("#hubHeroAvatar").text(heroInitials);
 
-          // D. Runs Console Execution Table
-          renderOverviewRunsTable(ov.recent_runs || []);
+          // Sub-nav badges
+          $("#hubCrmBadgeCount").text(cw.accounts_count !== undefined ? cw.accounts_count : (f.crm_backlog || 0));
+          $("#hubPeopleBadgeCount").text((f.tracked_people !== undefined ? f.tracked_people : 0).toLocaleString());
 
-          // E. Needs Attention Diagnostics Box
+          if (Array.isArray(cw.available_clients) && cw.available_clients.length > 0) {
+            ClientWorkspaceManager.clients = cw.available_clients;
+            ClientWorkspaceManager.renderDropdowns();
+          }
+
+          // D. Target Accounts Quick Launcher Grid
+          const clientAccounts = cw.accounts || [];
+          window._cachedClientAccounts = clientAccounts;
+          renderHubTargetAccounts(clientAccounts);
+          populateHubRunsAccountFilter(clientAccounts);
+
+          // E. Runs Console Execution Table
+          renderOverviewRunsTable(ov.recent_runs || [], window._activeHubRunFilter || "all", window._activeHubAccountFilter || "all");
+
+          // F. Needs Attention Diagnostics Box
           renderNeedsAttentionPanel(ov.needs_attention || []);
         }
       }
@@ -5723,7 +6880,7 @@ $(function () {
                 const rateCls = (t.rate || "").toLowerCase().includes("free") ? "rate-free" : "";
                 return `
                   <div class="hub-subtool-item">
-                    <span class="hub-subtool-name"><i class="bi bi-arrow-return-right" style="font-size:0.58rem;color:#0284c7;"></i> ${esc(t.name)}</span>
+                    <span class="hub-subtool-name"><i class="bi bi-arrow-return-right" style="font-size:0.58rem;color:#8A6248;"></i> ${esc(t.name)}</span>
                     <span class="hub-subtool-rate ${rateCls}">${esc(t.rate)}</span>
                     <span class="hub-subtool-desc" title="${esc(t.desc)}">${esc(t.desc)}</span>
                   </div>
@@ -5902,7 +7059,7 @@ $(function () {
                 <div style="font-size:0.68rem;color:#64748b;">${esc(r.company_name || '')}</div>
               </td>
               <td>${levelBadge}</td>
-              <td><span style="font-weight:700;color:#0284c7;">${score}</span> ${grade ? `<small>(${esc(grade)})</small>` : ''}</td>
+              <td><span style="font-weight:700;color:#8A6248;">${score}</span> ${grade ? `<small>(${esc(grade)})</small>` : ''}</td>
               <td><span style="font-weight:600;color:${r.total_credits_used > 0 ? '#b45309' : '#059669'};">${credits}</span></td>
               <td><span style="color:#64748b;">${timeStr}</span></td>
               <td><span class="hub-run-status-badge ${statusCls}"><i class="bi bi-circle-fill" style="font-size:0.5rem;"></i> ${esc(r.status || 'Done')}</span></td>
@@ -6292,8 +7449,8 @@ $(function () {
           <div class="drawer-ai-label" style="color:#059669;"><i class="bi bi-bullseye"></i> Tailored Value Proposition</div>
           <div class="drawer-ai-text">${esc(valueProp)}</div>
         </div>
-        <div class="drawer-ai-callout" style="border-left-color:#8b5cf6;margin-bottom:0;">
-          <div class="drawer-ai-label" style="color:#7c3aed;"><i class="bi bi-compass"></i> Strategic Priorities &amp; Decision Drivers</div>
+        <div class="drawer-ai-callout" style="border-left-color:#B88A64;margin-bottom:0;">
+          <div class="drawer-ai-label" style="color:#8A6248;"><i class="bi bi-compass"></i> Strategic Priorities &amp; Decision Drivers</div>
           <div class="drawer-ai-text">${esc(strategicAngle)}</div>
         </div>
       </div>
@@ -6307,13 +7464,13 @@ $(function () {
           <div class="drawer-field">
             <span class="drawer-field-label">Verified Work Email</span>
             <span class="drawer-field-val">
-              ${pEmail ? `<a href="mailto:${esc(pEmail)}" style="color:#0284c7;text-decoration:none;">${esc(pEmail)}</a>` : '<span style="color:#94a3b8;">Not captured</span>'}
+              ${pEmail ? `<a href="mailto:${esc(pEmail)}" style="color:#8A6248;text-decoration:none;">${esc(pEmail)}</a>` : '<span style="color:#94a3b8;">Not captured</span>'}
             </span>
           </div>
           <div class="drawer-field">
             <span class="drawer-field-label">Direct / Mobile Phone</span>
             <span class="drawer-field-val">
-              ${pPhone ? `<a href="tel:${esc(pPhone)}" style="color:#0284c7;text-decoration:none;">${esc(pPhone)}</a>` : '<span style="color:#94a3b8;">Not captured</span>'}
+              ${pPhone ? `<a href="tel:${esc(pPhone)}" style="color:#8A6248;text-decoration:none;">${esc(pPhone)}</a>` : '<span style="color:#94a3b8;">Not captured</span>'}
             </span>
           </div>
           <div class="drawer-field">
@@ -6938,7 +8095,7 @@ $(function () {
 
     function saveField() {
       const newVal = $input.val().trim();
-      $valContainer.html(`<span style="color:#0284c7;font-size:0.75rem;"><i class="bi bi-arrow-repeat spin"></i> Saving...</span>`);
+      $valContainer.html(`<span style="color:#8A6248;font-size:0.75rem;"><i class="bi bi-arrow-repeat spin"></i> Saving...</span>`);
 
       const payload = {};
       const intFields = [
@@ -7567,7 +8724,7 @@ $(function () {
                     background: var(--card-bg, #fff); border: 1px dashed var(--border, #cbd5e1);
                     border-radius: 12px; margin-top: 8px;">
           <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--badge-bg, #f1f5f9);
-                      display: inline-flex; align-items: center; justify-content: center; margin-bottom: 12px; color: var(--accent, #0ea5e9); font-size: 1.4rem;">
+                      display: inline-flex; align-items: center; justify-content: center; margin-bottom: 12px; color: var(--accent, #8A6248); font-size: 1.4rem;">
             <i class="bi bi-people"></i>
           </div>
           <div style="font-weight: 600; color: var(--text, #1e293b); font-size: 0.95rem; margin-bottom: 4px;">
@@ -8368,9 +9525,9 @@ $(function () {
                 <button type="button" class="feed-title-btn" data-platform="crunchbase"
                   data-title="Crunchbase Executive Profile" data-entity="${esc(p.name)}" data-url="${esc(p.crunchbase_url)}"
                   title="Click to view Crunchbase profile">
-                  <span class="feed-title"><i class="bi bi-briefcase-fill" style="color:#0284c7;"></i> Crunchbase <i class="bi bi-chevron-right" style="font-size:.7rem;margin-left:auto;"></i></span>
+                  <span class="feed-title"><i class="bi bi-briefcase-fill" style="color:#8A6248;"></i> Crunchbase <i class="bi bi-chevron-right" style="font-size:.7rem;margin-left:auto;"></i></span>
                 </button>
-                <a href="${esc(p.crunchbase_url)}" target="_blank" class="feed-right-icon-link" title="Open Crunchbase in new tab"><i class="bi bi-box-arrow-up-right" style="color:#0284c7;font-size:1.1rem;"></i></a>
+                <a href="${esc(p.crunchbase_url)}" target="_blank" class="feed-right-icon-link" title="Open Crunchbase in new tab"><i class="bi bi-box-arrow-up-right" style="color:#8A6248;font-size:1.1rem;"></i></a>
               </div>
             ` : ''}
 
@@ -8379,9 +9536,9 @@ $(function () {
                 <button type="button" class="feed-title-btn" data-platform="sec"
                   data-title="SEC Form 4 Insider Filings" data-entity="${esc(p.name)}" data-url="${esc(p.sec_insider_trades_url)}"
                   title="Click to view SEC EDGAR Form 4 filings">
-                  <span class="feed-title"><i class="bi bi-file-earmark-text-fill" style="color:#1e3a8a;"></i> SEC Form 4 <i class="bi bi-chevron-right" style="font-size:.7rem;margin-left:auto;"></i></span>
+                  <span class="feed-title"><i class="bi bi-file-earmark-text-fill" style="color:#8A6248;"></i> SEC Form 4 <i class="bi bi-chevron-right" style="font-size:.7rem;margin-left:auto;"></i></span>
                 </button>
-                <a href="${esc(p.sec_insider_trades_url)}" target="_blank" class="feed-right-icon-link" title="Open SEC Form 4 in new tab"><i class="bi bi-box-arrow-up-right" style="color:#1e3a8a;font-size:1.1rem;"></i></a>
+                <a href="${esc(p.sec_insider_trades_url)}" target="_blank" class="feed-right-icon-link" title="Open SEC Form 4 in new tab"><i class="bi bi-box-arrow-up-right" style="color:#8A6248;font-size:1.1rem;"></i></a>
               </div>
             ` : ''}
 
@@ -8401,9 +9558,9 @@ $(function () {
                 <button type="button" class="feed-title-btn" data-platform="quiver"
                   data-title="Quiver Quant Insider Net Worth" data-entity="${esc(p.name)}" data-url="${esc(p.quiver_insider_url)}"
                   title="Click to view Quiver Quantitative Insider data">
-                  <span class="feed-title"><i class="bi bi-graph-up" style="color:#6366f1;"></i> Quiver Quant <i class="bi bi-chevron-right" style="font-size:.7rem;margin-left:auto;"></i></span>
+                  <span class="feed-title"><i class="bi bi-graph-up" style="color:#8A6248;"></i> Quiver Quant <i class="bi bi-chevron-right" style="font-size:.7rem;margin-left:auto;"></i></span>
                 </button>
-                <a href="${esc(p.quiver_insider_url)}" target="_blank" class="feed-right-icon-link" title="Open Quiver Quant in new tab"><i class="bi bi-box-arrow-up-right" style="color:#6366f1;font-size:1.1rem;"></i></a>
+                <a href="${esc(p.quiver_insider_url)}" target="_blank" class="feed-right-icon-link" title="Open Quiver Quant in new tab"><i class="bi bi-box-arrow-up-right" style="color:#8A6248;font-size:1.1rem;"></i></a>
               </div>
             ` : ''}
 
@@ -8456,9 +9613,9 @@ $(function () {
                 <button type="button" class="feed-title-btn" data-platform="zoominfo"
                   data-title="ZoomInfo Contact Profile" data-entity="${esc(p.name)}" data-url="${esc(p.zoominfo_url)}"
                   title="Click to view ZoomInfo profile">
-                  <span class="feed-title"><i class="bi bi-telephone-fill" style="color:#2563eb;"></i> ZoomInfo Profile <i class="bi bi-chevron-right" style="font-size:.7rem;margin-left:auto;"></i></span>
+                  <span class="feed-title"><i class="bi bi-telephone-fill" style="color:#4A3528;"></i> ZoomInfo Profile <i class="bi bi-chevron-right" style="font-size:.7rem;margin-left:auto;"></i></span>
                 </button>
-                <a href="${esc(p.zoominfo_url)}" target="_blank" class="feed-right-icon-link" title="Open ZoomInfo in new tab"><i class="bi bi-box-arrow-up-right" style="color:#2563eb;font-size:1.1rem;"></i></a>
+                <a href="${esc(p.zoominfo_url)}" target="_blank" class="feed-right-icon-link" title="Open ZoomInfo in new tab"><i class="bi bi-box-arrow-up-right" style="color:#4A3528;font-size:1.1rem;"></i></a>
               </div>
             ` : ''}
 
@@ -9955,10 +11112,15 @@ $(function () {
       $btn.html('<i class="bi bi-hourglass-split"></i> Initializing Stub in DB...').prop("disabled", true);
     }
 
+    const chosenSlug = $("#newAccountClientSlug").val() || (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : "stradit_india");
+
     try {
+      const headers = { "Content-Type": "application/json" };
+      if (chosenSlug) headers["X-Client-Slug"] = chosenSlug;
+
       const res = await fetch(`${API_BASE}/api/account/create`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: headers,
         body: JSON.stringify({
           company_name: companyName,
           domain: domain || null,
@@ -9992,6 +11154,11 @@ $(function () {
         `✅ Account stub <strong>${esc(companyName)}</strong> created (ID: ${realId}). Ready for manual Pull.`,
         "success"
       );
+
+      if (chosenSlug && typeof getActiveClientSlug === "function" && chosenSlug !== getActiveClientSlug()) {
+        ClientWorkspaceManager.switchToClient(chosenSlug);
+        return;
+      }
 
       accountStagedData = null;
 
@@ -10044,14 +11211,14 @@ $(function () {
     showNotification(
       `<div id="${toastId}">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px;">
-          <span style="font-weight:700;color:#0369a1;font-size:0.86rem;">
+          <span style="font-weight:700;color:#4A3528;font-size:0.86rem;">
             <i class="bi bi-cpu"></i> Auto-Enriching ${esc(companyName)}
           </span>
           <span class="badge bg-primary" id="${toastId}_pct" style="font-size:0.75rem;padding:3px 8px;">15%</span>
         </div>
         <div class="progress" style="height:6px;background:#e2e8f0;border-radius:4px;overflow:hidden;margin-bottom:6px;">
           <div class="progress-bar progress-bar-striped progress-bar-animated" id="${toastId}_bar"
-               style="width:15%;background:linear-gradient(90deg,#0ea5e9,#6366f1);transition:width 0.4s ease;"></div>
+               style="width:15%;background:linear-gradient(90deg,#8A6248,#8A6248);transition:width 0.4s ease;"></div>
         </div>
         <div style="font-size:0.72rem;color:#64748b;line-height:1.3;" id="${toastId}_msg">
           Pre-flight verified (${estimatedCredits} cr reserved). Harvesting multi-source intelligence...
@@ -10194,6 +11361,7 @@ $(function () {
       .toLowerCase();
 
     const isAutoEnrich = $("#autoEnrichAccountToggle").is(":checked");
+    const chosenSlug = $("#newAccountClientSlug").val() || (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : "stradit_india");
 
     // Option A: Manual Stub Creation (when user unchecks auto-enrich)
     if (!isAutoEnrich) {
@@ -10207,9 +11375,12 @@ $(function () {
 
     try {
       // Step 1: Pre-Flight Resource & Credit Gatekeeper
+      const reqHeaders = { "Content-Type": "application/json" };
+      if (chosenSlug) reqHeaders["X-Client-Slug"] = chosenSlug;
+
       const preflightRes = await fetch(`${API_BASE}/api/account/preflight`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: reqHeaders,
         body: JSON.stringify({
           company_name: companyName,
           domain: domain || null,
@@ -10237,7 +11408,7 @@ $(function () {
         const activeListHtml = (preflight.active_sources || []).map(s =>
           `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:0.75rem;border-bottom:1px dashed #f1f5f9;">
             <span>${esc(s.name)}</span>
-            <span class="badge ${s.is_billable ? 'bg-indigo' : 'bg-secondary'}" style="${s.is_billable ? 'background:#6366f1;' : ''}">${s.is_billable ? s.credits_per_unit + ' cr' : 'Free / Public'}</span>
+            <span class="badge ${s.is_billable ? 'bg-indigo' : 'bg-secondary'}" style="${s.is_billable ? 'background:#8A6248;' : ''}">${s.is_billable ? s.credits_per_unit + ' cr' : 'Free / Public'}</span>
           </div>`
         ).join("");
 
@@ -10291,7 +11462,7 @@ $(function () {
 
       const autoRes = await fetch(`${API_BASE}/api/account/create-and-enrich`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: reqHeaders,
         body: JSON.stringify({
           company_name: companyName,
           domain: domain || null,
@@ -10802,7 +11973,7 @@ $(function () {
     const $verifyBtn = $("#modalVerifySubLobBtn");
 
     $body.html(`
-      <div style="text-align:center;padding:36px 20px;color:#0284c7;">
+      <div style="text-align:center;padding:36px 20px;color:#8A6248;">
         <i class="bi bi-arrow-repeat spin" style="font-size:2.2rem;"></i>
         <div style="margin-top:12px;font-weight:600;font-size:0.9rem;">Loading Verified Sub-LOB Dossier...</div>
       </div>
@@ -10866,7 +12037,7 @@ $(function () {
       <div style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid #e2e8f0;border-radius:10px;padding:16px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
         <div>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
-            <span class="badge" style="background:#e0f2fe;color:#0284c7;font-weight:700;"><i class="bi bi-diagram-3"></i> ${esc(entityLevel)}</span>
+            <span class="badge" style="background:#F3E7DA;color:#8A6248;font-weight:700;"><i class="bi bi-diagram-3"></i> ${esc(entityLevel)}</span>
             <span class="badge-solid-green">${esc(status)}</span>
             ${isVerified ? `<span class="badge" style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;"><i class="bi bi-check-circle-fill"></i> Manually Verified</span>` : `<span class="badge" style="background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;"><i class="bi bi-dash-circle"></i> AI Inferred</span>`}
           </div>
@@ -10911,7 +12082,7 @@ $(function () {
 
         <div class="sublob-detail-cell">
           <div class="sublob-detail-label">CONTROLLING PARENT LOB</div>
-          <div class="sublob-detail-value" style="color:#0284c7;display:flex;align-items:center;gap:5px;">
+          <div class="sublob-detail-value" style="color:#8A6248;display:flex;align-items:center;gap:5px;">
             <i class="bi bi-building"></i> ${esc(parentName)}
           </div>
         </div>
@@ -10920,7 +12091,7 @@ $(function () {
           <div class="sublob-detail-label">PARENT LOB LEI CODE</div>
           <div class="sublob-detail-value" style="font-family:monospace;">
             ${parentLei && parentLei !== '—' ? `
-              <a href="https://search.gleif.org/#/record/${esc(parentLei)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;">
+              <a href="https://search.gleif.org/#/record/${esc(parentLei)}" target="_blank" rel="noopener noreferrer" style="color:#8A6248;">
                 ${esc(parentLei)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;"></i>
               </a>
             ` : '—'}
@@ -10930,7 +12101,7 @@ $(function () {
         <div class="sublob-detail-cell">
           <div class="sublob-detail-label">DIGITAL DOMAIN</div>
           <div class="sublob-detail-value">
-            ${domain ? `<span style="color:#0284c7;"><i class="bi bi-globe"></i> ${esc(domain)}</span>` : '<span style="color:#94a3b8;">Inherited from parent LOB</span>'}
+            ${domain ? `<span style="color:#8A6248;"><i class="bi bi-globe"></i> ${esc(domain)}</span>` : '<span style="color:#94a3b8;">Inherited from parent LOB</span>'}
           </div>
         </div>
 
@@ -10938,7 +12109,7 @@ $(function () {
           <div class="sublob-detail-label">OFFICIAL WEBSITE URL</div>
           <div class="sublob-detail-value">
             ${website ? `
-              <a href="${esc(website)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;word-break:break-all;">
+              <a href="${esc(website)}" target="_blank" rel="noopener noreferrer" style="color:#8A6248;word-break:break-all;">
                 ${esc(website)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;"></i>
               </a>
             ` : '<span style="color:#94a3b8;">—</span>'}
@@ -11157,7 +12328,7 @@ $(function () {
               <div>
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                   <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:#0f172a;font-size:0.86rem;">
-                    <i class="bi ${ch.icon}" style="color:#0284c7;font-size:1rem;"></i>
+                    <i class="bi ${ch.icon}" style="color:#8A6248;font-size:1rem;"></i>
                     <span>${esc(ch.name)}</span>
                   </div>
                   <span class="${isActive ? 'badge-solid-green' : 'badge-solid-gray'}" style="font-size:0.65rem;padding:2px 7px;">
@@ -11165,7 +12336,7 @@ $(function () {
                   </span>
                 </div>
                 <div style="font-size:0.75rem;color:#64748b;word-break:break-all;">
-                  ${isActive ? `<a href="${esc(norm)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:none;">${esc(ch.url.length > 55 ? ch.url.substring(0, 52) + '...' : ch.url)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;"></i></a>` : '<span style="color:#94a3b8;font-style:italic;">No endpoint configured</span>'}
+                  ${isActive ? `<a href="${esc(norm)}" target="_blank" rel="noopener noreferrer" style="color:#8A6248;text-decoration:none;">${esc(ch.url.length > 55 ? ch.url.substring(0, 52) + '...' : ch.url)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;"></i></a>` : '<span style="color:#94a3b8;font-style:italic;">No endpoint configured</span>'}
                 </div>
               </div>
               <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:4px;">
@@ -11635,7 +12806,17 @@ $(function () {
 
     // Reset toolbar controls
     $("#batchSearchInput").val("");
-    $("#batchStatusFilter").val("pending");
+    let initStatus = "pending";
+    if (batchConsoleState.entityType === "account") {
+      initStatus = "all";
+    } else if (batchConsoleState.entityType === "lob") {
+      const pLobs = (targetAcct?.lobs || []).filter(l => !isLobItemEnriched(l)).length;
+      initStatus = pLobs > 0 ? "pending" : "all";
+    } else {
+      const pPersonas = (targetAcct?.personas || []).filter(p => !isPersonaItemEnriched(p)).length;
+      initStatus = pPersonas > 0 ? "pending" : "all";
+    }
+    $("#batchStatusFilter").val(initStatus);
     $("#batchTierFilter").val("all");
     $("#batchLiveProgressWrap").addClass("d-none");
     $("#batchStopBtn").addClass("d-none");
@@ -11659,6 +12840,7 @@ $(function () {
       screen: $("#batchScreenHistory").hasClass("d-none") ? "directory" : "history",
     });
   }
+  window.openBatchConsole = openBatchConsole;
 
   // Switch Entity Type inside the modal without closing it!
   function switchBatchEntity(newEntityType) {
@@ -11670,6 +12852,7 @@ $(function () {
       ? MOCK_DATA.accounts
       : [];
     let targetAcct = batchConsoleState.targetAccount || activeAccount || (acctsList.length ? acctsList[0] : null);
+    const acct = targetAcct;
 
     batchConsoleState.entityType = newEntityType;
     batchConsoleState.selectedKeys.clear();
@@ -11730,7 +12913,17 @@ $(function () {
 
     // Reset filters and table
     $("#batchSearchInput").val("");
-    $("#batchStatusFilter").val("pending");
+    let tabStatus = "pending";
+    if (newEntityType === "account") {
+      tabStatus = "all";
+    } else if (newEntityType === "lob") {
+      const pLobs = (acct?.lobs || []).filter(l => !isLobItemEnriched(l)).length;
+      tabStatus = pLobs > 0 ? "pending" : "all";
+    } else {
+      const pPersonas = (acct?.personas || []).filter(p => !isPersonaItemEnriched(p)).length;
+      tabStatus = pPersonas > 0 ? "pending" : "all";
+    }
+    $("#batchStatusFilter").val(tabStatus);
     $("#batchTierFilter").val("all");
     $("#batchLiveProgressWrap").addClass("d-none");
     $("#batchStopBtn").addClass("d-none");
@@ -11748,6 +12941,7 @@ $(function () {
       screen: $("#batchScreenHistory").hasClass("d-none") ? "directory" : "history",
     });
   }
+  window.openBatchConsole = openBatchConsole;
 
   // Close Batch Console Modal
   function closeBatchConsole() {
@@ -11888,6 +13082,11 @@ $(function () {
       $("#batchEntityAccountBadge").text(1);
       $("#batchEntityLobBadge").text(acct?.lobs?.length || 0);
       $("#batchEntityPersonaBadge").text(acct?.personas?.length || 0);
+    }
+
+    // If filtered by pending but no pending items exist, gracefully fallback to all
+    if ($("#batchStatusFilter").val() === "pending" && pendingCount === 0 && total > 0) {
+      $("#batchStatusFilter").val("all");
     }
 
     // Apply Filter Criteria
@@ -12141,7 +13340,7 @@ $(function () {
             data-account-name="${esc(item.legal_name || item.display_name || item.name || '')}"
             data-account-domain="${esc(item.primary_domain || item.domain || '')}"
             data-account-cik="${esc(item.sec_cik || '')}"
-            style="background:rgba(139,92,246,0.1);color:#8b5cf6;border:1px solid rgba(139,92,246,0.3);white-space:nowrap;"
+            style="background:rgba(139,92,246,0.1);color:#B88A64;border:1px solid rgba(139,92,246,0.3);white-space:nowrap;"
             title="Discover Executive Leadership & Contacts via Apollo, Corporate Web, and OSINT (4-tier hierarchy)">
             <i class="bi bi-people"></i> Discover People
           </button>
@@ -12204,7 +13403,7 @@ $(function () {
           ? `<div class="batch-source-chips">${sources.map(s => `<span class="batch-source-chip ${s.cls}">${esc(s.label)}</span>`).join('')}</div>`
           : `<span class="text-muted" style="font-size:0.68rem;">Pending Sources</span>`;
 
-        const fillBarColor = displayPct >= 70 ? "#10b981" : (displayPct >= 40 ? "#3b82f6" : "#f59e0b");
+        const fillBarColor = displayPct >= 70 ? "#10b981" : (displayPct >= 40 ? "#8A6248" : "#f59e0b");
         const dbColsHtml = `
           <div class="batch-db-cols-meter" title="${dbCols.filled} out of ${dbCols.total} DB columns populated | ${acctHealth?.populatedCount || 0}/${acctHealth?.totalFields || 45} Core Attributes (${displayPct}%)">
             <div class="batch-db-cols-text">
@@ -12304,7 +13503,7 @@ $(function () {
         ? `<div class="batch-source-chips">${sources.map(s => `<span class="batch-source-chip ${s.cls}">${esc(s.label)}</span>`).join('')}</div>`
         : `<span class="text-muted" style="font-size:0.68rem;">Pending Sources</span>`;
 
-      const fillBarColor = dbCols.pct >= 70 ? "#10b981" : (dbCols.pct >= 40 ? "#3b82f6" : "#f59e0b");
+      const fillBarColor = dbCols.pct >= 70 ? "#10b981" : (dbCols.pct >= 40 ? "#8A6248" : "#f59e0b");
       const dbColsHtml = `
         <div class="batch-db-cols-meter" title="${dbCols.filled} out of ${dbCols.total} database columns populated (${dbCols.pct}%)">
           <div class="batch-db-cols-text">
@@ -12607,7 +13806,7 @@ $(function () {
               );
             }
             const updatedCols = calculateDbColumnsFilled(item, "account");
-            const fillCol = updatedCols.pct >= 70 ? "#10b981" : (updatedCols.pct >= 40 ? "#3b82f6" : "#f59e0b");
+            const fillCol = updatedCols.pct >= 70 ? "#10b981" : (updatedCols.pct >= 40 ? "#8A6248" : "#f59e0b");
             $row.find(".batch-db-cols-meter").html(
               `<div class="batch-db-cols-text"><span>${updatedCols.filled}/${updatedCols.total} cols</span><span style="color:${fillCol};">${updatedCols.pct}%</span></div><div class="batch-db-cols-bar"><div class="batch-db-cols-fill" style="width:${updatedCols.pct}%;background:${fillCol};"></div></div>`
             );
@@ -12675,7 +13874,7 @@ $(function () {
 
           if ($row.length) {
             const updatedCols = calculateDbColumnsFilled(item, "persona");
-            const fillCol = updatedCols.pct >= 70 ? "#10b981" : (updatedCols.pct >= 40 ? "#3b82f6" : "#f59e0b");
+            const fillCol = updatedCols.pct >= 70 ? "#10b981" : (updatedCols.pct >= 40 ? "#8A6248" : "#f59e0b");
             $row.find(".batch-status-badge").replaceWith(
               `<span class="batch-status-badge batch-status-enriched"><i class="bi bi-check-circle-fill"></i> Enriched (${updatedCols.pct}%)</span>`
             );
@@ -12744,7 +13943,7 @@ $(function () {
 
           if ($row.length) {
             const updatedCols = calculateDbColumnsFilled(item, "lob");
-            const fillCol = updatedCols.pct >= 70 ? "#10b981" : (updatedCols.pct >= 40 ? "#3b82f6" : "#f59e0b");
+            const fillCol = updatedCols.pct >= 70 ? "#10b981" : (updatedCols.pct >= 40 ? "#8A6248" : "#f59e0b");
             $row.find(".batch-status-badge").replaceWith(
               `<span class="batch-status-badge batch-status-enriched"><i class="bi bi-check-circle-fill"></i> Enriched (${updatedCols.pct}%)</span>`
             );
@@ -12922,6 +14121,13 @@ $(function () {
     searchDebounceTimer = setTimeout(() => {
       refreshBatchConsole();
     }, 200);
+  });
+
+  $(document).on("click", "#batchResetFilterBtn", function () {
+    $("#batchSearchInput").val("");
+    $("#batchStatusFilter").val("all");
+    $("#batchTierFilter").val("all");
+    refreshBatchConsole();
   });
 
   $(document).on("change", "#batchStatusFilter, #batchTierFilter", function () {
@@ -13296,9 +14502,9 @@ $(function () {
       const isPersona = (r.pipeline_level === "persona" || (r.run_id && r.run_id.includes("_persona_")));
       const isLob = (r.pipeline_level === "lob" || (r.run_id && r.run_id.includes("_lob_")));
       const kindBadge = isPersona
-        ? '<span class="badge" style="background:rgba(99,102,241,0.12);color:#6366f1;font-weight:600;"><i class="bi bi-person-fill"></i> Person</span>'
+        ? '<span class="badge" style="background:rgba(99,102,241,0.12);color:#8A6248;font-weight:600;"><i class="bi bi-person-fill"></i> Person</span>'
         : (isLob
-          ? '<span class="badge" style="background:rgba(14,165,233,0.12);color:#0284c7;font-weight:600;"><i class="bi bi-diagram-3-fill"></i> LOB</span>'
+          ? '<span class="badge" style="background:rgba(14,165,233,0.12);color:#8A6248;font-weight:600;"><i class="bi bi-diagram-3-fill"></i> LOB</span>'
           : '<span class="badge" style="background:rgba(16,185,129,0.12);color:#059669;font-weight:600;"><i class="bi bi-building"></i> Account</span>');
 
       const targetName = r.entities_extracted?.full_name || r.entities_extracted?.lob_name || r.entities_extracted?.title || r.entities_extracted?.company || r.company_name || r.run_id;
@@ -13307,11 +14513,11 @@ $(function () {
       const act = (r.action || "").toLowerCase();
       let stepBadge = `<span class="badge bg-secondary-subtle text-secondary" style="font-weight:600;font-size:0.68rem;text-transform:uppercase;">${esc(act || 'RUN')}</span>`;
       if (act === "pull") {
-        stepBadge = '<span class="badge" style="background:rgba(99,102,241,0.15);color:#6366f1;font-weight:700;font-size:0.68rem;"><i class="bi bi-cloud-arrow-down"></i> PULL</span>';
+        stepBadge = '<span class="badge" style="background:rgba(99,102,241,0.15);color:#8A6248;font-weight:700;font-size:0.68rem;"><i class="bi bi-cloud-arrow-down"></i> PULL</span>';
       } else if (act === "auto_enrich_and_ingest") {
         stepBadge = '<span class="badge" style="background:rgba(16,185,129,0.15);color:#059669;font-weight:700;font-size:0.68rem;"><i class="bi bi-cpu-fill"></i> AUTO INGEST</span>';
       } else if (act === "dump") {
-        stepBadge = '<span class="badge" style="background:rgba(59,130,246,0.15);color:#2563eb;font-weight:700;font-size:0.68rem;"><i class="bi bi-database-check"></i> DB DUMP</span>';
+        stepBadge = '<span class="badge" style="background:rgba(59,130,246,0.15);color:#4A3528;font-weight:700;font-size:0.68rem;"><i class="bi bi-database-check"></i> DB DUMP</span>';
       } else if (act === "retry_failed_sources") {
         stepBadge = '<span class="badge" style="background:rgba(245,158,11,0.15);color:#d97706;font-weight:700;font-size:0.68rem;"><i class="bi bi-arrow-repeat"></i> RETRY</span>';
       } else if (act === "validate") {
@@ -13428,14 +14634,14 @@ $(function () {
       : '<span class="badge" style="background:rgba(16,185,129,0.12);color:#10b981;font-weight:700;"><i class="bi bi-check-circle-fill"></i> Succeeded (OK)</span>';
 
     const levelBadge = isPersona
-      ? '<span class="badge" style="background:rgba(99,102,241,0.12);color:#6366f1;font-weight:600;"><i class="bi bi-person-fill"></i> Persona</span>'
+      ? '<span class="badge" style="background:rgba(99,102,241,0.12);color:#8A6248;font-weight:600;"><i class="bi bi-person-fill"></i> Persona</span>'
       : (isLob
-        ? '<span class="badge" style="background:rgba(14,165,233,0.12);color:#0284c7;font-weight:600;"><i class="bi bi-diagram-3-fill"></i> LOB</span>'
+        ? '<span class="badge" style="background:rgba(14,165,233,0.12);color:#8A6248;font-weight:600;"><i class="bi bi-diagram-3-fill"></i> LOB</span>'
         : '<span class="badge" style="background:rgba(16,185,129,0.12);color:#059669;font-weight:600;"><i class="bi bi-building"></i> Account</span>');
 
     let actionBadge = `<span class="badge bg-secondary-subtle text-secondary-emphasis" style="font-weight:600;text-transform:uppercase;">${esc(run.action || "run")}</span>`;
     if (isDump) {
-      actionBadge = `<span class="badge" style="background:rgba(59,130,246,0.12);color:#2563eb;font-weight:600;"><i class="bi bi-database-check"></i> DB STORAGE COMMIT</span>`;
+      actionBadge = `<span class="badge" style="background:rgba(59,130,246,0.12);color:#4A3528;font-weight:600;"><i class="bi bi-database-check"></i> DB STORAGE COMMIT</span>`;
     } else if (isAuto) {
       actionBadge = `<span class="badge" style="background:rgba(16,185,129,0.12);color:#059669;font-weight:600;"><i class="bi bi-cpu-fill"></i> AUTO ENRICH &amp; INGEST</span>`;
     } else if (isSelectiveRetry) {
@@ -13568,7 +14774,7 @@ $(function () {
       if (isDump) {
         credHtml = `
           <div class="p-3 text-muted" style="font-size:0.80rem;background:rgba(59,130,246,0.04);border:1px dashed rgba(59,130,246,0.3);border-radius:8px;">
-            <div class="d-flex align-items-center gap-2 mb-1" style="color:#2563eb;font-weight:600;">
+            <div class="d-flex align-items-center gap-2 mb-1" style="color:#4A3528;font-weight:600;">
               <i class="bi bi-database-check"></i> Database Record Storage Commit
             </div>
             <div>This execution was an internal PostgreSQL database record commit (action: <strong>${esc(run.action || 'dump')}</strong>). Internal database writes consume <strong>0 vendor API credits</strong>. Rate cards apply exclusively during external vendor intelligence collection.</div>
@@ -13757,7 +14963,8 @@ $(function () {
 
   async function fetchWorkspaceCreditBalance() {
     try {
-      const res = await fetch(`${API_BASE}/api/lobs/workspace-balance`, {
+      const base = typeof API_BASE !== "undefined" ? API_BASE : (window.API_BASE || "");
+      const res = await fetch(`${base}/api/lobs/workspace-balance`, {
         headers: authHeaders(),
       });
       if (res.ok) {
@@ -13857,7 +15064,7 @@ $(function () {
                   Account golden record committed &bull; Ready for Level 2 organizational hierarchy
                 </div>
               </div>
-              <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:0.78rem;font-weight:700;padding:6px 12px;border-radius:8px;">
+              <span class="badge" style="background:#F3E7DA;color:#2B241F;font-size:0.78rem;font-weight:700;padding:6px 12px;border-radius:8px;">
                 <i class="bi bi-diagram-3-fill"></i> ~${count} LOB Divisions Detected
               </span>
             </div>
@@ -13866,7 +15073,7 @@ $(function () {
             <div style="background:#ffffff;border:1px solid #cbd5e1;border-radius:10px;padding:12px 14px;margin-bottom:14px;">
               <div style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
                 <span><i class="bi bi-sliders2"></i> Batch Partitioning Strategy</span>
-                <span style="font-size:0.7rem;color:#0284c7;font-weight:700;">${phases} Sequential Phases (${batchSize} / phase)</span>
+                <span style="font-size:0.7rem;color:#8A6248;font-weight:700;">${phases} Sequential Phases (${batchSize} / phase)</span>
               </div>
               <div class="btn-group w-100" role="group" id="lobBatchSizeSelector">
                 <button type="button" class="btn btn-sm ${batchSize === 10 ? 'btn-primary active' : 'btn-outline-secondary'} btn-batch-size-pill" data-batch="10" style="font-size:0.76rem;font-weight:700;">
@@ -13903,8 +15110,8 @@ $(function () {
             </div>
 
             <!-- 3-Phase Execution Architecture Visual Summary -->
-            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;font-size:0.76rem;color:#1e3a8a;line-height:1.5;">
-              <div style="font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;color:#1e40af;">
+            <div style="background:#F3E7DA;border:1px solid #F3E7DA;border-radius:10px;padding:12px 14px;font-size:0.76rem;color:#2B241F;line-height:1.5;">
+              <div style="font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;color:#4A3528;">
                 <i class="bi bi-cpu-fill"></i> Autonomous Execution Architecture
               </div>
               <div style="display:flex;flex-direction:column;gap:4px;">
@@ -14354,7 +15561,7 @@ $(function () {
                   Operating structure committed &bull; Ready for Level 3 Executive Discovery &amp; Enrichment
                 </div>
               </div>
-              <span class="badge" style="background:#ede9fe;color:#6d28d9;font-size:0.78rem;font-weight:700;padding:6px 12px;border-radius:8px;">
+              <span class="badge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.78rem;font-weight:700;padding:6px 12px;border-radius:8px;">
                 <i class="bi bi-people-fill"></i> ~${count} Executive Personas Detected
               </span>
             </div>
@@ -14365,7 +15572,7 @@ $(function () {
                 <span style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;">
                   <i class="bi bi-diagram-2"></i> Seniority Hierarchy Ingestion Mode
                 </span>
-                <span style="font-size:0.7rem;color:#7c3aed;font-weight:700;">
+                <span style="font-size:0.7rem;color:#8A6248;font-weight:700;">
                   ${mode === 'auto' ? 'Auto Hierarchical (C-Suite → VPs → Directors)' : 'Manual Sequential Order'}
                 </span>
               </div>
@@ -14380,7 +15587,7 @@ $(function () {
 
               <div style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.04em;margin-top:10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
                 <span><i class="bi bi-sliders2"></i> Batch Partitioning Size</span>
-                <span style="font-size:0.7rem;color:#0284c7;font-weight:700;">${phases} Sequential Phases (${batchSize} / phase)</span>
+                <span style="font-size:0.7rem;color:#8A6248;font-weight:700;">${phases} Sequential Phases (${batchSize} / phase)</span>
               </div>
               <div class="btn-group w-100" role="group" id="personaBatchSizeSelector">
                 <button type="button" class="btn btn-sm ${batchSize === 10 ? 'btn-primary active' : 'btn-outline-secondary'} btn-persona-batch-pill" data-batch="10" style="font-size:0.76rem;font-weight:700;">
@@ -14417,8 +15624,8 @@ $(function () {
             </div>
 
             <!-- 4-Cycle Execution Architecture Visual Summary -->
-            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:12px 14px;font-size:0.76rem;color:#4c1d95;line-height:1.5;">
-              <div style="font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;color:#6d28d9;">
+            <div style="background:#F3E7DA;border:1px solid #D3C2B1;border-radius:10px;padding:12px 14px;font-size:0.76rem;color:#2B241F;line-height:1.5;">
+              <div style="font-weight:800;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;color:#4A3528;">
                 <i class="bi bi-diagram-3-fill"></i> Autonomous Persona Architecture
               </div>
               <div style="display:flex;flex-direction:column;gap:4px;">
@@ -14810,8 +16017,9 @@ $(function () {
     $("#hubRunsFilterGroup button").removeClass("active");
     $(this).addClass("active");
     const filter = $(this).attr("data-filter");
+    window._activeHubRunFilter = filter;
     if (window._cachedPipelineOverview && window._cachedPipelineOverview.recent_runs) {
-      renderOverviewRunsTable(window._cachedPipelineOverview.recent_runs, filter);
+      renderOverviewRunsTable(window._cachedPipelineOverview.recent_runs, filter, window._activeHubAccountFilter || "all");
     }
   });
 
@@ -14821,4 +16029,32 @@ $(function () {
 
   $(document).on("click", "#btnHubFetchDigest", function() {
     $("#sidebarBatchConsoleBtn").click();
+  });
+
+  $(document).on("click", ".btn-hub-explore-acct", function(e) {
+    e.stopPropagation();
+    const acctId = $(this).data("account-id");
+    const $sidebarItem = $(`#accountList .account-item[data-id="${acctId}"]`);
+    if ($sidebarItem.length) {
+      $sidebarItem.trigger("click");
+    } else {
+      window.location.hash = `#account/${acctId}`;
+    }
+  });
+
+  $(document).on("click", ".btn-hub-crawl-acct", function(e) {
+    e.stopPropagation();
+    const acctId = $(this).data("account-id");
+    const acct = (MOCK_DATA.accounts || []).find(a => String(a.id) === String(acctId)) || { id: acctId, key: "target_" + acctId, display_name: "Target " + acctId };
+    openBatchConsole("account", acct);
+  });
+
+  $(document).on("click", "#btnHubManageTenant", function() {
+    ClientWorkspaceManager.renderManageModal();
+    $("#manageClientsModal").modal("show");
+  });
+
+  $(document).on("click", "#hubHeroSchemaLink", function() {
+    const slug = ClientWorkspaceManager.activeClientSlug || "stradit_india";
+    ClientWorkspaceManager.openSchemaDiagnostics(slug);
   });

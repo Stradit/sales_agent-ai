@@ -39,6 +39,8 @@ class PipelineRunLogger:
         credits_breakdown: Optional[Dict[str, Any]] = None,
         session: Optional[Session] = None,
         pipeline_level: Optional[str] = None,
+        account_id: Optional[int] = None,
+        client_slug: Optional[str] = None,
     ) -> Optional[PipelineRun]:
         effective_level = level or pipeline_level or "composite"
         now = datetime.now(timezone.utc)
@@ -92,13 +94,17 @@ class PipelineRunLogger:
                 logs_list.append(completion_entry)
 
         try:
+            from db.routing import get_client_slug
+            effective_slug = client_slug or get_client_slug() or "common"
             date_str = start_time.strftime("%Y-%m-%d")
-            base_output = Path("output") / date_str
+            base_output = Path("output") / effective_slug / date_str
             base_output.mkdir(parents=True, exist_ok=True)
             audit_file = base_output / "pipeline_runs_audit.jsonl"
             with open(audit_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps({
                     "run_id": run_id,
+                    "client_slug": effective_slug,
+                    "account_id": account_id,
                     "company_name": safe_company,
                     "target_url": target_url,
                     "level": level,
@@ -126,6 +132,7 @@ class PipelineRunLogger:
         try:
             run_row = PipelineRun(
                 run_id=run_id,
+                account_id=account_id,
                 company_name=safe_company,
                 target_url=target_url,
                 status=status,
@@ -145,6 +152,23 @@ class PipelineRunLogger:
             db_session.add(run_row)
             db_session.commit()
             db_session.refresh(run_row)
+
+            # Atomic update to public.clients.api_credits_used (Decision 1)
+            if total_credits_used and total_credits_used > 0 and effective_slug and effective_slug != "common":
+                try:
+                    from db.connection import SessionLocal
+                    from sqlalchemy import text
+                    pub_sess = SessionLocal()
+                    try:
+                        pub_sess.execute(
+                            text("UPDATE public.clients SET api_credits_used = api_credits_used + :credits WHERE slug = :slug"),
+                            {"credits": int(total_credits_used), "slug": effective_slug}
+                        )
+                        pub_sess.commit()
+                    finally:
+                        pub_sess.close()
+                except Exception as ce:
+                    print(f"[!] [PipelineRunLogger] Failed to update client credits: {ce}")
             return run_row
         except Exception as db_err:
             db_session.rollback()
