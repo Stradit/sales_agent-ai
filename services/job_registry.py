@@ -41,13 +41,14 @@ TYPE_PERSONA = "persona_enrich"
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def create_job(job_type: str, meta: Optional[Dict[str, Any]] = None) -> str:
+def create_job(job_type: str, meta: Optional[Dict[str, Any]] = None, client_slug: Optional[str] = None) -> str:
     """
     Register a new background job.
 
     Args:
-        job_type: One of TYPE_ACCOUNT, TYPE_LOB, TYPE_PERSONA (or any string).
-        meta:     Arbitrary dict for display purposes (name, company, account_id etc.).
+        job_type:    One of TYPE_ACCOUNT, TYPE_LOB, TYPE_PERSONA (or any string).
+        meta:        Arbitrary dict for display purposes (name, company, account_id etc.).
+        client_slug: Optional client slug (defaults to current tenant or stradit_india).
 
     Returns:
         A unique job_id string like "pjob_a1b2c3d4e5f6".
@@ -55,12 +56,17 @@ def create_job(job_type: str, meta: Optional[Dict[str, Any]] = None) -> str:
     job_id = f"pjob_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
     with _lock:
+        resolved_slug = client_slug or (meta.get("client_slug") if meta else None) or "stradit_india"
         _jobs[job_id] = {
             "job_id":       job_id,
             "job_type":     job_type,
+            "type":         job_type,
+            "entity_id":    (meta.get("entity_id") or meta.get("account_id") or meta.get("lob_id") or meta.get("persona_id")) if meta else None,
+            "client_slug":  resolved_slug,
             "status":       STATUS_QUEUED,
             "progress_pct": 0,
             "message":      "Queued — waiting to start...",
+            "started_at":   now,
             "result":       None,
             "error":        None,
             "created_at":   now,
@@ -97,15 +103,17 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
         return dict(job) if job else None
 
 
-def list_jobs(job_type: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_jobs(job_type: Optional[str] = None, client_slug: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Return all jobs sorted newest-first, optionally filtered by job_type.
+    Return all jobs sorted newest-first, optionally filtered by job_type and client_slug.
     Each entry is a copy (safe to mutate).
     """
     with _lock:
         jobs = [dict(j) for j in _jobs.values()]
     if job_type:
         jobs = [j for j in jobs if j.get("job_type") == job_type]
+    if client_slug:
+        jobs = [j for j in jobs if j.get("client_slug") == client_slug]
     return sorted(jobs, key=lambda j: j.get("created_at", ""), reverse=True)
 
 

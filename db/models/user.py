@@ -32,6 +32,7 @@ class User(Base):
 
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_by = relationship("User", remote_side=[id])
+    client_access = relationship("UserClientAccess", primaryjoin="User.id == UserClientAccess.user_id", back_populates="user", cascade="all, delete-orphan")
 
     last_login_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

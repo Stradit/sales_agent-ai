@@ -26,7 +26,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from db.connection import get_session
-from db.models import AuditLog, PasswordResetToken, RefreshToken, User, UserAccountAccess
+from db.models import AuditLog, Client, PasswordResetToken, RefreshToken, User, UserAccountAccess, UserClientAccess
 
 # Loaded independently of import order (config.py also loads the same file,
 # but auth.py shouldn't rely on having been imported after it).
@@ -92,11 +92,12 @@ def _hash_token(raw_token: str) -> str:
 
 # ── JWT access tokens ─────────────────────────────────────────────
 
-def create_access_token(user: User) -> str:
+def create_access_token(user: User, client_slug: Optional[str] = None) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user.id),
         "role": user.role,
+        "client_slug": client_slug,
         "iat": now,
         "exp": now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
         "jti": secrets.token_hex(8),
@@ -233,8 +234,14 @@ def is_locked_out(user: User) -> bool:
 # CRM roles (apps/sales_crm/README.md §5). 'user' is the sales rep — the value
 # is kept so existing rows and checks keep working.
 ROLES = ("super_admin", "sales_manager", "user", "viewer", "partner")
-ROLE_LABELS = {"super_admin": "Super Admin", "sales_manager": "Sales Manager", "user": "Sales Rep",
-               "viewer": "Viewer", "partner": "Partner / Advisor"}
+ROLE_LABELS = {
+    "super_admin": "Super Admin",
+    "sales_manager": "Sales Manager",
+    "user": "Sales Rep",
+    "viewer": "Viewer",
+    "partner": "Partner / Advisor",
+}
+CLIENT_ROLES = ("client_admin", "analyst", "viewer")
 READ_ONLY_ROLES = ("viewer", "partner")
 
 
@@ -275,7 +282,7 @@ def get_accessible_account_ids(session, user_id: int) -> list:
 def account_scope(session, user) -> list:
     """Account ids a request may touch — every account for super_admin (or when
     auth is not enforced), otherwise get_accessible_account_ids()."""
-    if not AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
+    if not AUTH_ENFORCED or getattr(user, "role", None) in ("super_admin", "client_admin"):
         return [r[0] for r in session.execute(text("SELECT id FROM accounts")).fetchall()]
     return get_accessible_account_ids(session, user.id)
 
@@ -397,6 +404,7 @@ def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(_be
         # read attributes (SQLAlchemy would otherwise lazy-reload on access
         # and hit a closed session) — the same object, not a live query.
         session.expunge(user)
+        user.token_client_slug = payload.get("client_slug")
         return user
     finally:
         session.close()
@@ -418,7 +426,7 @@ def require_account_access(account_id: int, user: User = Depends(get_current_use
     automatically. super_admin always passes; anyone else needs an explicit
     UserAccountAccess grant for this specific account (see
     db/models/user_account_access.py)."""
-    if not AUTH_ENFORCED or user.role == "super_admin":
+    if not AUTH_ENFORCED or user.role in ("super_admin", "client_admin"):
         return user
     session = get_session()
     try:
@@ -432,7 +440,7 @@ def require_account_access(account_id: int, user: User = Depends(get_current_use
 def require_persona_account_access(persona_id: int, user: User = Depends(get_current_user)) -> User:
     """Same as require_account_access, but for a route keyed by persona_id —
     resolves the persona's account first, then applies the same check."""
-    if not AUTH_ENFORCED or user.role == "super_admin":
+    if not AUTH_ENFORCED or user.role in ("super_admin", "client_admin"):
         return user
     session = get_session()
     try:
@@ -451,7 +459,7 @@ def require_action_item_account_access(item_id: int, user: User = Depends(get_cu
     """Same as require_account_access, but for a route keyed by an
     action_items id — resolves the item's account first, then applies the
     same check. See ACTION_ITEMS_IMPLEMENTATION_PLAN.md §2."""
-    if not AUTH_ENFORCED or user.role == "super_admin":
+    if not AUTH_ENFORCED or user.role in ("super_admin", "client_admin"):
         return user
     session = get_session()
     try:
@@ -476,7 +484,7 @@ def require_editor(user: User = Depends(get_current_user)) -> User:
 
 
 def _require_account_of(sql: str, key: int, user: User, missing: str) -> User:
-    if not AUTH_ENFORCED or user.role == "super_admin":
+    if not AUTH_ENFORCED or user.role in ("super_admin", "client_admin"):
         return user
     session = get_session()
     try:
@@ -510,3 +518,66 @@ def require_entity_account_access(entity_type: str, entity_id: int, user: User =
     if kind not in sql:
         raise HTTPException(status_code=400, detail="Unknown entity type")
     return _require_account_of(sql[kind], entity_id, user, "Record not found")
+
+
+# ── Multi-Tenant Client Helpers ─────────────────────────────────────
+
+def get_user_client_grants(session, user_id: int) -> list:
+    """Returns all active clients accessible by this user with their role in each."""
+    rows = (
+        session.query(Client, UserClientAccess.role)
+        .join(UserClientAccess, UserClientAccess.client_id == Client.id)
+        .filter(UserClientAccess.user_id == user_id, Client.is_active == True)
+        .all()
+    )
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "slug": c.slug,
+            "schema_name": c.schema_name,
+            "plan_tier": c.plan_tier,
+            "role": role,
+            "api_credits_total": c.api_credits_total,
+            "api_credits_used": c.api_credits_used,
+            "max_accounts": c.max_accounts,
+        }
+        for c, role in rows
+    ]
+
+
+def user_has_client_access(session, user: User, client_slug: str) -> bool:
+    """Returns True if user has access to client_slug."""
+    if not AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
+        return True
+    access = (
+        session.query(UserClientAccess)
+        .join(Client, Client.id == UserClientAccess.client_id)
+        .filter(UserClientAccess.user_id == user.id, Client.slug == client_slug, Client.is_active == True)
+        .first()
+    )
+    return access is not None
+
+
+def require_client_role(*roles: str):
+    """Dependency verifying user has one of the allowed roles for the active client."""
+    def dependency(request: Request, user: User = Depends(get_current_user)) -> User:
+        if not AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
+            return user
+        client_slug = request.headers.get("X-Client-Slug") or getattr(user, "token_client_slug", None) or "stradit_india"
+        session = get_session()
+        try:
+            grant = (
+                session.query(UserClientAccess)
+                .join(Client, Client.id == UserClientAccess.client_id)
+                .filter(UserClientAccess.user_id == user.id, Client.slug == client_slug, Client.is_active == True)
+                .first()
+            )
+            if not grant:
+                raise HTTPException(status_code=403, detail="Not authorized for this client")
+            if grant.role in roles or (grant.role == "client_admin" and any(r in ("client_admin", "analyst", "viewer") for r in roles)):
+                return user
+            raise HTTPException(status_code=403, detail="Not authorized for this client")
+        finally:
+            session.close()
+    return dependency
