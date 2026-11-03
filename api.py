@@ -1116,6 +1116,17 @@ if FASTAPI_AVAILABLE:
         company_name: str
         deferred_failures: List[Dict[str, Any]]
 
+    class PersonaDeltaEnrichRequest(BaseModel):
+        persona_id: int
+        account_id: int
+        company_name: Optional[str] = None
+        target_fields: Optional[List[str]] = None
+
+    class PersonaRetryFailedRequest(BaseModel):
+        persona_id: int
+        account_id: int
+        company_name: Optional[str] = None
+
     class PersonaCardFetchRequest(BaseModel):
         """
         Exact payload structure sent by frontend when user clicks 'Fetch' on a Person card:
@@ -3899,6 +3910,30 @@ if FASTAPI_AVAILABLE:
             deferred_failures=req.deferred_failures,
             client_slug=active_slug,
         )
+
+    @personas_router.post("/delta-enrich")
+    def delta_enrich_persona(req: PersonaDeltaEnrichRequest):
+        """Cycle 4a: Targeted Delta Micro-Enrichment for half-fetched / partial personas."""
+        return PersonaAutomationEngine.enrich_persona_delta(
+            persona_id=req.persona_id,
+            account_id=req.account_id,
+            company_name=req.company_name or "",
+            target_fields=req.target_fields,
+        )
+
+    @personas_router.post("/retry-failed")
+    def retry_failed_persona(req: PersonaRetryFailedRequest):
+        """Cycle 4b: Priority Single Retry for completely failed personas (with backoff & DLQ check)."""
+        return PersonaAutomationEngine.retry_single_failed_persona(
+            persona_id=req.persona_id,
+            account_id=req.account_id,
+            company_name=req.company_name or "",
+        )
+
+    @personas_router.get("/triage/{account_id}")
+    def get_personas_triage(account_id: int):
+        """Categorized status audit of personas: enriched, partial, failed, unresolvable."""
+        return PersonaAutomationEngine.get_account_personas_triage(account_id=account_id)
 
     @personas_router.post("/fetch")
     def fetch_persona_from_card(card: PersonaCardFetchRequest):
