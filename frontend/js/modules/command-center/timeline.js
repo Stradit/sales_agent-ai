@@ -5,6 +5,7 @@ import { renderSkeleton } from '../skeleton.js';
 import { ccState, matchesCurrentAccount } from './state.js';
 import { openDossier } from './drawer.js';
 import { loadMatrixAccounts } from './real-accounts.js';
+import { dealsFor } from './deal-context.js';
 
 const TIMELINE_FILTERS = [
   { id: 'all', label: 'All' },
@@ -28,6 +29,13 @@ function renderTimelineFilters() {
   });
 }
 
+function committeeLink(e) {
+  const a = dealsFor(e.accountId, e.company);
+  if (!a || !a.deals.length) return '';
+  const d = a.deals[0];
+  return ` &middot; <a class="cc-timeline-committee" href="/deals?deal=${d.deal_id}&tab=committee" title="Add to the buying committee of ${esc(d.deal)}">Add to committee</a>`;
+}
+
 function itemHtml(e) {
   const aging = !e.actioned && (Date.now() - e.date.getTime()) / 86400000 >= 5;
   const dotCls = e.type === 'joined' ? 'cc-dot-joined' : (e.type === 'promoted' ? 'cc-dot-promoted' : 'cc-dot-neutral');
@@ -45,7 +53,7 @@ function itemHtml(e) {
           <span class="cc-meta-sep">&middot;</span>
           <strong class="cc-company-name" title="${esc(e.company)}">${esc(e.company)}</strong>
         </div>
-        <div class="cc-timeline-date">${esc(dateLabel)}${aging ? ' &middot; <span class="cc-warning-text">aging</span>' : ''}</div>
+        <div class="cc-timeline-date">${esc(dateLabel)}${aging ? ' &middot; <span class="cc-warning-text">aging</span>' : ''}${committeeLink(e)}</div>
       </div>
       ${!e.actioned ? `<button type="button" class="cc-btn cc-btn-ghost cc-btn-xs cc-timeline-touch-btn" data-id="${e.id}" title="Log outreach touch">Log touch</button>` : '<span class="cc-touch-badge" title="Touch logged"><i class="fa-solid fa-check"></i></span>'}
     </li>`;
@@ -102,7 +110,8 @@ export async function renderTimeline() {
 
   // Clicking an exec timeline item opens the account dossier
   list.querySelectorAll('.cc-timeline-item').forEach(row => {
-    row.addEventListener('click', async () => {
+    row.addEventListener('click', async (ev) => {
+      if (ev.target.closest('a')) return;
       const acctId = row.dataset.accountId;
       const company = row.dataset.company;
       const accounts = await loadMatrixAccounts().catch(() => []);

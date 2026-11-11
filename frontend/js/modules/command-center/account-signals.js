@@ -6,6 +6,7 @@
 // used here is a real column on Account, nothing fabricated.
 import { loadRealAccounts, loadMatrixAccounts } from './real-accounts.js';
 import { openDossier } from './drawer.js';
+import { dealsFor, dealContext } from './deal-context.js';
 import { esc, formatMoney } from './utils.js';
 import { renderSkeleton } from '../skeleton.js';
 import { ccState, matchesCurrentAccount } from './state.js';
@@ -175,6 +176,35 @@ function coverageRowHtml({ account: a, total, gapLabel }) {
 
 let coverageChartInstance = null;
 
+// "By account": one bar per account (contacts mapped, C-suite), flagged where an open deal has nobody mapped
+function renderCoverageByAccount(accounts) {
+  const el = document.getElementById('ccCoverageAccounts');
+  if (!el) return;
+  const rows = accounts.map(a => ({ a, c: getAccountCoverage(a), p: dealsFor(a.id, a.name || a.display_name) }))
+    .sort((x, y) => y.c.total - x.c.total);
+  const max = Math.max(1, ...rows.map(r => r.c.total));
+  const money = (v) => (v >= 1e6 ? `$${(v / 1e6).toFixed(2).replace(/\.?0+$/, '')}M` : `$${Math.round(v / 1e3)}k`);
+  const ctx = dealContext();
+  const gaps = ctx ? ctx.eb_gap_deals : 0;
+  el.innerHTML = rows.map(({ a, c, p }) => {
+    const name = a.name || a.display_name || a.key || 'Account';
+    const blind = c.total === 0 && p && p.open_count > 0;
+    const right = blind
+      ? `0 mapped — ${money(p.open_value)} deal${p.open_count === 1 ? '' : 's'} open`
+      : `${c.total.toLocaleString()} · ${c.cSuite} C-suite`;
+    return `<button type="button" class="cc-cov-acct${blind ? ' is-blind' : ''}" data-account-id="${esc(a.id)}">
+      <span class="cc-cov-acct-row"><strong>${esc(name)}</strong><span>${esc(right)}</span></span>
+      <span class="cc-cov-acct-bar"><span style="width:${Math.max(c.total ? 2 : 0, (c.total / max) * 100)}%"></span></span></button>`;
+  }).join('') + (gaps
+    ? `<p class="cc-cov-acct-foot">${gaps} open deal${gaps === 1 ? ' has' : 's have'} no economic buyer · <a href="/introductions?new=1">Find who can introduce you</a></p>`
+    : '');
+  el.querySelectorAll('[data-account-id]').forEach(b => b.addEventListener('click', async () => {
+    const accts = await loadMatrixAccounts().catch(() => []);
+    const acct = accts.find(x => String(x.id) === b.dataset.accountId);
+    if (acct) openDossier(acct);
+  }));
+}
+
 function setupCoverageViewToggle() {
   const toggleGroup = document.getElementById('ccCoverageViewToggle');
   if (!toggleGroup) return;
@@ -188,16 +218,24 @@ function setupCoverageViewToggle() {
       const chartWrap = document.getElementById('ccCoverageChartWrap');
       const listEl = document.getElementById('ccCoverageList');
 
+      const accountsEl = document.getElementById('ccCoverageAccounts');
+      if (accountsEl) accountsEl.style.setProperty('display', view === 'accounts' ? 'flex' : 'none', 'important');
       if (view === 'chart') {
         if (chartWrap) chartWrap.style.setProperty('display', 'flex', 'important');
         if (listEl) listEl.style.setProperty('display', 'none', 'important');
         if (coverageChartInstance) coverageChartInstance.resize();
-      } else {
+      } else if (view === 'list') {
         if (chartWrap) chartWrap.style.setProperty('display', 'none', 'important');
         if (listEl) listEl.style.setProperty('display', 'block', 'important');
+      } else {
+        if (chartWrap) chartWrap.style.setProperty('display', 'none', 'important');
+        if (listEl) listEl.style.setProperty('display', 'none', 'important');
       }
     };
   });
+  // Show the selected view now (the stylesheet forces the chart visible until told otherwise)
+  const active = toggleGroup.querySelector('[data-coverage-view].active');
+  if (active) active.onclick();
 }
 
 function renderCoveragePieChart(accounts, activeAccountName) {
@@ -478,6 +516,7 @@ export async function renderCoverageGaps() {
 
     const labelName = names.length === 1 ? names[0] : (names.length > 1 ? `${names.length} Selected Accounts` : null);
     renderCoveragePieChart(filteredAccounts, labelName);
+    renderCoverageByAccount(filteredAccounts);
     setupCoverageViewToggle();
   } catch (err) {
     console.error('Error rendering coverage pie chart:', err);

@@ -1,6 +1,7 @@
 import { esc } from './utils.js';
 
 export const DASHBOARD_WIDGETS = [
+  { id: 'my_day', name: 'My Day', icon: 'fa-sun', category: 'Summary', desc: 'What needs you today: overdue tasks and deal steps, quiet deals, the quarter and reasons to reach out' },
   { id: 'kpi', name: 'KPI Metric Strip', icon: 'fa-chart-line', category: 'Summary', desc: 'Velocity, executive outreach signals, and active plays' },
   { id: 'matrix', name: 'Account Priority Matrix', icon: 'fa-chart-pie', category: 'Strategic', desc: 'Interactive 4-quadrant bubble chart ranking accounts by signal & heat' },
   { id: 'priority_feed', name: 'Priority Signal Feed', icon: 'fa-bolt', category: 'Signals', desc: 'Real-time multi-source buying trigger alerts with new/old status' },
@@ -17,6 +18,10 @@ export const DASHBOARD_WIDGETS = [
 ];
 
 const STORAGE_KEY = 'cc_widget_visibility_v1';
+// Off until switched on: My Day's headline numbers and "Do today" list cover these (people who already
+// customized the dashboard keep their saved choice)
+const HIDDEN_BY_DEFAULT = new Set(['kpi', 'due_soon']);
+const byDefault = (id) => !HIDDEN_BY_DEFAULT.has(id);
 
 export function getWidgetPreferences() {
   try {
@@ -26,7 +31,7 @@ export function getWidgetPreferences() {
       // Ensure all current widgets have a boolean entry
       const result = {};
       DASHBOARD_WIDGETS.forEach(w => {
-        result[w.id] = parsed[w.id] !== undefined ? Boolean(parsed[w.id]) : true;
+        result[w.id] = parsed[w.id] !== undefined ? Boolean(parsed[w.id]) : byDefault(w.id);
       });
       return result;
     }
@@ -34,9 +39,9 @@ export function getWidgetPreferences() {
     console.error('Failed to parse widget preferences:', e);
   }
 
-  // Default: all widgets visible
+  // Default: every widget visible except the ones My Day replaces
   const defaults = {};
-  DASHBOARD_WIDGETS.forEach(w => { defaults[w.id] = true; });
+  DASHBOARD_WIDGETS.forEach(w => { defaults[w.id] = byDefault(w.id); });
   return defaults;
 }
 
@@ -168,7 +173,7 @@ export function initWidgetCustomizer() {
   if (resetBtn) {
     resetBtn.addEventListener('click', () => {
       list.querySelectorAll('input[data-widget-toggle]').forEach(input => {
-        input.checked = true;
+        input.checked = byDefault(input.dataset.widgetToggle);
       });
     });
   }

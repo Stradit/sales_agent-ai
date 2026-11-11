@@ -1122,7 +1122,10 @@ async function init() {
   initViews({ st, $, api, esc, money, dateLabel, isOverdue, healthBadge, needsAttention, lostText, openDeal,
     showToast, OPEN_STAGES, reload: loadDeals });
   await loadDeals();
-  if (params.get('deal')) openDeal(Number(params.get('deal')));
+  if (params.get('deal')) {
+    if (params.get('tab')) st.tab = params.get('tab');
+    openDeal(Number(params.get('deal')));
+  }
   if (params.get('new') === '1') openNewDeal();
 }
 

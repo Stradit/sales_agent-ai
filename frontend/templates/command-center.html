@@ -20,10 +20,10 @@
   <link rel="stylesheet" href="css/action-items.css?v=1.0">
   <link rel="stylesheet" href="css/profile-page.css?v=3.1">
   <link rel="stylesheet" href="css/responsive.css?v=3.0">
-  <link rel="stylesheet" href="css/command-center.css?v=3.3">
+  <link rel="stylesheet" href="css/command-center.css?v=3.6">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
-<body>
+<body class="cc-wide">
 
 <div class="global-loading-bar" id="globalLoadingBar"></div>
 
@@ -33,14 +33,12 @@
 
   <div class="dash-body">
 
-{% include "partials/nav.html" %}
-
     <main class="dash-main">
       <header class="cc-header">
         <div class="cc-header-left">
-          <div class="cc-breadcrumb"><a href="/"><i class="fa-solid fa-arrow-left"></i> Accounts</a></div>
-          <h1 class="cc-title">Sales Command Center</h1>
-          <p class="cc-subtitle" id="ccSubtitle">Loading…</p>
+          <p class="cc-md-meta" id="ccMdMeta">Loading My Day…</p>
+          <h1 class="cc-md-title" id="ccMdTitle">Sales Command Center</h1>
+          <p class="cc-subtitle" id="ccSubtitle"></p>
         </div>
         <div class="cc-header-controls">
           <div class="cc-acct-filter-wrap" id="ccAcctFilterWrap">
@@ -81,17 +79,20 @@
           <button type="button" class="cc-btn cc-btn-outline cc-customize-btn" id="ccCustomizeBtn" title="Customize visible dashboard widgets">
             <i class="fa-solid fa-sliders"></i> Customize View
           </button>
+          <a class="cc-md-act dark" href="/copilot"><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Copilot</a>
         </div>
       </header>
 
+      <section class="cc-myday" id="ccMyDay" data-widget-id="my_day" aria-label="My Day" aria-busy="true"></section>
       <section class="cc-kpi-strip" id="ccKpiStrip" data-widget-id="kpi"></section>
 
-      <section class="cc-row cc-row-2col cc-row-matrix-feed">
+      <div class="cc-group-head" id="ccGroupAccounts"><h2>My accounts at a glance</h2><span>Where to spend time across your accounts</span></div>
+      <section class="cc-row cc-row-matrix-feed">
         <div class="cc-panel cc-matrix-panel" data-widget-id="matrix">
           <div class="cc-panel-head">
             <div class="cc-panel-head-left">
               <h2>Account priority matrix</h2>
-              <span class="cc-panel-note">Bubble size (deal potential) is estimated — no CRM pipeline value on file</span>
+              <span class="cc-panel-note" id="ccMatrixNote">Bubble size (deal potential) is estimated — no CRM pipeline value on file</span>
             </div>
             <button type="button" class="cc-help-btn" data-widget-info="matrix" title="About Account Priority Matrix" aria-label="About Account Priority Matrix">
               <i class="fa-solid fa-circle-question"></i>
@@ -108,7 +109,38 @@
             <span class="cc-legend-tier"><span class="cc-legend-dot" style="background:#ef4444;"></span> 80+ Strategic Surge</span>
           </div>
         </div>
-
+        <div class="cc-panel" data-widget-id="coverage">
+          <div class="cc-panel-head">
+            <div class="cc-panel-head-left">
+              <h2>Org coverage gaps</h2>
+              <span class="cc-panel-note" id="ccCoveragePanelNote">Mapped contacts breakdown</span>
+            </div>
+            <div class="cc-panel-actions">
+              <div class="cc-filter-pill-group" id="ccCoverageViewToggle" role="group" aria-label="Toggle Chart or Gaps View">
+                <button type="button" class="cc-filter-pill active" data-coverage-view="accounts" title="Contacts mapped per account"><i class="fa-solid fa-building"></i> By account</button>
+                <button type="button" class="cc-filter-pill" data-coverage-view="chart" title="View Contacts Mapped Pie Chart"><i class="fa-solid fa-chart-pie"></i> Chart</button>
+                <button type="button" class="cc-filter-pill" data-coverage-view="list" title="View Coverage Gaps List"><i class="fa-solid fa-list-ul"></i> Gaps</button>
+              </div>
+              <button type="button" class="cc-help-btn" data-widget-info="coverage" title="About Org Coverage Gaps" aria-label="About Org Coverage Gaps">
+                <i class="fa-solid fa-circle-question"></i>
+              </button>
+            </div>
+          </div>
+          <div class="cc-cov-accounts" id="ccCoverageAccounts"></div>
+          <div class="cc-coverage-chart-wrap" id="ccCoverageChartWrap" style="display:none;">
+            <div class="cc-coverage-chart-stats">
+              <span class="cc-cov-stat-pill"><i class="fa-solid fa-users"></i> <strong id="ccTotalMappedBadge">0</strong> mapped</span>
+              <span class="cc-cov-stat-pill cc-cov-csuite"><i class="fa-solid fa-crown"></i> <strong id="ccTotalCSuiteBadge">0</strong> C-suite</span>
+            </div>
+            <div class="cc-coverage-canvas-container">
+              <canvas id="ccCoveragePieCanvas"></canvas>
+            </div>
+          </div>
+          <ul class="cc-feed-list" id="ccCoverageList" style="display:none;"></ul>
+        </div>
+      </section>
+      <div class="cc-group-head" id="ccGroupChanges"><h2>What changed at my accounts</h2><span>Signals, each tagged with the open deals it affects</span></div>
+      <section class="cc-row cc-row-2col cc-row-wide-left">
         <div class="cc-panel cc-feed-panel" data-widget-id="priority_feed">
           <div class="cc-panel-head">
             <div class="cc-panel-head-left">
@@ -124,26 +156,6 @@
           </div>
           <ul class="cc-feed-list" id="ccFeedList"></ul>
         </div>
-      </section>
-
-      <section class="cc-row cc-row-3col">
-        <div class="cc-panel" data-widget-id="due_soon">
-          <div class="cc-panel-head">
-            <div class="cc-panel-head-left">
-              <h2>Due soon</h2>
-            </div>
-            <div class="cc-panel-actions">
-              <span class="cc-due-badge-count" id="ccDueSoonCountBadge" style="display:none;"></span>
-              <a class="cc-panel-link" href="/tasks">View all <i class="fa-solid fa-arrow-right"></i></a>
-              <button type="button" class="cc-help-btn" data-widget-info="due_soon" title="About Due Soon & Tasks" aria-label="About Due Soon & Tasks">
-                <i class="fa-solid fa-circle-question"></i>
-              </button>
-            </div>
-          </div>
-          <div id="ccDueSoonFilterStripContainer"></div>
-          <ul class="cc-feed-list cc-due-feed-list" id="ccDueSoonList"></ul>
-        </div>
-
         <div class="cc-panel cc-timeline-panel" data-widget-id="timeline">
           <div class="cc-panel-head">
             <div class="cc-panel-head-left">
@@ -158,19 +170,8 @@
           </div>
           <ul class="cc-timeline-list" id="ccTimelineList"></ul>
         </div>
-
-        <div class="cc-panel cc-playbook-panel" data-widget-id="playbook">
-          <div class="cc-panel-head">
-            <div class="cc-panel-head-left">
-              <h2>This week's playbook</h2>
-            </div>
-            <button type="button" class="cc-help-btn" data-widget-info="playbook" title="About This Week's Playbook" aria-label="About This Week's Playbook">
-              <i class="fa-solid fa-circle-question"></i>
-            </button>
-          </div>
-          <ol class="cc-playbook-list" id="ccPlaybookList"></ol>
-        </div>
-
+      </section>
+      <section class="cc-row cc-row-3col cc-row-signals">
         <div class="cc-panel" data-widget-id="hiring">
           <div class="cc-panel-head">
             <div class="cc-panel-head-left">
@@ -190,7 +191,6 @@
           </div>
           <ul class="cc-feed-list" id="ccHiringList"></ul>
         </div>
-
         <div class="cc-panel" data-widget-id="capital">
           <div class="cc-panel-head">
             <div class="cc-panel-head-left">
@@ -203,83 +203,6 @@
           </div>
           <ul class="cc-feed-list" id="ccCapitalList"></ul>
         </div>
-
-        <div class="cc-panel" data-widget-id="coverage">
-          <div class="cc-panel-head">
-            <div class="cc-panel-head-left">
-              <h2>Org coverage gaps</h2>
-              <span class="cc-panel-note" id="ccCoveragePanelNote">Mapped contacts breakdown</span>
-            </div>
-            <div class="cc-panel-actions">
-              <div class="cc-filter-pill-group" id="ccCoverageViewToggle" role="group" aria-label="Toggle Chart or Gaps View">
-                <button type="button" class="cc-filter-pill active" data-coverage-view="chart" title="View Contacts Mapped Pie Chart"><i class="fa-solid fa-chart-pie"></i> Chart</button>
-                <button type="button" class="cc-filter-pill" data-coverage-view="list" title="View Coverage Gaps List"><i class="fa-solid fa-list-ul"></i> Gaps</button>
-              </div>
-              <button type="button" class="cc-help-btn" data-widget-info="coverage" title="About Org Coverage Gaps" aria-label="About Org Coverage Gaps">
-                <i class="fa-solid fa-circle-question"></i>
-              </button>
-            </div>
-          </div>
-          <div class="cc-coverage-chart-wrap" id="ccCoverageChartWrap">
-            <div class="cc-coverage-chart-stats">
-              <span class="cc-cov-stat-pill"><i class="fa-solid fa-users"></i> <strong id="ccTotalMappedBadge">0</strong> mapped</span>
-              <span class="cc-cov-stat-pill cc-cov-csuite"><i class="fa-solid fa-crown"></i> <strong id="ccTotalCSuiteBadge">0</strong> C-suite</span>
-            </div>
-            <div class="cc-coverage-canvas-container">
-              <canvas id="ccCoveragePieCanvas"></canvas>
-            </div>
-          </div>
-          <ul class="cc-feed-list" id="ccCoverageList" style="display:none;"></ul>
-        </div>
-
-  </section>
-
-  <!-- Parallel Side-by-Side: Operational Pain Points & Common Objections -->
-  <section class="cc-row cc-row-2col">
-    <div class="cc-panel" data-widget-id="pain_points">
-      <div class="cc-panel-head">
-        <div class="cc-panel-head-left">
-          <h2>Operational pain points</h2>
-          <span class="cc-panel-note">Ranked Operational Friction &middot; Multi-Account Intelligence</span>
-        </div>
-        <button type="button" class="cc-help-btn" data-widget-info="pain_points" title="About Operational Pain Points" aria-label="About Operational Pain Points">
-          <i class="fa-solid fa-circle-question"></i>
-        </button>
-      </div>
-      <div id="ccPainPointsBody"></div>
-    </div>
-
-    <div class="cc-panel" data-widget-id="objections">
-      <div class="cc-panel-head">
-        <div class="cc-panel-head-left">
-          <h2>Common objections</h2>
-          <span class="cc-panel-note">Field Objections & Stakeholder Resistance &middot; Enterprise Intelligence</span>
-        </div>
-        <button type="button" class="cc-help-btn" data-widget-info="objections" title="About Common Objections" aria-label="About Common Objections">
-          <i class="fa-solid fa-circle-question"></i>
-        </button>
-      </div>
-      <div id="ccObjectionsBody"></div>
-    </div>
-  </section>
-
-
-      <section class="cc-row">
-        <div class="cc-panel" data-widget-id="strategic_tracks">
-          <div class="cc-panel-head">
-            <div class="cc-panel-head-left">
-              <h2>Strategic investment tracks &amp; key sponsoring decision makers</h2>
-              <span class="cc-panel-note">Executive Sponsoring Tracks &middot; Multi-Organization Intelligence</span>
-            </div>
-            <button type="button" class="cc-help-btn" data-widget-info="strategic_tracks" title="About Strategic Investment Tracks" aria-label="About Strategic Investment Tracks">
-              <i class="fa-solid fa-circle-question"></i>
-            </button>
-          </div>
-          <div id="ccTracksList"></div>
-        </div>
-      </section>
-
-      <section class="cc-row">
         <div class="cc-panel" data-widget-id="news">
           <div class="cc-panel-head">
             <div class="cc-panel-head-left">
@@ -335,6 +258,76 @@
           <div id="ccNewsFilterStripContainer"></div>
           <ul class="cc-feed-list cc-news-feed-list" id="ccNewsList"></ul>
         </div>
+      </section>
+      <section class="cc-row">
+        <div class="cc-panel" data-widget-id="due_soon">
+          <div class="cc-panel-head">
+            <div class="cc-panel-head-left">
+              <h2>Due soon</h2>
+            </div>
+            <div class="cc-panel-actions">
+              <span class="cc-due-badge-count" id="ccDueSoonCountBadge" style="display:none;"></span>
+              <a class="cc-panel-link" href="/tasks">View all <i class="fa-solid fa-arrow-right"></i></a>
+              <button type="button" class="cc-help-btn" data-widget-info="due_soon" title="About Due Soon & Tasks" aria-label="About Due Soon & Tasks">
+                <i class="fa-solid fa-circle-question"></i>
+              </button>
+            </div>
+          </div>
+          <div id="ccDueSoonFilterStripContainer"></div>
+          <ul class="cc-feed-list cc-due-feed-list" id="ccDueSoonList"></ul>
+        </div>
+      </section>
+      <div class="cc-group-head" id="ccGroupSell"><h2>How to sell it</h2><span>Plays, pain points, objections and the people who sponsor the work</span></div>
+      <section class="cc-row cc-row-2col">
+        <div class="cc-panel cc-playbook-panel" data-widget-id="playbook">
+          <div class="cc-panel-head">
+            <div class="cc-panel-head-left">
+              <h2>This week's playbook</h2>
+            </div>
+            <button type="button" class="cc-help-btn" data-widget-info="playbook" title="About This Week's Playbook" aria-label="About This Week's Playbook">
+              <i class="fa-solid fa-circle-question"></i>
+            </button>
+          </div>
+          <ol class="cc-playbook-list" id="ccPlaybookList"></ol>
+        </div>
+        <div class="cc-panel" data-widget-id="strategic_tracks">
+          <div class="cc-panel-head">
+            <div class="cc-panel-head-left">
+              <h2>Strategic investment tracks &amp; key sponsoring decision makers</h2>
+              <span class="cc-panel-note">Executive Sponsoring Tracks &middot; Multi-Organization Intelligence</span>
+            </div>
+            <button type="button" class="cc-help-btn" data-widget-info="strategic_tracks" title="About Strategic Investment Tracks" aria-label="About Strategic Investment Tracks">
+              <i class="fa-solid fa-circle-question"></i>
+            </button>
+          </div>
+          <div id="ccTracksList"></div>
+        </div>
+      </section>
+      <section class="cc-row cc-row-2col">
+    <div class="cc-panel" data-widget-id="pain_points">
+      <div class="cc-panel-head">
+        <div class="cc-panel-head-left">
+          <h2>Operational pain points</h2>
+          <span class="cc-panel-note">Ranked Operational Friction &middot; Multi-Account Intelligence</span>
+        </div>
+        <button type="button" class="cc-help-btn" data-widget-info="pain_points" title="About Operational Pain Points" aria-label="About Operational Pain Points">
+          <i class="fa-solid fa-circle-question"></i>
+        </button>
+      </div>
+      <div id="ccPainPointsBody"></div>
+    </div>
+    <div class="cc-panel" data-widget-id="objections">
+      <div class="cc-panel-head">
+        <div class="cc-panel-head-left">
+          <h2>Common objections</h2>
+          <span class="cc-panel-note">Field Objections & Stakeholder Resistance &middot; Enterprise Intelligence</span>
+        </div>
+        <button type="button" class="cc-help-btn" data-widget-info="objections" title="About Common Objections" aria-label="About Common Objections">
+          <i class="fa-solid fa-circle-question"></i>
+        </button>
+      </div>
+      <div id="ccObjectionsBody"></div>
+    </div>
       </section>
     </main>
   </div>
@@ -406,6 +399,6 @@
 {% include "partials/drawer.html" %}
 {% include "partials/copilot-dock.html" %}
 
-<script type="module" src="js/modules/command-center/main.js?v=7.9"></script>
+<script type="module" src="js/modules/command-center/main.js?v=8.2"></script>
 </body>
 </html>

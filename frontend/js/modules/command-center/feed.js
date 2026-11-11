@@ -3,6 +3,7 @@ import { esc, relativeTime, ageInDays } from './utils.js';
 import { ccState, matchesCurrentAccount } from './state.js';
 import { createTask, isTasked, markAsTasked } from './actions.js';
 import { clearGlobalAccountFilter } from './account-filter.js';
+import { dealsFor, hasDealContext, dealContext } from './deal-context.js';
 
 function matchesAccount(sig) {
   return matchesCurrentAccount(sig.account_id, sig.account_name);
@@ -96,6 +97,18 @@ function cleanFeedText(str) {
   return String(str).replace(/[\ufffd]/g, '—').trim();
 }
 
+// Which open deals this signal bears on (from My Day's deal context)
+function affectsHtml(sig) {
+  if (!hasDealContext()) return '';
+  const a = dealsFor(sig.account_id, sig.account_name);
+  if (a && a.deals.length) {
+    const names = a.deals.map(d => `<a href="/deals?deal=${d.deal_id}">${esc(d.deal)}</a>`);
+    return `<div class="cc-sig-affects"><i class="fa-solid fa-link"></i> Affects ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` +${names.length - 3}` : ''}</div>`;
+  }
+  const acct = a ? a.account_id : sig.account_id;
+  return `<div class="cc-sig-affects is-none">No open deal at ${esc(sig.account_name)}${acct ? ` · <a href="/deals?new=1&account_id=${esc(acct)}">Add deal</a>` : ''}</div>`;
+}
+
 function rowHtml(sig) {
   const isNew = sig.is_new != null
     ? Boolean(sig.is_new)
@@ -122,9 +135,9 @@ function rowHtml(sig) {
           <span class="cc-sig-account-badge" title="${esc(sig.account_name)}">
             <i class="fa-regular fa-building"></i> ${esc(sig.account_name)}
           </span>
-          <span class="cc-sig-time-badge ${isNew ? 'is-recent' : ''}">
+          ${sig.detectedAt ? `<span class="cc-sig-time-badge ${isNew ? 'is-recent' : ''}">
             <i class="fa-regular fa-clock"></i> ${esc(relativeTime(sig.detectedAt))}
-          </span>
+          </span>` : ''}
           ${newBadge}
         </div>
         <div class="cc-sig-action-wrap">
@@ -140,6 +153,7 @@ function rowHtml(sig) {
       <div class="cc-sig-title-row">
         ${titleHtml}
       </div>
+      ${affectsHtml(sig)}
 
       ${displaySummary ? `
       <div class="cc-sig-summary-block" role="button" tabindex="0" title="Click to view complete text">
@@ -161,18 +175,34 @@ export function renderFeed() {
     return;
   }
   const { signals } = getCommandCenter();
+  let rows;
+  let source = signals;
+  let note = '';
   if (!signals.length) {
-    list.innerHTML = '<li class="cc-feed-empty">No signals in the last 7 days. Run the pipeline or content refresh for your accounts, then Generate again.</li>';
-    return;
+    // Nothing this week: show My Day's latest signals on accounts with open deals (last 30 days) rather than a blank card
+    const ctx = dealContext();
+    const older = ctx && ctx.reasons_window_days !== 7
+      ? ctx.reasons.map((r, i) => ({ id: `latest-${i}`, kind: r.kind, category: r.category, account_id: r.account_id,
+        account_name: r.account, title: r.title, url: r.url, score: r.score, summary: '', is_new: false,
+        detectedAt: r.detected_at ? new Date(r.detected_at) : null })).filter(matchesAccount)
+      : [];
+    if (!older.length) {
+      list.innerHTML = '<li class="cc-feed-empty">No signals in the last 7 days. Run the pipeline or content refresh for your accounts, then Generate again.</li>';
+      return;
+    }
+    rows = older.map(s => ({ ...s, meta: getCategoryMeta(s) }));
+    source = rows;
+    note = `<li class="cc-feed-note">Nothing in the last 7 days. These are the latest from the last ${ctx.reasons_window_days} days on accounts with open deals.</li>`;
+  } else {
+    rows = visibleSignals();
+    if (!rows.length) {
+      list.innerHTML = '<li class="cc-feed-empty">No signals match the current filters.</li>';
+      return;
+    }
   }
-  const rows = visibleSignals();
-  if (!rows.length) {
-    list.innerHTML = '<li class="cc-feed-empty">No signals match the current filters.</li>';
-    return;
-  }
-  list.innerHTML = rows.map(rowHtml).join('');
+  list.innerHTML = note + rows.map(rowHtml).join('');
   list.querySelectorAll('.cc-signal-card').forEach(row => {
-    const sig = signals.find(s => s.id === row.dataset.signalId);
+    const sig = source.find(s => s.id === row.dataset.signalId);
     if (!sig) return;
 
     // Click to expand / collapse full text

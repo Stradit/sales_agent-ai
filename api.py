@@ -6644,6 +6644,19 @@ if FASTAPI_AVAILABLE:
         finally:
             session.close()
 
+    @app.get("/api/command-center/my-day", tags=["9. Command Center"])
+    def get_my_day(response: Response, user: User = Depends(auth.get_current_user)):
+        """My Day: what needs the caller today (overdue tasks and deal steps, quiet deals, committee gaps,
+        stale introductions), deals needing attention, the quarter and signals on accounts with deals.
+        Reps see their own work, managers and admins their team's (services/my_day_service.py)."""
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        from services import my_day_service
+        session = get_session()
+        try:
+            return my_day_service.build(session, user)
+        finally:
+            session.close()
+
     @app.post("/api/command-center/generate", tags=["9. Command Center"])
     def generate_command_center(user: User = Depends(auth.get_current_user)):
         """Rebuilds the Priority Signal Feed, This Week's Playbook and signal

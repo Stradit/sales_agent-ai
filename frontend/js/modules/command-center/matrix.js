@@ -3,6 +3,7 @@ import { ccState, matchesCurrentAccount } from './state.js';
 import { openDossier } from './drawer.js';
 import { loadMatrixAccounts } from './real-accounts.js';
 import { renderSkeleton } from '../skeleton.js';
+import { dealsFor, hasDealContext } from './deal-context.js';
 
 // Chart.js's own default font ('Helvetica Neue'/Arial) doesn't follow this
 // app's CSS at all — canvas text isn't affected by page font-family — so
@@ -115,7 +116,7 @@ const quadrantPlugin = {
       const raw = element.$context?.raw?.account;
       if (!raw) return;
 
-      const label = raw.ticker || (raw.name || '').split(/,|\s-\s|\s/)[0].slice(0, 5).toUpperCase();
+      const label = raw.ticker || (raw.name || '').replace(/^the\s+/i, '').split(/,|\s-\s|\s/)[0].slice(0, 5).toUpperCase();
       
       ctx.font = '700 9.5px Inter, system-ui, sans-serif';
       ctx.fillStyle = '#ffffff';
@@ -154,6 +155,21 @@ export async function renderMatrix() {
   // since the original `canvas` reference is now a detached (invisible) node.
   if (wrap) wrap.innerHTML = '<canvas id="ccMatrixCanvas"></canvas>';
   const liveCanvas = wrap ? document.getElementById('ccMatrixCanvas') : canvas;
+
+  // Open CRM pipeline replaces the estimate wherever the account has open deals
+  accounts = accounts.map(a => {
+    const p = dealsFor(a.id, a.name);
+    return p && p.open_value > 0
+      ? { ...a, dealPotential: p.open_value, dealPotentialEstimated: false, openDeals: p.open_count }
+      : { ...a, dealPotentialEstimated: true, openDeals: 0 };
+  });
+  const note = document.getElementById('ccMatrixNote');
+  if (note && hasDealContext()) {
+    const real = accounts.filter(a => !a.dealPotentialEstimated).length;
+    note.textContent = real
+      ? `Bubble size = open pipeline (${real} of ${accounts.length} accounts have deals; the rest are estimated)`
+      : 'Bubble size (deal potential) is estimated — no open deals on these accounts';
+  }
 
   const dealMin = Math.min(...accounts.map(a => a.dealPotential));
   const dealMax = Math.max(...accounts.map(a => a.dealPotential));
@@ -225,7 +241,9 @@ export async function renderMatrix() {
                 `Composite Heat Score: ${a.compositeScore} / 100`,
                 `Signal Strength: ${a.signalStrength} / 100`,
                 `Engagement Recency: ${a.engagementRecency} / 100`,
-                `Deal Potential (est.): ${formatMoney(a.dealPotential)}`,
+                a.dealPotentialEstimated
+                  ? `Deal Potential (est.): ${formatMoney(a.dealPotential)}`
+                  : `Open pipeline: ${formatMoney(a.dealPotential)} (${a.openDeals} deal${a.openDeals === 1 ? '' : 's'})`,
               ];
             },
           },

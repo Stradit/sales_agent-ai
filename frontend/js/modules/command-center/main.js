@@ -19,6 +19,7 @@ import { renderNewsFeed } from './news.js';
 import { initWidgetGuides } from './widget-guide.js';
 import { initAccountFilter } from './account-filter.js';
 import { initWidgetCustomizer } from './widget-customizer.js';
+import { initMyDay, refreshMyDay } from './my-day.js';
 import { loadCommandCenter, generateCommandCenter, getCommandCenter, isGenerated } from './generator.js';
 import { esc, relativeTime } from './utils.js';
 
@@ -79,6 +80,7 @@ function initGenerateButton() {
       const data = await generateCommandCenter();
       ccState.activeDomainFilters.clear();
       renderAll();
+      refreshMyDay();
       const n = data.signals.length;
       showToast(n
         ? `Generated ${n} signal${n === 1 ? '' : 's'} and ${data.playbook.length} play${data.playbook.length === 1 ? '' : 's'}`
@@ -132,7 +134,10 @@ async function init() {
   initWidgetCustomizer();
   initGenerateButton();
   loadRefreshInfo();
+  initMyDay();
   document.addEventListener('cc:plays-changed', () => { renderSubtitle(); renderKpi(); });
+  // My Day's data names the open deals per account: the feed, exec moves, coverage and matrix show them
+  document.addEventListener('cc:deal-context', () => { renderFeed(); renderTimeline(); renderCoverageGaps(); renderMatrix(); });
   await loadCommandCenter();
   await initAccountFilter((accountId, accountObj) => {
     renderAll();
