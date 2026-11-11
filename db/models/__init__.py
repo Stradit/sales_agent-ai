@@ -26,6 +26,8 @@ from db.models.action_item import ActionItem
 from db.models.action_item_reminder import ActionItemReminder
 from db.models.api_config import SystemApiConfig
 from db.models.command_center_snapshot import CommandCenterSnapshot
+from db.models.credit_ledger import CreditLedger
+from db.models.pipeline_job import PipelineJob
 
 __all__ = [
     "Base",
@@ -51,4 +53,6 @@ __all__ = [
     "ActionItemReminder",
     "SystemApiConfig",
     "CommandCenterSnapshot",
+    "CreditLedger",
+    "PipelineJob",
 ]

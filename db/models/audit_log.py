@@ -12,12 +12,14 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True)
     actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     action = Column(String(100), nullable=False, index=True)
     target_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     details = Column(JSONB)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
+    client = relationship("Client", foreign_keys=[client_id])
     actor = relationship("User", foreign_keys=[actor_user_id])
     target = relationship("User", foreign_keys=[target_user_id])
 

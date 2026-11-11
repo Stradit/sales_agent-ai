@@ -738,6 +738,11 @@ def build_parser() -> argparse.ArgumentParser:
             "  python main.py serve --port 8001\n"
         ),
     )
+    parser.add_argument(
+        "--client",
+        "-c",
+        help="Client slug for multi-tenant data storage (e.g. stradit_india)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_selection(p):
@@ -752,6 +757,11 @@ def build_parser() -> argparse.ArgumentParser:
             "--person",
             action="store_true",
             help="treat the target as a person from people_targets.py instead of a company",
+        )
+        p.add_argument(
+            "--client",
+            "-c",
+            help="Client slug for multi-tenant data storage (e.g. stradit_india)",
         )
 
     def add_scrape_flags(p):
@@ -802,23 +812,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_status = sub.add_parser("status", help="what is stored, and how fresh it is")
     p_status.add_argument("--out-dir", default=DIGEST_DIR)
     p_status.add_argument("--person", action="store_true", help="show people instead of companies")
+    p_status.add_argument("--client", "-c", help="Client slug for multi-tenant data storage (e.g. stradit_india)")
 
-    sub.add_parser(
+    p_backfill = sub.add_parser(
         "db-backfill",
         help="sync existing JSON output into Postgres (needs DATABASE_URL in .env)",
     )
+    p_backfill.add_argument("--client", "-c", help="Client slug for multi-tenant data storage (e.g. stradit_india)")
 
     p_serve = sub.add_parser("serve", help="serve the frontend on localhost")
     p_serve.add_argument("--port", type=int, default=DEFAULT_PORT)
+    p_serve.add_argument("--client", "-c", help="Client slug for multi-tenant data storage (e.g. stradit_india)")
 
     p_list = sub.add_parser("list", help="show configured accounts")
     p_list.add_argument("--person", action="store_true", help="show people instead of companies")
+    p_list.add_argument("--client", "-c", help="Client slug for multi-tenant data storage (e.g. stradit_india)")
     return parser
 
 
-def main() -> int:
-    args = build_parser().parse_args()
-
+def _dispatch_command(args) -> int:
     if args.command == "scrape":
         return asyncio.run(cmd_scrape(args))
     if args.command == "digest":
@@ -834,6 +846,36 @@ def main() -> int:
     if args.command == "list":
         return cmd_list(args)
     return 1
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    client_slug = getattr(args, "client", None)
+    if client_slug:
+        os.environ["CLIENT_SLUG"] = client_slug
+        tenant_mod = None
+        try:
+            if "db.tenant" in sys.modules:
+                tenant_mod = sys.modules["db.tenant"]
+            elif "_root_db_tenant" in sys.modules:
+                tenant_mod = sys.modules["_root_db_tenant"]
+            else:
+                import importlib.util
+                curr_dir = os.path.dirname(os.path.abspath(__file__))
+                root_path = os.path.abspath(os.path.join(curr_dir, "..", "..", "db", "tenant.py"))
+                if os.path.isfile(root_path):
+                    spec = importlib.util.spec_from_file_location("_root_db_tenant", root_path)
+                    tenant_mod = importlib.util.module_from_spec(spec)
+                    sys.modules["_root_db_tenant"] = tenant_mod
+                    spec.loader.exec_module(tenant_mod)
+        except Exception:
+            tenant_mod = None
+
+        if tenant_mod and hasattr(tenant_mod, "tenant_scope"):
+            with tenant_mod.tenant_scope(client_slug):
+                return _dispatch_command(args)
+
+    return _dispatch_command(args)
 
 
 if __name__ == "__main__":

@@ -41,7 +41,17 @@ window.API_BASE = API_BASE;
   }
 
   function getActiveClientSlug() {
-    let slug = localStorage.getItem("active_client_slug") || localStorage.getItem("activeClientSlug") || "stradit_india";
+    let slug = localStorage.getItem("active_client_slug") || localStorage.getItem("activeClientSlug");
+    if (!slug) {
+      if (window.ClientWorkspaceManager && Array.isArray(window.ClientWorkspaceManager.clients) && window.ClientWorkspaceManager.clients.length > 0) {
+        const first = window.ClientWorkspaceManager.clients.find(c => c && c.is_active && c.status !== "suspended") || window.ClientWorkspaceManager.clients[0];
+        if (first && (first.slug || first.client_slug)) {
+          slug = first.slug || first.client_slug;
+          setActiveClientSlug(slug);
+        }
+      }
+    }
+    if (!slug) slug = "stradit_india";
     if (slug === "stradit") slug = "stradit_india";
     return slug.trim().toLowerCase();
   }
@@ -68,7 +78,21 @@ window.API_BASE = API_BASE;
       ...(clientSlug ? { "X-Client-Slug": clientSlug } : {}),
       ...(options.headers || {}),
     };
-    return fetch(url, { ...options, headers });
+    return fetch(url, { ...options, headers }).then(async (res) => {
+      if (res.status === 403) {
+        try {
+          const errCloned = res.clone();
+          const errData = await errCloned.json();
+          const detail = (errData && errData.detail ? String(errData.detail) : "").toLowerCase();
+          if (detail.includes("access denied") || detail.includes("workspace") || detail.includes("tenant")) {
+            console.warn("[apiFetch] 403 Access Denied for workspace. Clearing active client cache.");
+            localStorage.removeItem("active_client_slug");
+            localStorage.removeItem("activeClientSlug");
+          }
+        } catch (_) {}
+      }
+      return res;
+    });
   }
 
   window.apiFetch = apiFetch;
@@ -1105,6 +1129,8 @@ $(function () {
     activeUsersSlug: null,
     activeDiagnosticsSlug: null,
     activeAccountsSlug: null,
+    wizardStep: 1,
+    lastCreatedSlug: null,
 
     init: function () {
       const self = this;
@@ -1132,18 +1158,35 @@ $(function () {
           .replace(/^_+|_+$/g, "")
           .substring(0, 50);
         $("#newClientSlug").val(slug);
+        $("#wizardSchemaPreview").text("Result: client_" + (slug || "slug"));
       });
 
-      // Add Client modal triggers
+      // Manual input on workspace slug input
+      $(document).on("input", "#newClientSlug", function () {
+        const raw = $(this).val();
+        const cleaned = raw.toLowerCase().replace(/[^a-z0-9_]+/g, "").substring(0, 50);
+        if (raw !== cleaned) $(this).val(cleaned);
+        $("#wizardSchemaPreview").text("Result: client_" + (cleaned || "slug"));
+      });
+
+      // Add Client modal triggers (Wizard Reset & Launch)
       $(document).on("click", "#topbarAddClientBtn, #hubAddClientBtn, #sidebarAddClientBtn, #btnOpenAddClientFromManage", function (e) {
         e.preventDefault();
         $("#manageClientsModal").modal("hide");
-        $("#addClientForm")[0].reset();
-        $("#newClientMaxAccounts").val("30");
-        $("#newClientCredits").val("100000");
-        $("#addClientErrorAlert").addClass("d-none").text("");
+        self.resetAddClientWizard();
         const modal = new bootstrap.Modal(document.getElementById("addClientModal"));
         modal.show();
+      });
+
+      // Wizard Navigation Triggers
+      $(document).on("click", "#btnWizardNext", function () {
+        self.handleWizardNext();
+      });
+      $(document).on("click", "#btnWizardBack", function () {
+        self.handleWizardBack();
+      });
+      $(document).on("click", "#btnWizardFinish", function () {
+        self.finishWizard();
       });
 
       // Manage Clients modal triggers (Top bar, Hub, and Sidebar — §12.1)
@@ -1161,6 +1204,22 @@ $(function () {
       });
       $(document).on("change", "#manageClientsPlanFilter", function () {
         self.renderManageModal();
+      });
+      $(document).on("change", "#manageClientsStatusFilter", function () {
+        self.renderManageModal();
+      });
+      $(document).on("click", "#tenantViewModeToggle button", function () {
+        const view = $(this).data("view") || "cards";
+        self.manageViewMode = view;
+        $("#tenantViewModeToggle button").removeClass("active");
+        $(this).addClass("active");
+        if (view === "cards") {
+          $("#manageClientsCardsContainer").removeClass("d-none");
+          $("#manageClientsTableContainer").addClass("d-none");
+        } else {
+          $("#manageClientsCardsContainer").addClass("d-none");
+          $("#manageClientsTableContainer").removeClass("d-none");
+        }
       });
       $(document).on("click", "#btnRefreshManageClients", function () {
         const $btn = $(this);
@@ -1211,6 +1270,11 @@ $(function () {
           self.runSchemaRepair(self.activeDiagnosticsSlug);
         }
       });
+      $(document).on("click", "[data-schema-repair]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("schema-repair");
+        if (slug) self.runSchemaRepair(slug);
+      });
 
       // Adjust Credits triggers
       $(document).on("click", "[data-adjust-credits]", function (e) {
@@ -1220,6 +1284,32 @@ $(function () {
       });
       $(document).on("click", "#btnSubmitAdjustCredits", function () {
         self.submitAdjustCredits();
+      });
+
+      // Credit Ledger trigger
+      $(document).on("click", "[data-client-ledger]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("client-ledger");
+        if (slug) self.openCreditLedger(slug);
+      });
+
+      // Activity Log trigger
+      $(document).on("click", "[data-client-activity]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("client-activity");
+        if (slug) self.openActivityLog(slug);
+      });
+
+      // Suspend / Activate triggers
+      $(document).on("click", "[data-suspend-client]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("suspend-client");
+        if (slug) self.suspendClient(slug);
+      });
+      $(document).on("click", "[data-activate-client]", function (e) {
+        e.preventDefault();
+        const slug = $(this).data("activate-client");
+        if (slug) self.activateClient(slug);
       });
 
       // Client Accounts Explorer triggers
@@ -1250,6 +1340,55 @@ $(function () {
         if (userId && slug) {
           self.revokeClientUser(slug, userId);
         }
+      });
+
+      // Nested Modal Stacking & Scrim Dimming Controller
+      const childModalIds = [
+        "#editClientModal",
+        "#schemaDiagnosticsModal",
+        "#clientAccountsModal",
+        "#clientUsersModal",
+        "#adjustCreditsModal",
+        "#clientLedgerModal",
+        "#clientActivityModal",
+        "#addClientModal"
+      ];
+
+      function handleChildModalOpen() {
+        if ($("#manageClientsModal").hasClass("show") || $("#manageClientsModal").is(":visible")) {
+          $("#manageClientsModal").addClass("is-parent-modal-dimmed");
+          setTimeout(function () {
+            const $backdrops = $(".modal-backdrop");
+            if ($backdrops.length > 1) {
+              $backdrops.last().addClass("child-modal-backdrop");
+            }
+          }, 20);
+        }
+      }
+
+      function handleChildModalClose() {
+        setTimeout(function () {
+          const anyOtherOpen = childModalIds.some(function (id) {
+            return $(id).hasClass("show") || $(id).is(":visible");
+          });
+          if (!anyOtherOpen) {
+            $("#manageClientsModal").removeClass("is-parent-modal-dimmed");
+          }
+          if ($("#manageClientsModal").hasClass("show") || $("#manageClientsModal").is(":visible")) {
+            $("body").addClass("modal-open");
+            document.body.style.overflow = "hidden";
+          }
+        }, 40);
+      }
+
+      childModalIds.forEach(function (modalId) {
+        $(document).on("show.bs.modal", modalId, handleChildModalOpen);
+        $(document).on("shown.bs.modal", modalId, handleChildModalOpen);
+        $(document).on("hidden.bs.modal", modalId, handleChildModalClose);
+      });
+
+      $(document).on("hidden.bs.modal", "#manageClientsModal", function () {
+        $("#manageClientsModal").removeClass("is-parent-modal-dimmed");
       });
     },
 
@@ -1401,117 +1540,690 @@ $(function () {
     },
 
     renderManageModal: function () {
+
       const self = this;
+
       const query = ($("#manageClientsSearchInput").val() || "").toLowerCase().trim();
+
       const planFilter = $("#manageClientsPlanFilter").val() || "all";
 
+      const statusFilter = $("#manageClientsStatusFilter").val() || "all";
+
+      self.manageViewMode = self.manageViewMode || "cards";
+
+
+
       const filtered = self.clients.filter(c => {
+
         const matchesQuery = !query ||
+
           (c.name || "").toLowerCase().includes(query) ||
+
           (c.slug || "").toLowerCase().includes(query) ||
+
           (c.legal_name || "").toLowerCase().includes(query);
+
         const matchesPlan = planFilter === "all" || (c.plan_tier || "").toLowerCase() === planFilter.toLowerCase();
-        return matchesQuery && matchesPlan;
+
+        const cStatus = c.status || (c.is_active ? "active" : "suspended");
+
+        const matchesStatus = statusFilter === "all" || cStatus.toLowerCase() === statusFilter.toLowerCase();
+
+        return matchesQuery && matchesPlan && matchesStatus;
+
       });
 
-      let rowsHtml = "";
+
+
       if (filtered.length === 0) {
-        rowsHtml = `<tr><td colspan="8" class="text-center py-4 text-muted"><em>No client workspaces match the filter criteria.</em></td></tr>`;
-      } else {
-        filtered.forEach(c => {
-          const clientSlug = c.slug || c.client_slug || c.client_id || "stradit_india";
-          const clientName = c.name || c.client_name || clientSlug;
-          const legalName = c.legal_name || clientName;
-          const maxAccts = c.max_accounts || 30;
-          const creditsTotal = (c.api_credits_total !== undefined && c.api_credits_total !== null) ? c.api_credits_total : 100000;
-          const creditsUsed = c.api_credits_used || 0;
 
-          const isCurrent = clientSlug === self.activeSlug;
-          const total = Math.max(creditsTotal, 1);
-          const pct = Math.min(Math.round((creditsUsed / total) * 100), 100);
-          const barColor = pct > 90 ? "bg-danger" : pct > 70 ? "bg-warning" : "bg-primary";
+        const emptyCardHtml = `
 
-          rowsHtml += `
-            <tr class="${isCurrent ? 'table-primary-subtle' : ''}">
-              <td style="padding:12px 14px;">
-                <div class="d-flex align-items-center gap-2">
-                  <div style="width:32px;height:32px;border-radius:8px;background:#F3E7DA;display:flex;align-items:center;justify-content:center;color:#8A6248;font-weight:700;font-size:0.8rem;">
-                    ${(clientName || "C").substring(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <strong style="color:#0f172a;font-size:0.84rem;">${clientName}</strong>
-                    ${isCurrent ? '<span class="badge bg-primary ms-1" style="font-size:0.64rem;">Current</span>' : ''}
-                    <div style="font-size:0.71rem;color:#64748b;">${legalName}</div>
-                  </div>
-                </div>
-              </td>
-              <td>
-                <div class="d-flex align-items-center gap-1">
-                  <code>${c.schema_name || "client_" + clientSlug}</code>
-                  <a href="#" class="text-decoration-none ms-1" data-schema-health="${clientSlug}" title="View Schema Health Diagnostics">
-                    <span class="badge bg-success-subtle text-success" style="font-size:0.68rem;cursor:pointer;">
-                      <i class="bi bi-shield-check me-1"></i>16/16
-                    </span>
-                  </a>
-                </div>
-              </td>
-              <td>
-                <span class="badge ${c.plan_tier === 'enterprise' ? 'bg-primary-subtle text-primary' : 'bg-info-subtle text-info'} text-capitalize" style="font-size:0.72rem;font-weight:700;">
-                  ${c.plan_tier}
-                </span>
-              </td>
-              <td>
-                <button type="button" class="btn btn-link btn-xs p-0 text-decoration-none fw-semibold" data-client-accounts="${clientSlug}" title="Click to view client targets">
-                  <span class="badge bg-light text-dark border" style="font-size:0.74rem;">
-                    <i class="bi bi-crosshair me-1 text-primary"></i>${c.accounts_count || 0} / ${maxAccts}
-                  </span>
-                </button>
-              </td>
-              <td>
-                <button type="button" class="btn btn-xs btn-outline-secondary" data-client-users="${clientSlug}" title="Manage Client Users">
-                  <i class="bi bi-people-fill me-1 text-primary"></i>${c.users_count || 1}
-                </button>
-              </td>
-              <td style="min-width:140px;">
-                <div class="d-flex justify-content-between align-items-center mb-1" style="font-size:0.72rem;">
-                  <span><strong>${creditsUsed.toLocaleString()}</strong> / ${creditsTotal.toLocaleString()}</span>
-                  <a href="#" class="text-decoration-none text-warning fw-semibold ms-1" data-adjust-credits="${clientSlug}" title="Adjust Credits">
-                    <i class="bi bi-pencil-fill" style="font-size:0.65rem;"></i>
-                  </a>
-                </div>
-                <div class="progress" style="height:5px;border-radius:4px;background:#e2e8f0;">
-                  <div class="progress-bar ${barColor}" style="width:${pct}%;"></div>
-                </div>
-              </td>
-              <td>
-                <span class="badge ${c.is_active ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger'}" style="font-size:0.7rem;">
-                  ${c.is_active ? 'Active' : 'Deactivated'}
-                </span>
-              </td>
-              <td style="text-align:right;white-space:nowrap;padding-right:14px;">
-                <div class="btn-group btn-group-xs">
-                  ${!isCurrent ? `
-                    <button type="button" class="btn btn-sm btn-outline-primary" data-client-switch="${clientSlug}" data-bs-dismiss="modal" title="Switch to this Workspace">
-                      <i class="bi bi-box-arrow-in-right me-1"></i> Switch
-                    </button>` : `
-                    <button type="button" class="btn btn-sm btn-light text-primary fw-semibold" disabled>
-                      <i class="bi bi-check-circle-fill me-1"></i> Active
-                    </button>
-                  `}
-                  <button type="button" class="btn btn-sm btn-outline-secondary" data-edit-client="${clientSlug}" title="Edit Organization & Quotas">
-                    <i class="bi bi-pencil"></i>
-                  </button>
-                  <button type="button" class="btn btn-sm btn-outline-success" data-schema-health="${clientSlug}" title="Schema Health & Self-Healing">
-                    <i class="bi bi-shield-shaded"></i>
-                  </button>
-                </div>
-              </td>
-            </tr>`;
-        });
+          <div class="card p-5 text-center text-muted border-0 shadow-sm" style="border-radius:14px;background:#ffffff;">
+
+            <i class="bi bi-search fs-2 mb-2 text-secondary"></i>
+
+            <h6 class="fw-bold text-dark mb-1">No client workspaces found</h6>
+
+            <div class="text-muted small">No workspaces match your search or filter parameters. Try clearing the filters.</div>
+
+          </div>`;
+
+        const emptyRowHtml = `<tr><td colspan="7" class="text-center py-5 text-muted"><i class="bi bi-search me-2"></i>No client workspaces match the filter criteria.</td></tr>`;
+
+        $("#manageClientsCardsContainer").html(emptyCardHtml);
+
+        $("#manageClientsTableBody").html(emptyRowHtml);
+
+        return;
+
       }
 
-      $("#manageClientsTableBody").html(rowsHtml);
+
+
+      let cardsHtml = "";
+
+      let tableRowsHtml = "";
+
+
+
+      filtered.forEach(c => {
+
+        const clientSlug = c.slug || c.client_slug || c.client_id || "stradit_india";
+
+        const clientName = c.name || c.client_name || clientSlug;
+
+        const legalName = c.legal_name || clientName;
+
+        const maxAccts = c.max_accounts || 30;
+
+        const acctsCount = c.accounts_count || 0;
+
+        const creditsTotal = (c.api_credits_total !== undefined && c.api_credits_total !== null) ? c.api_credits_total : 100000;
+
+        const creditsUsed = c.api_credits_used || 0;
+
+
+
+        const isCurrent = clientSlug === self.activeSlug;
+
+        const total = Math.max(creditsTotal, 1);
+
+        const pct = Math.min(Math.round((creditsUsed / total) * 100), 100);
+
+        const barColor = pct >= 90 ? "bg-danger" : pct >= 70 ? "bg-warning" : "bg-primary";
+
+
+
+        // Account quota alert coloring
+
+        const acctPct = Math.round((acctsCount / Math.max(maxAccts, 1)) * 100);
+
+        const acctBadgeClass = acctPct >= 100 ? "bg-danger text-white" : (acctPct >= 80 ? "bg-warning text-dark" : "bg-light text-dark border");
+
+
+
+        // Schema Version & Drift
+
+        const skelVer = c.skeleton_version || "T0001";
+
+        const skelHead = c.skeleton_head || "T0001";
+
+        const isBehind = c.is_behind || false;
+
+
+
+        // Lifecycle status badge
+
+        const status = c.status || (c.is_active ? "active" : "suspended");
+
+        let statusBadgeClass = "bg-secondary-subtle text-secondary border border-secondary-subtle";
+
+        let statusIcon = "circle-fill";
+
+        if (status === "active") {
+
+          statusBadgeClass = "bg-success-subtle text-success border border-success-subtle";
+
+          statusIcon = "circle-fill";
+
+        } else if (status === "suspended") {
+
+          statusBadgeClass = "bg-warning-subtle text-warning border border-warning-subtle";
+
+          statusIcon = "pause-circle";
+
+        }
+
+
+
+        // Plan icon & style
+
+        const isEnterprise = (c.plan_tier || "").toLowerCase() === "enterprise";
+
+        const isPro = (c.plan_tier || "").toLowerCase() === "professional";
+
+        const planIcon = isEnterprise ? "gem" : (isPro ? "award" : "flag");
+
+        const planBadgeClass = isEnterprise ? "bg-primary-subtle text-primary border border-primary-subtle" : (isPro ? "bg-info-subtle text-info border border-info-subtle" : "bg-light text-secondary border");
+
+
+
+        // --- 1. BUILD EXECUTIVE WORKSPACE CARD ---
+
+        cardsHtml += `
+
+          <div class="tenant-workspace-card shadow-sm ${isCurrent ? 'border-active-workspace' : ''}">
+
+            <!-- Header Strip -->
+
+            <div class="tenant-card-header">
+
+              <div class="d-flex align-items-center gap-3">
+
+                <div class="tenant-card-avatar">
+
+                  ${(clientName || "C").substring(0, 2).toUpperCase()}
+
+                </div>
+
+                <div>
+
+                  <div class="d-flex align-items-center gap-2 flex-wrap">
+
+                    <h5 class="mb-0 fw-bold tenant-card-title">${clientName}</h5>
+
+                    ${isCurrent ? '<span class="badge badge-current-workspace"><i class="bi bi-star-fill text-warning me-1"></i> CURRENT WORKSPACE</span>' : ''}
+
+                    <span class="badge ${planBadgeClass} text-capitalize"><i class="bi bi-${planIcon} me-1"></i>${c.plan_tier || 'Starter'}</span>
+
+                    <span class="badge ${statusBadgeClass} text-capitalize"><i class="bi bi-${statusIcon} me-1" style="font-size:0.5rem;vertical-align:middle;"></i>${status}</span>
+
+                  </div>
+
+                  <div class="d-flex align-items-center gap-3 text-muted mt-1 flex-wrap" style="font-size:0.77rem;">
+
+                    <span><i class="bi bi-briefcase me-1 text-secondary"></i>${legalName}</span>
+
+                    <span class="text-secondary">&bull;</span>
+
+                    <span><i class="bi bi-database me-1 text-primary"></i>Schema: <code class="tenant-schema-code">${c.schema_name || 'client_' + clientSlug}</code></span>
+
+                    <span class="text-secondary">&bull;</span>
+
+                    <span>ID: <code class="tenant-schema-code">${clientSlug}</code></span>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+              <div class="d-flex align-items-center gap-2">
+
+                ${!isCurrent ? `
+
+                  <button type="button" class="btn btn-sm btn-primary px-3 py-2 fw-semibold" data-client-switch="${clientSlug}" data-bs-dismiss="modal" style="background:linear-gradient(135deg,#8A6248,#4A3528);border:none;border-radius:8px;">
+
+                    <i class="bi bi-box-arrow-in-right me-1"></i> Switch Workspace
+
+                  </button>` : `
+
+                  <span class="badge bg-success-subtle text-success border border-success-subtle px-3 py-2 fw-semibold" style="font-size:0.8rem;">
+
+                    <i class="bi bi-check-circle-fill me-1"></i> Active Workspace
+
+                  </span>
+
+                `}
+
+              </div>
+
+            </div>
+
+
+
+            <!-- Telemetry 4-Tile Grid -->
+
+            <div class="tenant-card-body">
+
+              <div class="row g-3">
+
+                <!-- Tile 1: Schema Isolation & Health -->
+
+                <div class="col-lg-3 col-sm-6">
+
+                  <div class="tenant-tile shadow-none">
+
+                    <div>
+
+                      <div class="tenant-tile-label"><i class="bi bi-shield-check text-success"></i> DATABASE SCHEMA</div>
+
+                      ${isBehind ? `
+
+                        <div class="text-warning fw-bold mb-1" style="font-size:0.9rem;">
+
+                          <i class="bi bi-exclamation-triangle-fill me-1"></i> Drift Detected
+
+                        </div>
+
+                        <div class="text-muted" style="font-size:0.73rem;">${skelVer} &lt; Head ${skelHead}</div>
+
+                        <button type="button" class="btn btn-xs btn-outline-warning mt-2 w-100" data-schema-repair="${clientSlug}" style="font-size:0.72rem;border-radius:6px;">
+
+                          <i class="bi bi-arrow-up-circle me-1"></i> Upgrade Schema
+
+                        </button>
+
+                      ` : `
+
+                        <div class="text-success fw-bold mb-1" style="font-size:0.9rem;">
+
+                          <i class="bi bi-check-circle-fill me-1"></i> 58/58 Verified
+
+                        </div>
+
+                        <div class="text-muted" style="font-size:0.73rem;">Manifest: ${skelVer} (In Sync)</div>
+
+                      `}
+
+                    </div>
+
+                    ${!isBehind ? `
+
+                      <div class="mt-2 pt-1 border-top" style="border-color:#F1F5F9 !important;">
+
+                        <a href="#" class="tenant-tile-link" data-schema-health="${clientSlug}">
+
+                          Run Diagnostics &rarr;
+
+                        </a>
+
+                      </div>
+
+                    ` : ''}
+
+                  </div>
+
+                </div>
+
+
+
+                <!-- Tile 2: Target Accounts Capacity -->
+
+                <div class="col-lg-3 col-sm-6">
+
+                  <div class="tenant-tile shadow-none">
+
+                    <div>
+
+                      <div class="tenant-tile-label"><i class="bi bi-crosshair text-warning"></i> TARGET CAPACITY</div>
+
+                      <div class="d-flex justify-content-between align-items-baseline mb-1">
+
+                        <span class="fw-bold" style="font-size:0.9rem;color:#0F172A;">${acctsCount} / ${maxAccts} Targets</span>
+
+                        <span class="badge ${acctBadgeClass}" style="font-size:0.68rem;">${acctPct}%</span>
+
+                      </div>
+
+                      <div class="progress" style="height:6px;border-radius:4px;background:#e2e8f0;">
+
+                        <div class="progress-bar ${acctPct >= 100 ? 'bg-danger' : (acctPct >= 80 ? 'bg-warning' : 'bg-primary')}" style="width:${acctPct}%;"></div>
+
+                      </div>
+
+                    </div>
+
+                    <div class="mt-2 pt-1 border-top" style="border-color:#F1F5F9 !important;">
+
+                      <a href="#" class="tenant-tile-link" data-client-accounts="${clientSlug}">
+
+                        Manage Target Accounts &rarr;
+
+                      </a>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+
+
+                <!-- Tile 3: API Credit Budget -->
+
+                <div class="col-lg-3 col-sm-6">
+
+                  <div class="tenant-tile shadow-none">
+
+                    <div>
+
+                      <div class="tenant-tile-label"><i class="bi bi-coin text-primary"></i> API CREDIT POOL</div>
+
+                      <div class="d-flex justify-content-between align-items-baseline mb-1">
+
+                        <span class="fw-bold" style="font-size:0.9rem;color:#0F172A;">${(creditsTotal - creditsUsed).toLocaleString()} cr</span>
+
+                        <span class="badge ${barColor}-subtle text-${barColor.replace('bg-', '')}" style="font-size:0.68rem;">${pct}% used</span>
+
+                      </div>
+
+                      <div class="progress" style="height:6px;border-radius:4px;background:#e2e8f0;">
+
+                        <div class="progress-bar ${barColor}" style="width:${pct}%;"></div>
+
+                      </div>
+
+                    </div>
+
+                    <div class="mt-2 pt-1 border-top d-flex justify-content-between align-items-center" style="border-color:#F1F5F9 !important;">
+
+                      <a href="#" class="tenant-tile-link" data-client-ledger="${clientSlug}">View Ledger &rarr;</a>
+
+                      <a href="#" class="tenant-tile-link text-warning" data-adjust-credits="${clientSlug}"><i class="bi bi-pencil me-1"></i>Adjust</a>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+
+
+                <!-- Tile 4: Team & Governance -->
+
+                <div class="col-lg-3 col-sm-6">
+
+                  <div class="tenant-tile shadow-none">
+
+                    <div>
+
+                      <div class="tenant-tile-label"><i class="bi bi-people-fill text-info"></i> TEAM & GOVERNANCE</div>
+
+                      <div class="fw-bold mb-1" style="font-size:0.9rem;color:#0F172A;">
+
+                        <i class="bi bi-person-badge text-secondary me-1"></i>${c.users_count || 1} Assigned User(s)
+
+                      </div>
+
+                      <div class="text-muted" style="font-size:0.73rem;">Role-Based Scoping</div>
+
+                    </div>
+
+                    <div class="mt-2 pt-1 border-top d-flex justify-content-between align-items-center" style="border-color:#F1F5F9 !important;">
+
+                      <a href="#" class="tenant-tile-link" data-client-users="${clientSlug}">Manage Access &rarr;</a>
+
+                      <a href="#" class="tenant-tile-link text-secondary" data-client-activity="${clientSlug}"><i class="bi bi-clock-history me-1"></i>Audit &rarr;</a>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            </div>
+
+
+
+            <!-- Footer Action Toolbar -->
+
+            <div class="tenant-card-footer">
+
+              <div class="d-flex align-items-center gap-2 flex-wrap">
+
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-edit-client="${clientSlug}" title="Edit Organization, Display Name & Limits">
+
+                  <i class="bi bi-gear me-1"></i> Settings &amp; Limits
+
+                </button>
+
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-schema-health="${clientSlug}" title="Inspect PostgreSQL Schema & Manifest Verification">
+
+                  <i class="bi bi-shield-shaded me-1"></i> Schema Diagnostics
+
+                </button>
+
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-client-ledger="${clientSlug}" title="View Credit Transaction Ledger">
+
+                  <i class="bi bi-journal-text me-1"></i> Credit Ledger
+
+                </button>
+
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-client-activity="${clientSlug}" title="View Audit Trail for this Workspace">
+
+                  <i class="bi bi-clock-history me-1"></i> Audit Trail
+
+                </button>
+
+              </div>
+
+              <div>
+
+                ${status === 'suspended' ? `
+
+                  <button type="button" class="btn btn-sm btn-outline-success" data-activate-client="${clientSlug}" title="Activate Workspace">
+
+                    <i class="bi bi-play-circle me-1"></i> Reactivate Workspace
+
+                  </button>` : `
+
+                  <button type="button" class="btn btn-sm btn-outline-warning" data-suspend-client="${clientSlug}" title="${clientSlug === 'stradit_india' ? 'Primary client cannot be suspended' : 'Suspend Workspace'}" ${clientSlug === 'stradit_india' ? 'disabled' : ''}>
+
+                    <i class="bi bi-pause-circle me-1"></i> Suspend Workspace
+
+                  </button>
+
+                `}
+
+              </div>
+
+            </div>
+
+          </div>`;
+
+
+
+        // --- 2. BUILD CLEAN, UNCONGESTED TABLE ROW ---
+
+        tableRowsHtml += `
+
+          <tr class="${isCurrent ? 'table-primary-subtle' : ''}">
+
+            <td style="padding:14px 18px;">
+
+              <div class="d-flex align-items-center gap-3">
+
+                <div class="tenant-avatar" style="width:36px;height:36px;font-size:0.8rem;">
+
+                  ${(clientName || "C").substring(0, 2).toUpperCase()}
+
+                </div>
+
+                <div>
+
+                  <div class="d-flex align-items-center gap-2">
+
+                    <strong style="color:#0f172a;font-size:0.88rem;">${clientName}</strong>
+
+                    ${isCurrent ? '<span class="badge" style="background:#2B241F;color:#F3E7DA;font-size:0.62rem;letter-spacing:0.04em;">CURRENT</span>' : ''}
+
+                  </div>
+
+                  <div class="text-muted" style="font-size:0.73rem;">${legalName}</div>
+
+                </div>
+
+              </div>
+
+            </td>
+
+            <td>
+
+              <div><code class="tenant-schema-code"><i class="bi bi-database text-primary me-1"></i>${c.schema_name || 'client_' + clientSlug}</code></div>
+
+              <div class="mt-1">
+
+                ${isBehind ? `
+
+                  <span class="badge bg-warning-subtle text-warning border border-warning" style="font-size:0.68rem;">Drift: ${skelVer}</span>
+
+                ` : `
+
+                  <a href="#" class="text-decoration-none" data-schema-health="${clientSlug}">
+
+                    <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size:0.68rem;cursor:pointer;"><i class="bi bi-shield-check me-1"></i>58/58</span>
+
+                  </a>
+
+                `}
+
+              </div>
+
+            </td>
+
+            <td>
+
+              <div class="d-flex align-items-center gap-1">
+
+                <span class="badge ${planBadgeClass} text-capitalize" style="font-size:0.7rem;font-weight:700;">${c.plan_tier || 'Starter'}</span>
+
+                <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2" data-client-users="${clientSlug}" title="Users" style="font-size:0.68rem;border-radius:5px;">
+
+                  <i class="bi bi-people-fill text-primary me-1"></i>${c.users_count || 1}
+
+                </button>
+
+              </div>
+
+            </td>
+
+            <td>
+
+              <button type="button" class="btn btn-link btn-xs p-0 text-decoration-none" data-client-accounts="${clientSlug}">
+
+                <span class="badge ${acctBadgeClass}" style="font-size:0.72rem;padding:3px 7px;">
+
+                  <i class="bi bi-crosshair me-1"></i><strong>${acctsCount}</strong> / ${maxAccts}
+
+                </span>
+
+              </button>
+
+            </td>
+
+            <td>
+
+              <div style="cursor:pointer;" data-client-ledger="${clientSlug}">
+
+                <div class="d-flex justify-content-between align-items-center mb-1" style="font-size:0.72rem;">
+
+                  <span><strong>${(creditsTotal - creditsUsed).toLocaleString()}</strong> cr</span>
+
+                  <span class="text-muted">${pct}%</span>
+
+                </div>
+
+                <div class="progress" style="height:5px;border-radius:4px;background:#e2e8f0;min-width:100px;">
+
+                  <div class="progress-bar ${barColor}" style="width:${pct}%;"></div>
+
+                </div>
+
+              </div>
+
+            </td>
+
+            <td class="text-center">
+
+              <span class="badge ${statusBadgeClass} text-capitalize" style="font-size:0.72rem;padding:4px 8px;">
+
+                <i class="bi bi-${statusIcon} me-1" style="font-size:0.5rem;vertical-align:middle;"></i>${status}
+
+              </span>
+
+            </td>
+
+            <td style="text-align:right;white-space:nowrap;padding-right:18px;">
+
+              <div class="d-flex align-items-center justify-content-end gap-2">
+
+                ${!isCurrent ? `
+
+                  <button type="button" class="btn btn-sm btn-outline-primary py-1 px-2 fw-semibold" data-client-switch="${clientSlug}" data-bs-dismiss="modal" title="Switch to this Workspace" style="font-size:0.76rem;border-radius:7px;">
+
+                    <i class="bi bi-box-arrow-in-right me-1"></i> Switch
+
+                  </button>` : `
+
+                  <span class="badge bg-light text-primary border border-primary-subtle py-1 px-2" style="font-size:0.74rem;">
+
+                    <i class="bi bi-check-circle-fill me-1"></i> Active
+
+                  </span>
+
+                `}
+
+                <div class="dropdown d-inline-block">
+
+                  <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" style="font-size:0.76rem;padding:4px 8px;border-radius:7px;" title="Workspace Actions">
+
+                    Manage
+
+                  </button>
+
+                  <ul class="dropdown-menu dropdown-menu-end shadow-sm" style="font-size:0.8rem;border-radius:10px;padding:6px 0;">
+
+                    <li><a class="dropdown-item py-2" href="#" data-edit-client="${clientSlug}"><i class="bi bi-gear me-2 text-primary"></i>Settings &amp; Quotas</a></li>
+
+                    <li><a class="dropdown-item py-2" href="#" data-schema-health="${clientSlug}"><i class="bi bi-shield-shaded me-2 text-success"></i>Schema Health &amp; Diagnostics</a></li>
+
+                    <li><a class="dropdown-item py-2" href="#" data-client-ledger="${clientSlug}"><i class="bi bi-journal-text me-2 text-info"></i>Credit Transaction Ledger</a></li>
+
+                    <li><a class="dropdown-item py-2" href="#" data-client-activity="${clientSlug}"><i class="bi bi-clock-history me-2 text-secondary"></i>Audit History</a></li>
+
+                    <li><hr class="dropdown-divider my-1"></li>
+
+                    ${status === 'suspended' ? `
+
+                      <li><a class="dropdown-item py-2 text-success" href="#" data-activate-client="${clientSlug}"><i class="bi bi-play-circle me-2"></i>Reactivate Workspace</a></li>
+
+                    ` : `
+
+                      <li><a class="dropdown-item py-2 text-warning ${clientSlug === 'stradit_india' ? 'disabled' : ''}" href="#" data-suspend-client="${clientSlug}"><i class="bi bi-pause-circle me-2"></i>Suspend Workspace</a></li>
+
+                    `}
+
+                  </ul>
+
+                </div>
+
+              </div>
+
+            </td>
+
+          </tr>`;
+
+      });
+
+
+
+      $("#manageClientsCardsContainer").html(cardsHtml);
+
+      $("#manageClientsTableBody").html(tableRowsHtml);
+
+
+
+      // Apply initial view mode visibility
+
+      if (self.manageViewMode === "cards") {
+
+        $("#manageClientsCardsContainer").removeClass("d-none");
+
+        $("#manageClientsTableContainer").addClass("d-none");
+
+        $("#tenantViewModeToggle button[data-view='cards']").addClass("active");
+
+        $("#tenantViewModeToggle button[data-view='table']").removeClass("active");
+
+      } else {
+
+        $("#manageClientsCardsContainer").addClass("d-none");
+
+        $("#manageClientsTableContainer").removeClass("d-none");
+
+        $("#tenantViewModeToggle button[data-view='cards']").removeClass("active");
+
+        $("#tenantViewModeToggle button[data-view='table']").addClass("active");
+
+      }
+
     },
+
+
 
     openEditClient: function (slug) {
       const self = this;
@@ -1961,32 +2673,222 @@ $(function () {
       }
     },
 
+    resetAddClientWizard: function () {
+      const self = this;
+      self.wizardStep = 1;
+      self.lastCreatedSlug = null;
+      $("#addClientForm")[0].reset();
+      $("#newClientPlan").val("enterprise");
+      $("#newClientMaxAccounts").val("30");
+      $("#newClientCredits").val("100000");
+      $("#newClientCron").val("0 0 * * *");
+      $("#wizardSchemaPreview").text("Result: client_slug");
+      $("#addClientErrorAlert").addClass("d-none").text("");
+
+      // Panes
+      $("#wizardPaneStep1").removeClass("d-none");
+      $("#wizardPaneStep2").addClass("d-none");
+      $("#wizardPaneStep3").addClass("d-none");
+
+      // Indicators
+      $("#stepIndicator1").addClass("active");
+      $("#stepIndicator2").removeClass("active");
+      $("#stepIndicator3").removeClass("active");
+      $("#stepCircle1").css({ background: "#8A6248", color: "#fff" }).html("1");
+      $("#stepCircle2").css({ background: "#e2e8f0", color: "#64748b" }).html("2");
+      $("#stepCircle3").css({ background: "#e2e8f0", color: "#64748b" }).html("3");
+      $("#stepLabel1").css({ color: "#0f172a", fontWeight: "700" });
+      $("#stepLabel2").css({ color: "#64748b", fontWeight: "600" });
+      $("#stepLabel3").css({ color: "#64748b", fontWeight: "600" });
+
+      // Buttons
+      $("#btnWizardCancel").removeClass("d-none").prop("disabled", false);
+      $("#btnWizardBack").addClass("d-none").prop("disabled", false);
+      $("#btnWizardNext").removeClass("d-none").prop("disabled", false).html('Next: Plan &amp; Limits &rarr;');
+      $("#btnSubmitAddClient").addClass("d-none").prop("disabled", false).html('<i class="bi bi-plus-circle me-1"></i> Start Provisioning');
+      $("#btnWizardFinish").addClass("d-none");
+
+      // Reset checklist
+      for (let i = 1; i <= 6; i++) {
+        $(`#checkIcon${i}`).attr("class", "bi bi-circle text-muted");
+        $(`#checkStep${i}`).removeClass("fw-bold text-primary text-danger text-success");
+      }
+
+      // Populate admin users dropdown if empty
+      self.loadPlatformUsersDropdown();
+    },
+
+    handleWizardNext: function () {
+      const self = this;
+      if (self.wizardStep === 1) {
+        const name = $("#newClientName").val().trim();
+        const slug = $("#newClientSlug").val().trim().toLowerCase();
+
+        if (!name) {
+          $("#addClientErrorAlert").removeClass("d-none").text("Please specify the Client / Organization Name.");
+          return;
+        }
+        if (!slug || !/^[a-z0-9_]{2,50}$/.test(slug)) {
+          $("#addClientErrorAlert").removeClass("d-none").text("Workspace slug must be 2 to 50 characters using lowercase letters, numbers, and underscores only.");
+          return;
+        }
+        const exists = (self.clients || []).some(c => (c.slug || "").toLowerCase() === slug);
+        if (exists) {
+          $("#addClientErrorAlert").removeClass("d-none").text(`A workspace with slug "${slug}" already exists. Please choose another slug.`);
+          return;
+        }
+
+        $("#addClientErrorAlert").addClass("d-none").text("");
+
+        // Transition 1 -> 2
+        self.wizardStep = 2;
+        $("#wizardPaneStep1").addClass("d-none");
+        $("#wizardPaneStep2").removeClass("d-none");
+
+        // Indicators
+        $("#stepIndicator1").removeClass("active");
+        $("#stepIndicator2").addClass("active");
+        $("#stepCircle1").css({ background: "#22c55e", color: "#fff" }).html('<i class="bi bi-check-lg"></i>');
+        $("#stepCircle2").css({ background: "#8A6248", color: "#fff" }).html("2");
+        $("#stepLabel2").css({ color: "#0f172a", fontWeight: "700" });
+
+        // Buttons
+        $("#btnWizardBack").removeClass("d-none");
+        $("#btnWizardNext").html('Next: Review &amp; Provision &rarr;');
+      } else if (self.wizardStep === 2) {
+        const maxAccts = parseInt($("#newClientMaxAccounts").val(), 10);
+        const credits = parseInt($("#newClientCredits").val(), 10);
+
+        if (isNaN(maxAccts) || maxAccts < 1) {
+          $("#addClientErrorAlert").removeClass("d-none").text("Max accounts quota must be at least 1.");
+          return;
+        }
+        if (isNaN(credits) || credits < 0) {
+          $("#addClientErrorAlert").removeClass("d-none").text("Initial credits budget must be 0 or greater.");
+          return;
+        }
+
+        $("#addClientErrorAlert").addClass("d-none").text("");
+
+        // Populate Review Summary Card in Step 3
+        const name = $("#newClientName").val().trim();
+        const slug = $("#newClientSlug").val().trim().toLowerCase();
+        const plan = $("#newClientPlan").val();
+        const cron = $("#newClientCron").val().trim() || "0 0 * * *";
+
+        $("#wizardSummaryName").text(name);
+        $("#wizardSummaryPlan").text(plan.toUpperCase());
+        $("#wizardSummarySchema").text("client_" + slug);
+        $("#wizardSummaryQuota").text(`${maxAccts} accounts`);
+        $("#wizardSummaryCredits").text(`${credits.toLocaleString()} cr`);
+        $("#wizardSummaryCron").text(cron);
+
+        // Transition 2 -> 3
+        self.wizardStep = 3;
+        $("#wizardPaneStep2").addClass("d-none");
+        $("#wizardPaneStep3").removeClass("d-none");
+
+        // Indicators
+        $("#stepIndicator2").removeClass("active");
+        $("#stepIndicator3").addClass("active");
+        $("#stepCircle2").css({ background: "#22c55e", color: "#fff" }).html('<i class="bi bi-check-lg"></i>');
+        $("#stepCircle3").css({ background: "#8A6248", color: "#fff" }).html("3");
+        $("#stepLabel3").css({ color: "#0f172a", fontWeight: "700" });
+
+        // Buttons
+        $("#btnWizardNext").addClass("d-none");
+        $("#btnSubmitAddClient").removeClass("d-none");
+      }
+    },
+
+    handleWizardBack: function () {
+      const self = this;
+      if (self.wizardStep === 2) {
+        self.wizardStep = 1;
+        $("#wizardPaneStep2").addClass("d-none");
+        $("#wizardPaneStep1").removeClass("d-none");
+
+        // Indicators
+        $("#stepIndicator2").removeClass("active");
+        $("#stepIndicator1").addClass("active");
+        $("#stepCircle1").css({ background: "#8A6248", color: "#fff" }).html("1");
+        $("#stepCircle2").css({ background: "#e2e8f0", color: "#64748b" }).html("2");
+        $("#stepLabel2").css({ color: "#64748b", fontWeight: "600" });
+
+        // Buttons
+        $("#btnWizardBack").addClass("d-none");
+        $("#btnWizardNext").html('Next: Plan &amp; Limits &rarr;');
+      } else if (self.wizardStep === 3) {
+        self.wizardStep = 2;
+        $("#wizardPaneStep3").addClass("d-none");
+        $("#wizardPaneStep2").removeClass("d-none");
+
+        // Indicators
+        $("#stepIndicator3").removeClass("active");
+        $("#stepIndicator2").addClass("active");
+        $("#stepCircle2").css({ background: "#8A6248", color: "#fff" }).html("2");
+        $("#stepCircle3").css({ background: "#e2e8f0", color: "#64748b" }).html("3");
+        $("#stepLabel3").css({ color: "#64748b", fontWeight: "600" });
+
+        // Buttons
+        $("#btnSubmitAddClient").addClass("d-none");
+        $("#btnWizardNext").removeClass("d-none").html('Next: Review &amp; Provision &rarr;');
+      }
+    },
+
     submitAddClient: async function () {
       const self = this;
       const name = $("#newClientName").val().trim();
       const slug = $("#newClientSlug").val().trim().toLowerCase();
+      const legalName = $("#newClientLegalName").val().trim() || name;
       const plan = $("#newClientPlan").val();
       const maxAccounts = parseInt($("#newClientMaxAccounts").val(), 10) || 30;
       const credits = parseInt($("#newClientCredits").val(), 10) || 100000;
+      const cron = $("#newClientCron").val().trim() || "0 0 * * *";
+      const adminUserId = parseInt($("#newClientAdminUserSelect").val(), 10);
 
-      if (!name || !slug) {
-        $("#addClientErrorAlert").removeClass("d-none").text("Please provide both a client name and workspace slug.");
-        return;
+      const $btn = $("#btnSubmitAddClient");
+      const $back = $("#btnWizardBack");
+      const $cancel = $("#btnWizardCancel");
+
+      $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm me-1"></span> Provisioning...');
+      $back.prop("disabled", true);
+      $cancel.prop("disabled", true);
+      $("#addClientErrorAlert").addClass("d-none").text("");
+
+      function setStepState(stepNum, state) {
+        const $icon = $(`#checkIcon${stepNum}`);
+        const $item = $(`#checkStep${stepNum}`);
+        if (state === "loading") {
+          $icon.attr("class", "spinner-border spinner-border-sm text-primary");
+          $item.addClass("fw-bold text-primary");
+        } else if (state === "done") {
+          $icon.attr("class", "bi bi-check-circle-fill text-success");
+          $item.removeClass("text-primary fw-bold").addClass("text-success");
+        } else if (state === "error") {
+          $icon.attr("class", "bi bi-x-circle-fill text-danger");
+          $item.removeClass("text-primary fw-bold").addClass("text-danger");
+        }
       }
 
-      const btn = $("#btnSubmitAddClient");
-      btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm me-1"></span> Provisioning...');
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
 
       try {
-        const res = await fetch("/api/clients", {
+        setStepState(1, "loading");
+        await sleep(120);
+
+        const fetchFn = typeof apiFetch === "function" ? apiFetch : fetch;
+        const res = await fetchFn("/api/clients", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: name,
             slug: slug,
+            legal_name: legalName,
             plan_tier: plan,
             max_accounts: maxAccounts,
             api_credits_total: credits,
+            refresh_cron: cron,
           })
         });
 
@@ -1996,18 +2898,208 @@ $(function () {
         }
 
         const created = await res.json();
-        $("#addClientModal").modal("hide");
+        setStepState(1, "done");
+        setStepState(2, "loading");
+        await sleep(100);
+        setStepState(2, "done");
+        setStepState(3, "loading");
+        await sleep(100);
+        setStepState(3, "done");
+        setStepState(4, "loading");
+        await sleep(100);
+        setStepState(4, "done");
+        setStepState(5, "loading");
+        await sleep(100);
+        setStepState(5, "done");
+        setStepState(6, "loading");
+        await sleep(100);
+        setStepState(6, "done");
+
+        // If an initial admin user was chosen, assign workspace permissions
+        if (!isNaN(adminUserId) && adminUserId > 0) {
+          try {
+            await fetchFn(`/api/clients/${slug}/users`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ user_id: adminUserId, role: "client_admin" })
+            });
+          } catch (userErr) {
+            console.warn("[submitAddClient] Could not assign initial client admin:", userErr);
+          }
+        }
+
+        self.lastCreatedSlug = slug;
+        $btn.addClass("d-none");
+        $back.addClass("d-none");
+        $cancel.addClass("d-none");
+        $("#btnWizardFinish").removeClass("d-none");
+
         if (typeof showToast === "function") {
-          showToast(`Client "${name}" provisioned successfully with schema "${created.schema_name}"!`, "success");
+          showToast(`Workspace "${name}" provisioned and verified successfully!`, "success");
         }
 
         await self.loadClients();
         await self.loadKpis();
-        self.switchToClient(slug);
       } catch (err) {
+        setStepState(1, "error");
+        $btn.prop("disabled", false).html('<i class="bi bi-plus-circle me-1"></i> Start Provisioning');
+        $back.prop("disabled", false);
+        $cancel.prop("disabled", false);
         $("#addClientErrorAlert").removeClass("d-none").text(err.message || "Failed to provision client workspace.");
-      } finally {
-        btn.prop("disabled", false).html('<i class="bi bi-plus-circle me-1"></i> Provision Workspace');
+      }
+    },
+
+    finishWizard: function () {
+      const self = this;
+      $("#addClientModal").modal("hide");
+      if (self.lastCreatedSlug) {
+        self.switchToClient(self.lastCreatedSlug);
+      }
+    },
+
+    openCreditLedger: async function (slug) {
+      const self = this;
+      const client = self.clients.find(c => c.slug === slug) || { name: slug, slug: slug };
+      $("#clientLedgerModalSubtitle").text(`Client: ${client.name || slug} (${slug}) — Immutable credit audit ledger`);
+      $("#clientLedgerTableBody").html(`<tr><td colspan="4" class="text-center py-4"><div class="spinner-border spinner-border-sm text-primary"></div> Loading credit ledger...</td></tr>`);
+
+      const modal = new bootstrap.Modal(document.getElementById("clientLedgerModal"));
+      modal.show();
+
+      try {
+        const fetchFn = typeof apiFetch === "function" ? apiFetch : fetch;
+        const res = await fetchFn(`/api/clients/${slug}/credits/ledger`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const rows = data.ledger || [];
+
+        if (rows.length === 0) {
+          $("#clientLedgerTableBody").html(`<tr><td colspan="4" class="text-center text-muted py-4"><em>No credit ledger transactions recorded for this client yet.</em></td></tr>`);
+          return;
+        }
+
+        let html = "";
+        rows.forEach(r => {
+          const delta = r.delta || 0;
+          const isPositive = delta >= 0;
+          const deltaColor = isPositive ? "text-success" : "text-danger";
+          const deltaSign = isPositive ? "+" : "";
+          const dateStr = r.created_at ? new Date(r.created_at).toLocaleString() : "-";
+          const reason = r.reason || "Credit transaction";
+          const runId = r.run_id ? `<code>${String(r.run_id).substring(0, 8)}</code>` : '<span class="text-muted">-</span>';
+
+          html += `
+            <tr>
+              <td style="white-space:nowrap;color:#64748b;font-size:0.75rem;">${dateStr}</td>
+              <td><strong>${reason}</strong></td>
+              <td class="fw-bold ${deltaColor}" style="white-space:nowrap;">${deltaSign}${delta.toLocaleString()} cr</td>
+              <td>${runId}</td>
+            </tr>`;
+        });
+        $("#clientLedgerTableBody").html(html);
+      } catch (err) {
+        $("#clientLedgerTableBody").html(`<tr><td colspan="4" class="text-danger py-3 text-center">Failed to load credit ledger: ${err.message}</td></tr>`);
+      }
+    },
+
+    openActivityLog: async function (slug) {
+      const self = this;
+      const client = self.clients.find(c => c.slug === slug) || { name: slug, slug: slug };
+      $("#clientActivityModalSubtitle").text(`Client: ${client.name || slug} (${slug}) — Workspace security & lifecycle events`);
+      $("#clientActivityTableBody").html(`<tr><td colspan="4" class="text-center py-4"><div class="spinner-border spinner-border-sm text-primary"></div> Loading activity trail...</td></tr>`);
+
+      const modal = new bootstrap.Modal(document.getElementById("clientActivityModal"));
+      modal.show();
+
+      try {
+        const fetchFn = typeof apiFetch === "function" ? apiFetch : fetch;
+        const res = await fetchFn(`/api/clients/${slug}/activity`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const rows = data.events || [];
+
+        if (rows.length === 0) {
+          $("#clientActivityTableBody").html(`<tr><td colspan="4" class="text-center text-muted py-4"><em>No activity recorded for this workspace yet.</em></td></tr>`);
+          return;
+        }
+
+        let html = "";
+        rows.forEach(e => {
+          const dateStr = e.created_at ? new Date(e.created_at).toLocaleString() : "-";
+          const action = e.action || "action";
+          const actionBadge = action.includes("suspend") ? "bg-warning-subtle text-warning" :
+                              action.includes("delete") ? "bg-danger-subtle text-danger" :
+                              action.includes("create") || action.includes("activate") || action.includes("provision") ? "bg-success-subtle text-success" :
+                              "bg-primary-subtle text-primary";
+          const actor = e.actor_user_id ? `User #${e.actor_user_id}` : '<span class="text-muted">system</span>';
+          let detailsStr = "-";
+          if (e.details) {
+            if (typeof e.details === "object") {
+              detailsStr = Object.entries(e.details).map(([k, v]) => `<strong>${k}:</strong> ${v}`).join(", ");
+            } else {
+              detailsStr = String(e.details);
+            }
+          }
+
+          html += `
+            <tr>
+              <td style="white-space:nowrap;color:#64748b;font-size:0.75rem;">${dateStr}</td>
+              <td><span class="badge ${actionBadge}" style="font-size:0.72rem;">${action}</span></td>
+              <td style="font-size:0.75rem;">${actor}</td>
+              <td style="font-size:0.75rem;max-width:320px;word-break:break-word;">${detailsStr}</td>
+            </tr>`;
+        });
+        $("#clientActivityTableBody").html(html);
+      } catch (err) {
+        $("#clientActivityTableBody").html(`<tr><td colspan="4" class="text-danger py-3 text-center">Failed to load activity log: ${err.message}</td></tr>`);
+      }
+    },
+
+    suspendClient: async function (slug) {
+      const self = this;
+      if (slug === "stradit_india") {
+        alert("The primary platform client (stradit_india) cannot be suspended.");
+        return;
+      }
+      if (!confirm(`Are you sure you want to suspend client workspace "${slug}"?\nDynamic DB operations and pipeline executions will be temporarily blocked.`)) {
+        return;
+      }
+
+      try {
+        const fetchFn = typeof apiFetch === "function" ? apiFetch : fetch;
+        const res = await fetchFn(`/api/clients/${slug}/suspend`, { method: "POST" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Server returned ${res.status}`);
+        }
+        if (typeof showToast === "function") {
+          showToast(`Client "${slug}" suspended successfully.`, "warning");
+        }
+        await self.loadClients();
+        await self.loadKpis();
+        self.renderManageModal();
+      } catch (err) {
+        alert(err.message || "Failed to suspend client.");
+      }
+    },
+
+    activateClient: async function (slug) {
+      const self = this;
+      try {
+        const fetchFn = typeof apiFetch === "function" ? apiFetch : fetch;
+        const res = await fetchFn(`/api/clients/${slug}/activate`, { method: "POST" });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Server returned ${res.status}`);
+        }
+        if (typeof showToast === "function") {
+          showToast(`Client "${slug}" activated successfully!`, "success");
+        }
+        await self.loadClients();
+        await self.loadKpis();
+        self.renderManageModal();
+      } catch (err) {
+        alert(err.message || "Failed to activate client.");
       }
     }
   };

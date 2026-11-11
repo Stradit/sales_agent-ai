@@ -129,6 +129,10 @@ class PipelineRunLogger:
             db_session = get_session()
             close_session = True
 
+        if effective_slug and effective_slug != "common" and "schema" not in db_session.info:
+            from db.tenant import schema_for
+            db_session.info["schema"] = schema_for(effective_slug)
+
         try:
             run_row = PipelineRun(
                 run_id=run_id,

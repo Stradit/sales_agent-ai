@@ -30,6 +30,11 @@ for _prefix in ("postgresql://", "postgres://"):
 MULTITENANT_ENABLED = os.getenv("MULTITENANT_ENABLED", "true").lower() in ("true", "1", "yes")
 DEFAULT_CLIENT_SLUG = os.getenv("DEFAULT_CLIENT_SLUG", "stradit_india")
 
+# Celery & Redis Task Queue Configuration
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
+
 # Monid.ai Gateway
 MONID_API_KEY = os.getenv("MONID_API_KEY", "")
 MONID_BASE_URL = os.getenv("MONID_BASE_URL", "https://api.monid.ai/v1")
@@ -94,7 +99,12 @@ RAW_APIFY_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_client_output_dir(client_slug: str = None) -> Path:
     """Returns the dedicated output directory for a specific client tenant."""
-    slug = client_slug or os.getenv("ACTIVE_CLIENT_SLUG", "stradit_india")
+    try:
+        from db.tenant import get_current_slug
+        context_slug = get_current_slug()
+    except Exception:
+        context_slug = None
+    slug = client_slug or context_slug or os.getenv("ACTIVE_CLIENT_SLUG", "stradit_india")
     client_dir = OUTPUT_DIR / slug
     client_dir.mkdir(parents=True, exist_ok=True)
     return client_dir
@@ -120,7 +130,13 @@ def get_run_output_dirs(company_name: str, run_dt: datetime = None, client_slug:
     timestamp_str = f"{date_str.replace('-', '')}_{time_str}"
     safe_name = company_name.lower().replace(" ", "_").replace(".", "").replace(",", "")
 
-    effective_slug = client_slug or os.getenv("ACTIVE_CLIENT_SLUG") or "stradit_india"
+    try:
+        from db.tenant import get_current_slug
+        context_slug = get_current_slug()
+    except Exception:
+        context_slug = None
+
+    effective_slug = client_slug or context_slug or os.getenv("ACTIVE_CLIENT_SLUG") or "stradit_india"
 
     # Base client & date folder
     client_dir = OUTPUT_DIR / effective_slug
@@ -158,6 +174,7 @@ def get_run_output_dirs(company_name: str, run_dt: datetime = None, client_slug:
         d.mkdir(parents=True, exist_ok=True)
 
     return {
+        "client_dir": client_dir,
         "date_str": date_str,
         "time_str": time_str,
         "timestamp_str": timestamp_str,

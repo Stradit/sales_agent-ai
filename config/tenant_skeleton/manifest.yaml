@@ -1,0 +1,559 @@
+skeleton_version: T0001
+total_tables: 58
+platform_references:
+- ref_table: users
+  ref_schema: public
+  ref_columns:
+  - id
+tables:
+- name: business_lines
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: crm_settings
+  primary_key:
+  - key
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - updated_by
+    ref: public.users.id
+    on_delete: SET NULL
+- name: connectors
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - created_by
+    ref: public.users.id
+    on_delete: SET NULL
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: SET NULL
+- name: targets
+  primary_key:
+  - key
+  intra_tenant_fks: []
+  platform_fks: []
+- name: activities
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - owner_user_id
+    ref: public.users.id
+    on_delete: SET NULL
+- name: forecast_snapshots
+  primary_key:
+  - snapshot_date
+  - deal_id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: copilot_user_prefs
+  primary_key:
+  - user_id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_chunks
+  primary_key:
+  - chunk_hash
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_index_versions
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_sync_state
+  primary_key:
+  - source_table
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_outbox
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_schema_meta
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: system_api_configs
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - updated_by
+    ref: public.users.id
+    on_delete: SET NULL
+- name: crm_notifications
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: CASCADE
+- name: crm_notification_prefs
+  primary_key:
+  - user_id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: CASCADE
+- name: crm_saved_views
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: CASCADE
+- name: crm_demo_rows
+  primary_key:
+  - table_name
+  - row_id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: search_log
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: SET NULL
+- name: run_history
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: cxo_movements
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: weekly_digest_snapshots
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: digests
+  primary_key:
+  - target_key
+  intra_tenant_fks: []
+  platform_fks: []
+- name: posts
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: linkedin_jobs
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: activity_links
+  primary_key:
+  - activity_id
+  - object_type
+  - object_id
+  intra_tenant_fks:
+  - columns:
+    - activity_id
+    ref_table: activities
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks: []
+- name: sales_targets
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - business_line_id
+    ref_table: business_lines
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks:
+  - columns:
+    - updated_by
+    ref: public.users.id
+    on_delete: SET NULL
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: CASCADE
+- name: user_business_lines
+  primary_key:
+  - user_id
+  - business_line_id
+  intra_tenant_fks:
+  - columns:
+    - business_line_id
+    ref_table: business_lines
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks:
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: CASCADE
+- name: accounts
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - primary_business_line_id
+    ref_table: business_lines
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  platform_fks:
+  - columns:
+    - owner_user_id
+    ref: public.users.id
+    on_delete: SET NULL
+- name: lobs
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: sub_lobs
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: personas
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - created_by_user_id
+    ref: public.users.id
+    on_delete: SET NULL
+- name: pipeline_runs
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - account_id
+    ref_table: accounts
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  platform_fks: []
+- name: user_account_access
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - account_id
+    ref_table: accounts
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks:
+  - columns:
+    - granted_by_id
+    ref: public.users.id
+    on_delete: SET NULL
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: CASCADE
+- name: opportunity_signals
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: action_items
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - account_id
+    ref_table: accounts
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  - columns:
+    - persona_id
+    ref_table: personas
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  platform_fks:
+  - columns:
+    - assigned_to_id
+    ref: public.users.id
+    on_delete: SET NULL
+  - columns:
+    - created_by_id
+    ref: public.users.id
+    on_delete: SET NULL
+- name: action_item_reminders
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - action_item_id
+    ref_table: action_items
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks:
+  - columns:
+    - sent_to_user_id
+    ref: public.users.id
+    on_delete: SET NULL
+- name: command_center_snapshots
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: CASCADE
+- name: deals
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - business_line_id
+    ref_table: business_lines
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  - columns:
+    - introduction_id
+    ref_table: introductions
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  platform_fks: []
+- name: deal_stakeholders
+  primary_key:
+  - deal_id
+  - persona_id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: deal_stage_history
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: deal_checklist
+  primary_key:
+  - deal_id
+  - stage
+  - item_key
+  intra_tenant_fks: []
+  platform_fks: []
+- name: deal_activity
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: deal_close_plan
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - deal_id
+    ref_table: deals
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks:
+  - columns:
+    - created_by
+    ref: public.users.id
+    on_delete: SET NULL
+- name: deal_buyer_rooms
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - deal_id
+    ref_table: deals
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks:
+  - columns:
+    - created_by
+    ref: public.users.id
+    on_delete: SET NULL
+- name: deal_email_drafts
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - deal_id
+    ref_table: deals
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks:
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: SET NULL
+- name: introductions
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - account_id
+    ref_table: accounts
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  - columns:
+    - business_line_id
+    ref_table: business_lines
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  - columns:
+    - connector_id
+    ref_table: connectors
+    ref_columns:
+    - id
+    on_delete: RESTRICT
+  - columns:
+    - deal_id
+    ref_table: deals
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  - columns:
+    - persona_id
+    ref_table: personas
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  - columns:
+    - wanted_id
+    ref_table: crm_wanted_intros
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  platform_fks:
+  - columns:
+    - created_by
+    ref: public.users.id
+    on_delete: SET NULL
+  - columns:
+    - owner_user_id
+    ref: public.users.id
+    on_delete: SET NULL
+- name: introduction_events
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - introduction_id
+    ref_table: introductions
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks:
+  - columns:
+    - by_user
+    ref: public.users.id
+    on_delete: SET NULL
+- name: crm_wanted_intros
+  primary_key:
+  - id
+  intra_tenant_fks:
+  - columns:
+    - account_id
+    ref_table: accounts
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  - columns:
+    - business_line_id
+    ref_table: business_lines
+    ref_columns:
+    - id
+    on_delete: SET NULL
+  platform_fks:
+  - columns:
+    - created_by
+    ref: public.users.id
+    on_delete: SET NULL
+- name: capture_connections
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks:
+  - columns:
+    - user_id
+    ref: public.users.id
+    on_delete: CASCADE
+- name: copilot_sessions
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: copilot_messages
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: copilot_memories
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_documents
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_document_chunks
+  primary_key:
+  - document_id
+  - ordinal
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_document_sources
+  primary_key:
+  - source_table
+  - source_pk
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_document_entities
+  primary_key: []
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_index_entries
+  primary_key:
+  - index_version_id
+  - chunk_hash
+  - account_id
+  intra_tenant_fks: []
+  platform_fks: []
+- name: rag_pipeline_runs
+  primary_key:
+  - id
+  intra_tenant_fks: []
+  platform_fks: []

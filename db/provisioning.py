@@ -1,102 +1,118 @@
 """Schema Provisioning Service — Dynamically provisions and manages per-client PostgreSQL schemas.
 
-Clones the skeleton schema from public, isolates sequences, establishes
-intra-schema foreign keys, and provides data migration capabilities.
+Clones the complete skeleton schema from public for all 58 Tenant tables,
+isolates autoincrement sequences, establishes intra-schema and cross-schema
+foreign keys, and provides self-healing schema repair and data migration.
 """
 
+import hashlib
 import re
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 from sqlalchemy import text, inspect
 from sqlalchemy.engine import Engine
 
+from db.tenant import validate_slug, schema_for, RESERVED_SLUGS
 
-RESERVED_SLUGS = {
-    "public", "information_schema", "pg_catalog", "template", "postgres",
-    "admin", "root", "system", "auth", "api", "default", "core"
-}
 
-CLIENT_TABLES_ORDERED = [
-    "accounts",
-    "lobs",
-    "sub_lobs",
-    "personas",
-    "pipeline_runs",
-    "user_account_access",
-    "opportunity_signals",
-    "weekly_digest_snapshots",
-    "linkedin_jobs",
-    "cxo_movements",
-    "action_items",
-    "action_item_reminders",
+# ── Canonical Tenant Tables in Dependency Order (58 Tables) ──────────────────
+# Tables are ordered topologically so that referenced parent tables precede child tables.
+CLIENT_TABLES_ORDERED: List[str] = [
+    # 1. Base reference & configuration tables (independent within tenant domain)
+    "business_lines",
+    "crm_settings",
+    "connectors",
+    "targets",
+    "activities",
+    "forecast_snapshots",
+    "copilot_user_prefs",
+    "rag_chunks",
+    "rag_index_versions",
+    "rag_sync_state",
+    "rag_outbox",
+    "rag_schema_meta",
     "system_api_configs",
-    "command_center_snapshots",
+    "crm_notifications",
+    "crm_notification_prefs",
+    "crm_saved_views",
+    "crm_demo_rows",
+    "search_log",
+    "run_history",
+    "cxo_movements",
+    "weekly_digest_snapshots",
     "digests",
     "posts",
+    # 2. Level 1 dependents
+    "linkedin_jobs",        # -> targets(key)
+    "activity_links",       # -> activities(id)
+    "sales_targets",        # -> business_lines(id)
+    "user_business_lines",  # -> business_lines(id)
+    "accounts",             # -> business_lines(id)
+    # 3. Level 2 dependents (account children)
+    "lobs",                 # -> accounts(id)
+    "sub_lobs",             # -> lobs(id)
+    "personas",             # -> accounts(id), lobs(id)
+    "pipeline_runs",        # -> accounts(id)
+    "user_account_access",  # -> accounts(id)
+    "opportunity_signals",  # -> accounts(id)
+    "action_items",         # -> accounts(id), personas(id)
+    "action_item_reminders",# -> action_items(id)
+    "command_center_snapshots", # -> accounts(id)
+    # 4. Deals & sales flow
+    "deals",                # -> accounts(id), lobs(id), business_lines(id)
+    "deal_stakeholders",    # -> deals(id), personas(id)
+    "deal_stage_history",   # -> deals(id)
+    "deal_checklist",       # -> deals(id)
+    "deal_activity",        # -> deals(id)
+    "deal_close_plan",      # -> deals(id)
+    "deal_buyer_rooms",     # -> deals(id)
+    "deal_email_drafts",    # -> deals(id)
+    # 5. Introductions & events
+    "introductions",        # -> connectors(id), accounts(id), personas(id), business_lines(id), deals(id)
+    "introduction_events",  # -> introductions(id)
+    "crm_wanted_intros",    # -> accounts(id), business_lines(id)
+    "capture_connections",
+    # 6. Copilot & RAG hierarchy
+    "copilot_sessions",     # -> accounts(id), personas(id)
+    "copilot_messages",     # -> copilot_sessions(id)
+    "copilot_memories",     # -> copilot_messages(id), accounts(id), personas(id)
+    "rag_documents",
+    "rag_document_chunks",  # -> rag_documents(id), rag_chunks(chunk_hash)
+    "rag_document_sources",
+    "rag_document_entities",# -> accounts(id), personas(id), lobs(id)
+    "rag_index_entries",    # -> rag_index_versions(id), rag_chunks(chunk_hash), accounts(id)
+    "rag_pipeline_runs",
 ]
 
 
 class SchemaProvisioningService:
-    @classmethod
-    def create_cross_client_views(cls, engine: Engine) -> Dict[str, str]:
-        """
-        Super-Admin Cross-Client UNION ALL Views (Decision 3).
-        Dynamically constructs in-DB UNION ALL views in public schema over all active client schemas:
-        - public.v_all_accounts
-        - public.v_all_pipeline_runs
-        - public.v_all_personas
-        - public.v_all_lobs
-        - public.v_all_opportunity_signals
-        """
-        from sqlalchemy import inspect
-        created_views = {}
-
-        with engine.begin() as conn:
-            clients = conn.execute(text(
-                "SELECT slug, schema_name FROM public.clients WHERE is_active = true ORDER BY id ASC"
-            )).fetchall()
-
-            if not clients:
-                return created_views
-
-            view_targets = ["accounts", "pipeline_runs", "personas", "lobs", "opportunity_signals"]
-            inspector = inspect(engine)
-
-            for target in view_targets:
-                parts = []
-                for slug, schema in clients:
-                    tables = inspector.get_table_names(schema=schema)
-                    if target in tables:
-                        parts.append(f"SELECT '{slug}'::text AS client_slug, * FROM \"{schema}\".\"{target}\"")
-
-                if parts:
-                    view_name = f"v_all_{target}"
-                    union_sql = f"CREATE OR REPLACE VIEW public.{view_name} AS " + " UNION ALL ".join(parts)
-                    conn.execute(text(union_sql))
-                    created_views[view_name] = f"UNION ALL across {len(parts)} tenant schemas"
-
-        return created_views
-
     """Enterprise-grade dynamic schema provisioning and migration service."""
 
-    @staticmethod
-    def validate_slug(client_slug: str) -> str:
+    @classmethod
+    def validate_slug(cls, client_slug: str) -> str:
         """Validates that a client slug is safe for use as a PostgreSQL schema identifier."""
-        if not client_slug:
-            raise ValueError("Client slug cannot be empty.")
-        slug = client_slug.strip().lower()
-        if not re.match(r"^[a-z][a-z0-9_]{1,98}$", slug):
-            raise ValueError(
-                f"Invalid client slug '{slug}'. Must start with a letter and contain "
-                "only lowercase letters, numbers, and underscores (2-99 characters)."
-            )
-        if slug in RESERVED_SLUGS:
-            raise ValueError(f"Client slug '{slug}' is a reserved system name.")
-        return slug
+        return validate_slug(client_slug)
 
     @classmethod
     def get_schema_name(cls, client_slug: str) -> str:
-        slug = cls.validate_slug(client_slug)
-        return f"client_{slug}"
+        return schema_for(client_slug)
+
+    @classmethod
+    def resolve_schema_name(cls, engine: Optional[Engine], client_slug: str, schema_name: Optional[str] = None) -> str:
+        """Resolves the schema name either from direct param, from public.clients, or fallback to naming rule."""
+        if schema_name:
+            return schema_name
+        if engine is not None:
+            try:
+                with engine.connect() as conn:
+                    row = conn.execute(
+                        text("SELECT schema_name FROM public.clients WHERE slug = :s"),
+                        {"s": client_slug}
+                    ).fetchone()
+                    if row and row[0]:
+                        return row[0]
+            except Exception:
+                pass
+        return cls.get_schema_name(client_slug)
 
     @classmethod
     def schema_exists(cls, engine: Engine, client_slug: str) -> bool:
@@ -105,137 +121,243 @@ class SchemaProvisioningService:
         return schema_name in insp.get_schema_names()
 
     @classmethod
-    def create_client_schema(cls, engine: Engine, client_slug: str) -> str:
-        """Provisions a complete isolated schema for the client from the skeleton.
+    def _adapt_fk_constraint(cls, con_def: str, schema_name: str, tenant_set: Set[str]) -> str:
+        """Dynamically adapts a public schema foreign key constraint definition for a tenant schema.
         
-        Steps:
-        1. CREATE SCHEMA IF NOT EXISTS
-        2. CREATE TABLE ... (LIKE public.<table> INCLUDING ALL) for all 16 client tables
-        3. Allocate independent sequence for each table column with a nextval sequence
-        4. Establish intra-schema foreign key constraints
+        Intra-tenant references point to \"{schema_name}\".\"{ref_tbl}\".
+        Cross-schema platform references point to public.\"{ref_tbl}\".
         """
-        schema_name = cls.get_schema_name(client_slug)
-        q = chr(39)
+        m = re.search(
+            r'FOREIGN\s+KEY\s*\(([^\)]+)\)\s+REFERENCES\s+([a-zA-Z0-9_\"]+)\s*(\([^\)]+\))(.*)',
+            con_def,
+            re.IGNORECASE,
+        )
+        if not m:
+            return con_def
+        fk_cols = m.group(1).strip()
+        ref_table = m.group(2).replace('"', '').strip()
+        ref_cols = m.group(3).strip()
+        rest = m.group(4).strip()
 
-        with engine.begin() as conn:
-            # 1. Create Schema
-            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+        if ref_table in tenant_set:
+            new_ref = f'"{schema_name}"."{ref_table}"'
+        else:
+            new_ref = f'public."{ref_table}"'
 
-            # 2. Clone Tables from public skeleton
-            for table in CLIENT_TABLES_ORDERED:
-                conn.execute(text(
-                    f'CREATE TABLE IF NOT EXISTS "{schema_name}"."{table}" '
-                    f'(LIKE public."{table}" INCLUDING ALL)'
-                ))
+        return f'FOREIGN KEY ({fk_cols}) REFERENCES {new_ref} {ref_cols} {rest}'.strip()
 
-                # 3. Detect any column that has a sequence in public, and rebind in target schema
-                seq_cols = conn.execute(text("""
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = :tbl AND column_default LIKE '%nextval%'
-                """), {"tbl": table}).fetchall()
+    @classmethod
+    def _ensure_tenant_foreign_keys(cls, conn, schema_name: str) -> List[str]:
+        """Dynamically discovers and binds all intra-tenant and cross-schema foreign keys."""
+        tenant_set = set(CLIENT_TABLES_ORDERED)
+        fk_query = text("""
+            SELECT
+                cl.relname AS table_name,
+                con.conname AS constraint_name,
+                pg_get_constraintdef(con.oid) AS definition
+            FROM pg_constraint con
+            JOIN pg_class cl ON cl.oid = con.conrelid
+            JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+            WHERE ns.nspname = 'public' AND con.contype = 'f'
+            ORDER BY cl.relname, con.conname;
+        """)
+        rows = conn.execute(fk_query).fetchall()
+        applied = []
+        for tbl, cname, cdef in rows:
+            if tbl in tenant_set:
+                raw_cname = f"fk_{schema_name}_{tbl}_{cname}"
+                if len(raw_cname) > 63:
+                    h = hashlib.md5(cname.encode()).hexdigest()[:8]
+                    raw_cname = f"fk_{schema_name[:15]}_{tbl[:25]}_{h}"
 
-                for (col_name,) in seq_cols:
-                    seq_name = f"{table}_{col_name}_seq"
-                    conn.execute(text(
-                        f'CREATE SEQUENCE IF NOT EXISTS "{schema_name}"."{seq_name}"'
-                    ))
-                    conn.execute(text(
-                        f'ALTER TABLE "{schema_name}"."{table}" '
-                        f'ALTER COLUMN "{col_name}" SET DEFAULT nextval({q}"{schema_name}"."{seq_name}"{q}::regclass)'
-                    ))
-                    conn.execute(text(
-                        f'ALTER SEQUENCE "{schema_name}"."{seq_name}" '
-                        f'OWNED BY "{schema_name}"."{table}"."{col_name}"'
-                    ))
-
-            # 4. Intra-schema Foreign Keys
-            def _add_fk(tbl: str, constraint_name: str, fk_col: str, ref_tbl: str, ref_col: str = "id", on_delete: str = "CASCADE"):
                 check_sql = text("""
                     SELECT 1 FROM pg_constraint c
                     JOIN pg_namespace n ON n.oid = c.connamespace
                     WHERE n.nspname = :schema AND c.conname = :cname
                 """)
-                exists = conn.execute(check_sql, {"schema": schema_name, "cname": constraint_name}).scalar()
+                exists = conn.execute(check_sql, {"schema": schema_name, "cname": raw_cname}).scalar()
                 if not exists:
+                    adapted_def = cls._adapt_fk_constraint(cdef, schema_name, tenant_set)
+                    alter_sql = f'ALTER TABLE "{schema_name}"."{tbl}" ADD CONSTRAINT "{raw_cname}" {adapted_def}'
+                    conn.execute(text(alter_sql))
+                    applied.append(raw_cname)
+        return applied
+
+    @classmethod
+    def create_client_schema(cls, engine: Engine, client_slug: str) -> str:
+        """Provisions a complete isolated schema for the client from the skeleton.
+        
+        Lifecycle state machine (§4.3, §5.3):
+        1. Set client status to 'provisioning'
+        2. CREATE SCHEMA IF NOT EXISTS
+        3. CREATE TABLE ... (LIKE public.<table> INCLUDING ALL) for all 58 tenant tables
+        4. Allocate independent sequence for each table column with a nextval sequence
+        5. Establish all intra-schema and cross-schema foreign key constraints
+        6. Verify schema against manifest and mark client status = 'active'
+        """
+        schema_name = cls.get_schema_name(client_slug)
+        clean_slug = validate_slug(client_slug)
+        q = chr(39)
+        from db.manifest import TenantManifest
+        manifest_version = TenantManifest.get_skeleton_version()
+
+        # 1. Register or update client in public.clients with status 'provisioning'
+        try:
+            with engine.begin() as conn:
+                client_name = clean_slug.replace("_", " ").title()
+                conn.execute(text("""
+                    INSERT INTO public.clients (slug, name, schema_name, status, skeleton_version, is_active)
+                    VALUES (:s, :name, :sc, 'provisioning', :ver, true)
+                    ON CONFLICT (slug) DO UPDATE
+                    SET status = 'provisioning', last_error = NULL
+                """), {"s": clean_slug, "name": client_name, "sc": schema_name, "ver": manifest_version})
+        except Exception:
+            pass
+
+        # 2. Commit schema creation in its own transaction so it persists even if table provisioning fails
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
+
+        try:
+            with engine.begin() as conn:
+                # 3. Clone Tables from public skeleton
+                for table in CLIENT_TABLES_ORDERED:
                     conn.execute(text(
-                        f'ALTER TABLE "{schema_name}"."{tbl}" '
-                        f'ADD CONSTRAINT "{constraint_name}" '
-                        f'FOREIGN KEY ({fk_col}) REFERENCES "{schema_name}"."{ref_tbl}"({ref_col}) '
-                        f'ON DELETE {on_delete}'
+                        f'CREATE TABLE IF NOT EXISTS "{schema_name}"."{table}" '
+                        f'(LIKE public."{table}" INCLUDING ALL)'
                     ))
 
-            _add_fk("lobs", f"fk_{schema_name}_lobs_account", "account_id", "accounts", on_delete="CASCADE")
-            _add_fk("sub_lobs", f"fk_{schema_name}_sublobs_lob", "lob_id", "lobs", on_delete="CASCADE")
-            _add_fk("personas", f"fk_{schema_name}_personas_account", "account_id", "accounts", on_delete="CASCADE")
-            _add_fk("personas", f"fk_{schema_name}_personas_lob", "lob_id", "lobs", on_delete="SET NULL")
-            _add_fk("pipeline_runs", f"fk_{schema_name}_runs_account", "account_id", "accounts", on_delete="SET NULL")
-            _add_fk("user_account_access", f"fk_{schema_name}_uaa_account", "account_id", "accounts", on_delete="CASCADE")
-            _add_fk("opportunity_signals", f"fk_{schema_name}_opp_account", "account_id", "accounts", on_delete="CASCADE")
-            _add_fk("weekly_digest_snapshots", f"fk_{schema_name}_wds_account", "account_id", "accounts", on_delete="CASCADE")
-            _add_fk("action_items", f"fk_{schema_name}_ai_account", "account_id", "accounts", on_delete="CASCADE")
-            _add_fk("action_items", f"fk_{schema_name}_ai_persona", "persona_id", "personas", on_delete="SET NULL")
-            _add_fk("action_item_reminders", f"fk_{schema_name}_air_item", "action_item_id", "action_items", on_delete="CASCADE")
+                    # 4. Detect any column that has a sequence in public, and rebind in target schema
+                    seq_cols = conn.execute(text("""
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = :tbl AND column_default LIKE '%nextval%'
+                    """), {"tbl": table}).fetchall()
+
+                    for (col_name,) in seq_cols:
+                        seq_name = f"{table}_{col_name}_seq"
+                        conn.execute(text(
+                            f'CREATE SEQUENCE IF NOT EXISTS "{schema_name}"."{seq_name}"'
+                        ))
+                        conn.execute(text(
+                            f'ALTER TABLE "{schema_name}"."{table}" '
+                            f'ALTER COLUMN "{col_name}" SET DEFAULT nextval({q}"{schema_name}"."{seq_name}"{q}::regclass)'
+                        ))
+                        conn.execute(text(
+                            f'ALTER SEQUENCE "{schema_name}"."{seq_name}" '
+                            f'OWNED BY "{schema_name}"."{table}"."{col_name}"'
+                        ))
+
+                    # Ensure primary key exists if public table has one
+                    has_pk_target = conn.execute(text("""
+                        SELECT 1 FROM pg_constraint c
+                        JOIN pg_namespace n ON n.oid = c.connamespace
+                        JOIN pg_class cl ON cl.oid = c.conrelid
+                        WHERE n.nspname = :s AND cl.relname = :t AND c.contype = 'p'
+                    """), {"s": schema_name, "t": table}).scalar()
+                    if not has_pk_target:
+                        pub_pk_def = conn.execute(text("""
+                            SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+                            JOIN pg_namespace n ON n.oid = c.connamespace
+                            JOIN pg_class cl ON cl.oid = c.conrelid
+                            WHERE n.nspname = 'public' AND cl.relname = :t AND c.contype = 'p'
+                        """), {"t": table}).scalar()
+                        if pub_pk_def:
+                            conn.execute(text(f'ALTER TABLE "{schema_name}"."{table}" ADD {pub_pk_def}'))
+
+                # 5. Intra-schema & cross-schema foreign keys
+                cls._ensure_tenant_foreign_keys(conn, schema_name)
+
+            # 6. Mark client status = 'active', set skeleton_version to manifest head
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        UPDATE public.clients
+                        SET status = 'active',
+                            skeleton_version = :ver,
+                            provisioned_at = COALESCE(provisioned_at, NOW()),
+                            last_error = NULL
+                        WHERE slug = :s
+                    """), {"s": clean_slug, "ver": manifest_version})
+            except Exception:
+                pass
+
+        except Exception as exc:
+            # On failure, mark status = 'failed' with error message, NEVER drop schema
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        UPDATE public.clients
+                        SET status = 'failed', last_error = :err
+                        WHERE slug = :s
+                    """), {"s": clean_slug, "err": str(exc)[:2000]})
+            except Exception:
+                pass
+            raise
 
         return schema_name
 
     @classmethod
-    def copy_data_from_public(cls, engine: Engine, client_slug: str) -> Dict[str, int]:
-        """Copies existing accounts, lobs, personas, runs, etc. from public into the client schema.
+    def copy_data_from_public(cls, engine: Engine, client_slug: str, schema_name: Optional[str] = None) -> Dict[str, int]:
+        """Copies existing accounts, lobs, personas, runs, deals, CRM, etc. from public into the client schema.
         
         Used for initial migration (e.g. Stradit India PVT LTD).
-        Updates sequence values afterwards so future inserts continue seamlessly.
+        Guarantees session_replication_role safety, generated column exclusion, and sequence synchronization.
         """
-        schema_name = cls.get_schema_name(client_slug)
+        schema_name = cls.resolve_schema_name(engine, client_slug, schema_name)
         stats: Dict[str, int] = {}
 
         with engine.begin() as conn:
-            for table in CLIENT_TABLES_ORDERED:
-                # Check if public table has rows
-                count = conn.execute(text(f'SELECT count(*) FROM public."{table}"')).scalar() or 0
-                if count > 0:
-                    # Get common columns between public and client schema table
-                    cols_sql = text("""
+            conn.execute(text("SET session_replication_role = 'replica'"))
+            try:
+                for table in CLIENT_TABLES_ORDERED:
+                    # Check if public table has rows
+                    count = conn.execute(text(f'SELECT count(*) FROM public."{table}"')).scalar() or 0
+                    if count > 0:
+                        # Exclude generated columns (is_generated = 'ALWAYS')
+                        cols_sql = text("""
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_schema = :schema AND table_name = :tbl AND is_generated = 'NEVER'
+                            ORDER BY ordinal_position
+                        """)
+                        target_cols = [r[0] for r in conn.execute(cols_sql, {"schema": schema_name, "tbl": table}).fetchall()]
+                        pub_cols = [r[0] for r in conn.execute(cols_sql, {"schema": "public", "tbl": table}).fetchall()]
+                        common_cols = [c for c in target_cols if c in pub_cols]
+
+                        if common_cols:
+                            cols_str = ", ".join(f'"{c}"' for c in common_cols)
+                            where_clause = ""
+                            if "account_id" in common_cols and table != "accounts":
+                                where_clause = f' WHERE account_id IS NULL OR account_id IN (SELECT id FROM "{schema_name}"."accounts")'
+                            conn.execute(text(
+                                f'INSERT INTO "{schema_name}"."{table}" ({cols_str}) '
+                                f'SELECT {cols_str} FROM public."{table}"{where_clause} '
+                                f'ON CONFLICT DO NOTHING'
+                            ))
+
+                    # Rebind sequence values to max value
+                    seq_cols = conn.execute(text("""
                         SELECT column_name
                         FROM information_schema.columns
-                        WHERE table_schema = :schema AND table_name = :tbl
-                        ORDER BY ordinal_position
-                    """)
-                    target_cols = [r[0] for r in conn.execute(cols_sql, {"schema": schema_name, "tbl": table}).fetchall()]
-                    pub_cols = [r[0] for r in conn.execute(cols_sql, {"schema": "public", "tbl": table}).fetchall()]
-                    common_cols = [c for c in target_cols if c in pub_cols]
+                        WHERE table_schema = 'public' AND table_name = :tbl AND column_default LIKE '%nextval%'
+                    """), {"tbl": table}).fetchall()
 
-                    if common_cols:
-                        cols_str = ", ".join(f'"{c}"' for c in common_cols)
-                        where_clause = ""
-                        if "account_id" in common_cols and table != "accounts":
-                            where_clause = f' WHERE account_id IS NULL OR account_id IN (SELECT id FROM "{schema_name}"."accounts")'
-                        conn.execute(text(
-                            f'INSERT INTO "{schema_name}"."{table}" ({cols_str}) '
-                            f'SELECT {cols_str} FROM public."{table}"{where_clause} '
-                            f'ON CONFLICT DO NOTHING'
-                        ))
+                    for (col_name,) in seq_cols:
+                        seq_name = f"{table}_{col_name}_seq"
+                        conn.execute(text(f"""
+                            SELECT setval(
+                                '"{schema_name}"."{seq_name}"',
+                                COALESCE((SELECT MAX("{col_name}") FROM "{schema_name}"."{table}"), 1),
+                                (SELECT MAX("{col_name}") IS NOT NULL FROM "{schema_name}"."{table}")
+                            )
+                        """))
 
-                # Rebind sequence values to max value
-                seq_cols = conn.execute(text("""
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = :tbl AND column_default LIKE '%nextval%'
-                """), {"tbl": table}).fetchall()
-
-                for (col_name,) in seq_cols:
-                    seq_name = f"{table}_{col_name}_seq"
-                    conn.execute(text(f"""
-                        SELECT setval(
-                            '"{schema_name}"."{seq_name}"',
-                            COALESCE((SELECT MAX("{col_name}") FROM "{schema_name}"."{table}"), 1),
-                            (SELECT MAX("{col_name}") IS NOT NULL FROM "{schema_name}"."{table}")
-                        )
-                    """))
-
-                # Record copied count
-                schema_count = conn.execute(text(f'SELECT count(*) FROM "{schema_name}"."{table}"')).scalar() or 0
-                stats[table] = schema_count
+                    # Record copied count
+                    schema_count = conn.execute(text(f'SELECT count(*) FROM "{schema_name}"."{table}"')).scalar() or 0
+                    stats[table] = schema_count
+            finally:
+                conn.execute(text("SET session_replication_role = 'origin'"))
 
         return stats
 
@@ -258,9 +380,9 @@ class SchemaProvisioningService:
         return report
 
     @classmethod
-    def verify_schema_integrity(cls, engine: Engine, client_slug: str) -> Dict[str, Any]:
+    def verify_schema_integrity(cls, engine: Engine, client_slug: str, schema_name: Optional[str] = None) -> Dict[str, Any]:
         """Deep integrity check of client PostgreSQL schema, tables, sequences and constraints."""
-        schema_name = cls.get_schema_name(client_slug)
+        schema_name = cls.resolve_schema_name(engine, client_slug, schema_name)
         insp = inspect(engine)
         if schema_name not in insp.get_schema_names():
             return {
@@ -314,12 +436,18 @@ class SchemaProvisioningService:
             """), {"schema": schema_name}).scalar() or 0
 
         is_healthy = len(missing_tables) == 0
+        from db.manifest import TenantManifest
+        manifest_report = TenantManifest.verify_schema_against_manifest(engine, schema_name)
+        overall_healthy = is_healthy and manifest_report["is_compliant"]
+
         return {
             "schema_name": schema_name,
             "slug": client_slug,
             "exists": True,
-            "status": "healthy" if is_healthy else "drift_detected",
-            "is_healthy": is_healthy,
+            "status": "healthy" if overall_healthy else "drift_detected",
+            "is_healthy": overall_healthy,
+            "skeleton_version": manifest_report["skeleton_version"],
+            "manifest_compliance": manifest_report,
             "tables_total": len(CLIENT_TABLES_ORDERED),
             "tables_found": len(existing_tables),
             "missing_tables": missing_tables,
@@ -329,13 +457,12 @@ class SchemaProvisioningService:
         }
 
     @classmethod
-    def repair_client_schema(cls, engine: Engine, client_slug: str) -> Dict[str, Any]:
+    def repair_client_schema(cls, engine: Engine, client_slug: str, schema_name: Optional[str] = None) -> Dict[str, Any]:
         """Self-healing: Non-destructively provisions any missing tables, sequences, or constraints."""
-        schema_name = cls.get_schema_name(client_slug)
+        schema_name = cls.resolve_schema_name(engine, client_slug, schema_name)
         q = chr(39)
         repaired_tables: List[str] = []
         repaired_sequences: List[str] = []
-        repaired_fks: List[str] = []
 
         with engine.begin() as conn:
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
@@ -371,33 +498,25 @@ class SchemaProvisioningService:
                         ))
                         repaired_sequences.append(seq_name)
 
-            # Intra-schema FKs
-            def _ensure_fk(tbl: str, constraint_name: str, fk_col: str, ref_tbl: str, ref_col: str = "id", on_delete: str = "CASCADE"):
-                exists = conn.execute(text("""
+                # Ensure primary key exists if public table has one
+                has_pk_target = conn.execute(text("""
                     SELECT 1 FROM pg_constraint c
                     JOIN pg_namespace n ON n.oid = c.connamespace
-                    WHERE n.nspname = :schema AND c.conname = :cname
-                """), {"schema": schema_name, "cname": constraint_name}).scalar()
-                if not exists:
-                    conn.execute(text(
-                        f'ALTER TABLE "{schema_name}"."{tbl}" '
-                        f'ADD CONSTRAINT "{constraint_name}" '
-                        f'FOREIGN KEY ({fk_col}) REFERENCES "{schema_name}"."{ref_tbl}"({ref_col}) '
-                        f'ON DELETE {on_delete}'
-                    ))
-                    repaired_fks.append(constraint_name)
+                    JOIN pg_class cl ON cl.oid = c.conrelid
+                    WHERE n.nspname = :s AND cl.relname = :t AND c.contype = 'p'
+                """), {"s": schema_name, "t": table}).scalar()
+                if not has_pk_target:
+                    pub_pk_def = conn.execute(text("""
+                        SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+                        JOIN pg_namespace n ON n.oid = c.connamespace
+                        JOIN pg_class cl ON cl.oid = c.conrelid
+                        WHERE n.nspname = 'public' AND cl.relname = :t AND c.contype = 'p'
+                    """), {"t": table}).scalar()
+                    if pub_pk_def:
+                        conn.execute(text(f'ALTER TABLE "{schema_name}"."{table}" ADD {pub_pk_def}'))
 
-            _ensure_fk("lobs", f"fk_{schema_name}_lobs_account", "account_id", "accounts", on_delete="CASCADE")
-            _ensure_fk("sub_lobs", f"fk_{schema_name}_sublobs_lob", "lob_id", "lobs", on_delete="CASCADE")
-            _ensure_fk("personas", f"fk_{schema_name}_personas_account", "account_id", "accounts", on_delete="CASCADE")
-            _ensure_fk("personas", f"fk_{schema_name}_personas_lob", "lob_id", "lobs", on_delete="SET NULL")
-            _ensure_fk("pipeline_runs", f"fk_{schema_name}_runs_account", "account_id", "accounts", on_delete="SET NULL")
-            _ensure_fk("user_account_access", f"fk_{schema_name}_uaa_account", "account_id", "accounts", on_delete="CASCADE")
-            _ensure_fk("opportunity_signals", f"fk_{schema_name}_opp_account", "account_id", "accounts", on_delete="CASCADE")
-            _ensure_fk("weekly_digest_snapshots", f"fk_{schema_name}_wds_account", "account_id", "accounts", on_delete="CASCADE")
-            _ensure_fk("action_items", f"fk_{schema_name}_ai_account", "account_id", "accounts", on_delete="CASCADE")
-            _ensure_fk("action_items", f"fk_{schema_name}_ai_persona", "persona_id", "personas", on_delete="SET NULL")
-            _ensure_fk("action_item_reminders", f"fk_{schema_name}_air_item", "action_item_id", "action_items", on_delete="CASCADE")
+            # Intra-schema and cross-schema foreign keys
+            repaired_fks = cls._ensure_tenant_foreign_keys(conn, schema_name)
 
         return {
             "schema_name": schema_name,
@@ -409,9 +528,86 @@ class SchemaProvisioningService:
         }
 
     @classmethod
-    def drop_client_schema(cls, engine: Engine, client_slug: str) -> bool:
+    def drop_client_schema(cls, engine: Engine, client_slug: str, schema_name: Optional[str] = None) -> bool:
         """Safely drops a client schema. Use only for testing or explicit admin requests."""
-        schema_name = cls.get_schema_name(client_slug)
+        schema_name = cls.resolve_schema_name(engine, client_slug, schema_name)
         with engine.begin() as conn:
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
         return True
+
+    @classmethod
+    def create_cross_client_views(cls, engine: Engine) -> Dict[str, str]:
+        """Super-Admin Cross-Client UNION ALL Views (Decision 3).
+        
+        Dynamically constructs in-DB UNION ALL views in public schema over all active client schemas:
+        - public.v_all_accounts
+        - public.v_all_pipeline_runs
+        - public.v_all_personas
+        - public.v_all_lobs
+        - public.v_all_opportunity_signals
+        - public.v_all_deals
+        - public.v_all_activities
+        """
+        created_views = {}
+
+        with engine.begin() as conn:
+            clients = conn.execute(text(
+                "SELECT slug, schema_name FROM public.clients WHERE is_active = true ORDER BY id ASC"
+            )).fetchall()
+
+            if not clients:
+                return created_views
+
+            view_targets = [
+                "accounts", "pipeline_runs", "personas", "lobs",
+                "opportunity_signals", "deals", "activities"
+            ]
+            inspector = inspect(engine)
+
+            for target in view_targets:
+                parts = []
+                for slug, schema in clients:
+                    tables = inspector.get_table_names(schema=schema)
+                    if target in tables:
+                        parts.append(f"SELECT '{slug}'::text AS client_slug, * FROM \"{schema}\".\"{target}\"")
+
+                if parts:
+                    view_name = f"v_all_{target}"
+                    union_sql = f"CREATE OR REPLACE VIEW public.{view_name} AS " + " UNION ALL ".join(parts)
+                    conn.execute(text(union_sql))
+                    created_views[view_name] = f"UNION ALL across {len(parts)} tenant schemas"
+
+        return created_views
+
+
+# ── Module-Level Ergonomic Helpers ───────────────────────────────────────────
+
+def create_client_schema(client_slug: str, eng: Optional[Engine] = None) -> str:
+    """Provisions a complete isolated schema for the client from the skeleton."""
+    from db.connection import engine as default_engine
+    return SchemaProvisioningService.create_client_schema(eng or default_engine, client_slug)
+
+
+def copy_data_from_public(client_slug: str, eng: Optional[Engine] = None, schema_name: Optional[str] = None) -> Dict[str, Any]:
+    """Copies all tenant table rows from public schema into the client's schema."""
+    from db.connection import engine as default_engine
+    return SchemaProvisioningService.copy_data_from_public(eng or default_engine, client_slug, schema_name=schema_name)
+
+
+def verify_schema_integrity(client_slug: str, eng: Optional[Engine] = None, schema_name: Optional[str] = None) -> Dict[str, Any]:
+    """Evaluates the client's schema against canonical 58 tenant tables and sequences."""
+    from db.connection import engine as default_engine
+    return SchemaProvisioningService.verify_schema_integrity(eng or default_engine, client_slug, schema_name=schema_name)
+
+
+def repair_client_schema(client_slug: str, eng: Optional[Engine] = None, schema_name: Optional[str] = None) -> Dict[str, Any]:
+    """Self-healing migration that checks and creates missing tables, sequences, and FKs."""
+    from db.connection import engine as default_engine
+    return SchemaProvisioningService.repair_client_schema(eng or default_engine, client_slug, schema_name=schema_name)
+
+
+def drop_client_schema(client_slug: str, eng: Optional[Engine] = None, schema_name: Optional[str] = None) -> bool:
+    """Safely drops a client schema."""
+    from db.connection import engine as default_engine
+    return SchemaProvisioningService.drop_client_schema(eng or default_engine, client_slug, schema_name=schema_name)
+

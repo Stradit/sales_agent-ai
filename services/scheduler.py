@@ -71,14 +71,29 @@ def run_sources_refresh(session, options: Dict[str, Any]) -> Dict[str, Any]:
     if not channels:
         return {"skipped": "No channels selected."}
     limit = max(1, min(int(options.get("limit") or 20), 50))
+    slug = options.get("client_slug") or options.get("client")
+    if not slug:
+        try:
+            from db.tenant import get_current_slug
+            slug = get_current_slug()
+        except Exception:
+            slug = None
+
     cmd = [sys.executable, "main.py", "scrape", "--all", "--only", ",".join(channels), "--limit", str(limit)]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    if slug:
+        cmd.extend(["--client", slug])
+        env["CLIENT_SLUG"] = slug
+
     proc = subprocess.run(cmd, cwd=str(PIPELINE_DIR), capture_output=True, text=True, timeout=3 * 3600,
-                          env={**os.environ, "PYTHONIOENCODING": "utf-8"}, encoding="utf-8", errors="replace")
+                          env=env, encoding="utf-8", errors="replace")
     out = (proc.stdout or "") + (proc.stderr or "")
     failed = out.count("❌")
     scraped = out.count("SCRAPE ·")
     summary = {"channels": channels, "accounts": scraped, "accounts_failed": failed, "exit_code": proc.returncode,
                "output_tail": out[-1500:]}
+    if slug:
+        summary["client_slug"] = slug
     if proc.returncode != 0 and (not scraped or failed >= scraped):
         raise RuntimeError(f"Scrape failed for every account (exit {proc.returncode}): {out[-600:]}")
     return summary

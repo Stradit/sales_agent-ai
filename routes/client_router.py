@@ -33,6 +33,8 @@ class ClientCreateRequest(BaseModel):
     plan_tier: Optional[str] = Field("standard", description="standard | enterprise")
     max_accounts: Optional[int] = Field(20, ge=1, le=1000)
     api_credits_total: Optional[int] = Field(100000, ge=0)
+    refresh_cron: Optional[str] = Field("0 0 * * *", description="Cron schedule for updates")
+    max_concurrent_jobs: Optional[int] = Field(3, ge=1, le=20)
 
 
 class ClientUpdateRequest(BaseModel):
@@ -41,6 +43,9 @@ class ClientUpdateRequest(BaseModel):
     plan_tier: Optional[str] = None
     max_accounts: Optional[int] = Field(None, ge=1, le=1000)
     is_active: Optional[bool] = None
+    status: Optional[str] = Field(None, description="active | suspended | deleted")
+    refresh_cron: Optional[str] = None
+    max_concurrent_jobs: Optional[int] = Field(None, ge=1, le=20)
     api_credits_total: Optional[int] = Field(None, ge=0)
     api_credits_used: Optional[int] = Field(None, ge=0)
 
@@ -108,6 +113,11 @@ def _get_client_stats(session, schema_name: str) -> Dict[str, int]:
 
 
 def _serialize_client(c: Client, stats: Optional[Dict[str, int]] = None, users_count: int = 0) -> Dict[str, Any]:
+    from db.manifest import TenantManifest
+    head_ver = TenantManifest.get_skeleton_version()
+    current_ver = getattr(c, "skeleton_version", "T0001") or "T0001"
+    is_behind = current_ver != head_ver
+
     return {
         "id": c.id,
         "name": c.name,
@@ -116,6 +126,15 @@ def _serialize_client(c: Client, stats: Optional[Dict[str, int]] = None, users_c
         "schema_name": c.schema_name,
         "plan_tier": c.plan_tier,
         "is_active": c.is_active,
+        "status": getattr(c, "status", "active") or "active",
+        "skeleton_version": current_ver,
+        "skeleton_head": head_ver,
+        "is_behind": is_behind,
+        "provisioned_at": c.provisioned_at.isoformat() if getattr(c, "provisioned_at", None) else None,
+        "suspended_at": c.suspended_at.isoformat() if getattr(c, "suspended_at", None) else None,
+        "refresh_cron": getattr(c, "refresh_cron", "0 0 * * *"),
+        "max_concurrent_jobs": getattr(c, "max_concurrent_jobs", 3),
+        "last_error": getattr(c, "last_error", None),
         "max_accounts": c.max_accounts,
         "api_credits_total": c.api_credits_total,
         "api_credits_used": c.api_credits_used,
@@ -330,6 +349,18 @@ def update_client(
             client.max_accounts = body.max_accounts
         if body.is_active is not None:
             client.is_active = body.is_active
+        if body.status is not None:
+            client.status = body.status
+            if body.status == "suspended":
+                client.is_active = False
+                client.suspended_at = datetime.now(timezone.utc)
+            elif body.status == "active":
+                client.is_active = True
+                client.suspended_at = None
+        if body.refresh_cron is not None:
+            client.refresh_cron = body.refresh_cron
+        if body.max_concurrent_jobs is not None:
+            client.max_concurrent_jobs = body.max_concurrent_jobs
         if body.api_credits_total is not None:
             client.api_credits_total = body.api_credits_total
         if body.api_credits_used is not None:
@@ -823,7 +854,21 @@ def adjust_client_credits(
 
         old_total = client.api_credits_total or 0
         if body.action == "add":
-            new_total = max(0, old_total + body.amount)
+            from services.credit_service import CreditService
+            bal = CreditService.top_up_credits(
+                client_slug=slug,
+                amount=body.amount,
+                reason=body.reason or "Manual administrative adjustment",
+                user_id=getattr(current_user, "id", None),
+                engine=engine,
+            )
+            return {
+                "ok": True,
+                "slug": slug,
+                "api_credits_total": bal["total"],
+                "api_credits_used": bal["used"],
+                "remaining": bal["remaining"],
+            }
         elif body.action == "set":
             new_total = max(0, body.amount)
         else:
@@ -846,6 +891,109 @@ def adjust_client_credits(
             "api_credits_used": client.api_credits_used,
             "remaining": (client.api_credits_total or 0) - (client.api_credits_used or 0),
         }
+    finally:
+        session.close()
+
+
+@client_router.post("/{slug}/suspend", tags=["Clients & Multi-Tenancy"])
+def suspend_client(
+    slug: str,
+    current_user: User = Depends(auth.require_role("super_admin")),
+):
+    """Suspends a client workspace."""
+    session = SessionLocal()
+    try:
+        client = session.query(Client).filter_by(slug=slug).first()
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found.")
+        if slug == "stradit_india":
+            raise HTTPException(status_code=400, detail="Cannot suspend the primary platform client.")
+
+        client.status = "suspended"
+        client.is_active = False
+        client.suspended_at = datetime.now(timezone.utc)
+        session.commit()
+        auth.log_audit(session, getattr(current_user, "id", None), "client_suspended", details={"slug": slug})
+        return {"ok": True, "slug": slug, "status": "suspended"}
+    finally:
+        session.close()
+
+
+@client_router.post("/{slug}/activate", tags=["Clients & Multi-Tenancy"])
+def activate_client(
+    slug: str,
+    current_user: User = Depends(auth.require_role("super_admin")),
+):
+    """Reactivates a suspended client workspace."""
+    session = SessionLocal()
+    try:
+        client = session.query(Client).filter_by(slug=slug).first()
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found.")
+
+        client.status = "active"
+        client.is_active = True
+        client.suspended_at = None
+        session.commit()
+        auth.log_audit(session, getattr(current_user, "id", None), "client_activated", details={"slug": slug})
+        return {"ok": True, "slug": slug, "status": "active"}
+    finally:
+        session.close()
+
+
+@client_router.get("/{slug}/credits/ledger", tags=["Clients & Multi-Tenancy"])
+def get_client_credit_ledger(
+    slug: str,
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(auth.get_current_user),
+):
+    """Retrieves immutable credit ledger records for the client."""
+    session = SessionLocal()
+    try:
+        client = session.query(Client).filter_by(slug=slug).first()
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found.")
+        if not auth.user_has_client_access(session, current_user, slug):
+            raise HTTPException(status_code=403, detail="Access denied.")
+
+        rows = session.execute(text("""
+            SELECT id, account_id, run_id, delta, reason, created_at
+            FROM public.credit_ledger
+            WHERE client_id = :cid
+            ORDER BY created_at DESC
+            LIMIT :lim
+        """), {"cid": client.id, "lim": limit}).mappings().fetchall()
+
+        entries = []
+        for r in rows:
+            entry = dict(r)
+            if entry.get("created_at") and hasattr(entry["created_at"], "isoformat"):
+                entry["created_at"] = entry["created_at"].isoformat()
+            entries.append(entry)
+
+        return {"client_slug": slug, "ledger": entries, "total": len(entries)}
+    finally:
+        session.close()
+
+
+@client_router.get("/{slug}/activity", tags=["Clients & Multi-Tenancy"])
+def get_client_activity_log(
+    slug: str,
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(auth.get_current_user),
+):
+    """Retrieves audit log events for the client organization."""
+    from services.audit_service import AuditService
+    session = SessionLocal()
+    try:
+        client = session.query(Client).filter_by(slug=slug).first()
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found.")
+        if not auth.user_has_client_access(session, current_user, slug):
+            raise HTTPException(status_code=403, detail="Access denied.")
+
+        events = AuditService.list_events(client_slug=slug, limit=limit, engine=engine)
+        return {"client_slug": slug, "events": events, "total": len(events)}
     finally:
         session.close()
 

@@ -15,17 +15,27 @@ def get_model():
     if _model is None:
         with _lock:
             if _model is None:
-                from fastembed import TextEmbedding
-                _model = TextEmbedding(settings.EMBED_MODEL)
+                try:
+                    from fastembed import TextEmbedding
+                    _model = TextEmbedding(settings.EMBED_MODEL)
+                except Exception as e:
+                    print(f"⚠️  [Copilot] FastEmbed embedding model could not be loaded ({e})")
+                    return None
     return _model
 
 
 def embed_documents(texts: List[str], batch_size: int = 64) -> List[List[float]]:
-    return [v.tolist() for v in get_model().passage_embed(texts, batch_size=batch_size)]
+    model = get_model()
+    if model is None:
+        return [[0.0] * 384 for _ in texts]
+    return [v.tolist() for v in model.passage_embed(texts, batch_size=batch_size)]
 
 
 def embed_query(text: str) -> List[float]:
-    return next(iter(get_model().query_embed([text]))).tolist()
+    model = get_model()
+    if model is None:
+        return [0.0] * 384
+    return next(iter(model.query_embed([text]))).tolist()
 
 
 def warm_up_in_background() -> None:

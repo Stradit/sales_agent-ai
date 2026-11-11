@@ -184,7 +184,7 @@
                   <span class="badge bg-light text-secondary border" id="hubHeroSchemaBadge" style="font-size:0.72rem;font-weight:600;padding:4px 8px;font-family:monospace;">client_stradit_india</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;margin-top:6px;font-size:0.78rem;color:#64748b;flex-wrap:wrap;">
-                  <span style="cursor:pointer;" id="hubHeroSchemaLink" title="Click to inspect 16 isolated tenant tables"><i class="bi bi-shield-check text-success me-1"></i><strong style="color:#0f172a;" id="hubHeroSchemaStatus">16/16 Isolated Tables Verified</strong></span>
+                  <span style="cursor:pointer;" id="hubHeroSchemaLink" title="Click to inspect 58 isolated tenant tables"><i class="bi bi-shield-check text-success me-1"></i><strong style="color:#0f172a;" id="hubHeroSchemaStatus">58/58 Isolated Tables Verified</strong></span>
                   <span>&bull;</span>
                   <span><i class="bi bi-building me-1" style="color:#8A6248;"></i>Enrolled Targets: <strong style="color:#0f172a;" id="hubHeroAccountsCount">6</strong> / <span id="hubHeroMaxAccounts">50</span></span>
                   <span>&bull;</span>
@@ -2303,61 +2303,167 @@
   </div>
 </div>
 
-<!-- Modal: Add Client Workspace -->
-<div class="modal fade" id="addClientModal" tabindex="-1" aria-labelledby="addClientModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered" style="max-width:560px;">
-    <div class="modal-content" style="border-radius:14px;border:none;box-shadow:0 20px 40px rgba(0,0,0,0.15);">
+<!-- Modal: Add Client Workspace (3-Step Enterprise Provisioning Wizard §7.3.B) -->
+<div class="modal fade" id="addClientModal" tabindex="-1" aria-labelledby="addClientModalLabel" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:680px;">
+    <div class="modal-content" style="border-radius:14px;border:none;box-shadow:0 24px 48px rgba(0,0,0,0.18);">
       <div class="modal-header" style="background:linear-gradient(135deg,#4A3528,#8A6248);color:#F3E7DA;border-bottom:1px solid #B88A64;">
         <div style="display:flex;align-items:center;gap:12px;">
-          <div style="width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:1.2rem;">
+          <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:1.25rem;">
             <i class="bi bi-buildings"></i>
           </div>
           <div>
+            <div style="font-size:0.66rem;font-weight:700;color:#D3C2B1;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
+              <i class="bi bi-arrow-return-left me-1"></i> Client Workspaces &rsaquo; Tenant Provisioning
+            </div>
             <h5 class="modal-title mb-0" id="addClientModalLabel" style="font-weight:700;font-size:1.05rem;">Provision New Client Workspace</h5>
-            <div style="font-size:0.75rem;color:#94a3b8;">Creates dedicated PostgreSQL schema with isolated tables &amp; sequences</div>
+            <div style="font-size:0.72rem;color:#F3E7DA;opacity:0.85;">3-Step Guided Provisioning: Isolated PostgreSQL schema, 58 canonical tables &amp; quotas</div>
           </div>
         </div>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
+
+      <!-- Wizard Step Indicator Header -->
+      <div class="px-4 pt-3 pb-2 bg-light border-bottom">
+        <div class="d-flex align-items-center justify-content-between position-relative">
+          <div class="text-center wizard-step-indicator active" id="stepIndicator1" style="flex:1;">
+            <div class="wizard-step-circle mx-auto mb-1" id="stepCircle1" style="width:28px;height:28px;border-radius:50%;background:#8A6248;color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;">1</div>
+            <div style="font-size:0.72rem;font-weight:700;color:#0f172a;" id="stepLabel1">1. Organization</div>
+          </div>
+          <div class="text-center wizard-step-indicator" id="stepIndicator2" style="flex:1;">
+            <div class="wizard-step-circle mx-auto mb-1" id="stepCircle2" style="width:28px;height:28px;border-radius:50%;background:#e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;">2</div>
+            <div style="font-size:0.72rem;font-weight:600;color:#64748b;" id="stepLabel2">2. Plan &amp; Limits</div>
+          </div>
+          <div class="text-center wizard-step-indicator" id="stepIndicator3" style="flex:1;">
+            <div class="wizard-step-circle mx-auto mb-1" id="stepCircle3" style="width:28px;height:28px;border-radius:50%;background:#e2e8f0;color:#64748b;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;">3</div>
+            <div style="font-size:0.72rem;font-weight:600;color:#64748b;" id="stepLabel3">3. Provision &amp; Verify</div>
+          </div>
+        </div>
+      </div>
+
       <div class="modal-body" style="padding:24px;">
         <form id="addClientForm" onsubmit="return false;">
-          <div class="mb-3">
-            <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Client / Company Name <span class="text-danger">*</span></label>
-            <input type="text" class="form-control" id="newClientName" placeholder="e.g. Acme Financial Group" required style="border-radius:8px;font-size:0.88rem;">
-          </div>
-          <div class="mb-3">
-            <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Workspace Slug (Schema Identifier) <span class="text-danger">*</span></label>
-            <div class="input-group">
-              <span class="input-group-text" style="font-size:0.82rem;background:#f8fafc;color:#64748b;border-radius:8px 0 0 8px;">client_</span>
-              <input type="text" class="form-control" id="newClientSlug" placeholder="acme_financial" required style="border-radius:0 8px 8px 0;font-size:0.88rem;">
+          <!-- STEP 1: Organization Details -->
+          <div id="wizardPaneStep1">
+            <div class="mb-3">
+              <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Client / Organization Name <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="newClientName" placeholder="e.g. Acme Financial Holdings" required style="border-radius:8px;font-size:0.88rem;">
             </div>
-            <div style="font-size:0.72rem;color:#64748b;margin-top:4px;">Lowercase letters, numbers and underscores only (e.g. acme_financial).</div>
+            <div class="mb-3">
+              <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Workspace Slug (Schema Identifier) <span class="text-danger">*</span></label>
+              <div class="input-group">
+                <span class="input-group-text" style="font-size:0.82rem;background:#f8fafc;color:#64748b;border-radius:8px 0 0 8px;">client_</span>
+                <input type="text" class="form-control" id="newClientSlug" placeholder="acme_financial" required style="border-radius:0 8px 8px 0;font-size:0.88rem;">
+              </div>
+              <div class="d-flex justify-content-between align-items-center mt-1">
+                <div style="font-size:0.72rem;color:#64748b;">Lowercase letters, numbers, and underscores only.</div>
+                <div style="font-size:0.72rem;font-weight:600;color:#8A6248;" id="wizardSchemaPreview">Result: client_acme_financial</div>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Legal Entity Name</label>
+              <input type="text" class="form-control" id="newClientLegalName" placeholder="e.g. Acme Financial Holdings Inc." style="border-radius:8px;font-size:0.88rem;">
+            </div>
           </div>
-          <div class="row g-3 mb-3">
-            <div class="col-6">
-              <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Plan Tier</label>
-              <select class="form-select" id="newClientPlan" style="border-radius:8px;font-size:0.85rem;">
-                <option value="enterprise" selected>Enterprise</option>
-                <option value="professional">Professional</option>
-                <option value="starter">Starter</option>
+
+          <!-- STEP 2: Plan & Limits -->
+          <div id="wizardPaneStep2" class="d-none">
+            <div class="row g-3 mb-3">
+              <div class="col-6">
+                <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Plan Tier</label>
+                <select class="form-select" id="newClientPlan" style="border-radius:8px;font-size:0.85rem;">
+                  <option value="enterprise" selected>Enterprise</option>
+                  <option value="professional">Professional</option>
+                  <option value="starter">Starter</option>
+                </select>
+              </div>
+              <div class="col-6">
+                <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Max Accounts Quota</label>
+                <input type="number" class="form-control" id="newClientMaxAccounts" value="30" min="1" max="500" style="border-radius:8px;font-size:0.85rem;">
+              </div>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-6">
+                <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Initial API Credit Budget</label>
+                <input type="number" class="form-control" id="newClientCredits" value="100000" min="0" step="5000" style="border-radius:8px;font-size:0.85rem;">
+              </div>
+              <div class="col-6">
+                <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Automated Refresh Schedule (Cron)</label>
+                <input type="text" class="form-control" id="newClientCron" value="0 0 * * *" placeholder="0 0 * * *" style="border-radius:8px;font-size:0.85rem;">
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Assign First Client Admin User</label>
+              <select class="form-select" id="newClientAdminUserSelect" style="border-radius:8px;font-size:0.85rem;">
+                <option value="" selected>No initial admin (assign later)</option>
               </select>
-            </div>
-            <div class="col-6">
-              <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Max Accounts Quota</label>
-              <input type="number" class="form-control" id="newClientMaxAccounts" value="30" min="1" max="500" style="border-radius:8px;font-size:0.85rem;">
+              <div style="font-size:0.72rem;color:#64748b;margin-top:4px;">Grants the chosen platform user client_admin permissions on this workspace.</div>
             </div>
           </div>
-          <div class="mb-3">
-            <label class="form-label" style="font-weight:600;font-size:0.82rem;color:#334155;">Initial API Credit Budget</label>
-            <input type="number" class="form-control" id="newClientCredits" value="100000" min="0" step="5000" style="border-radius:8px;font-size:0.85rem;">
+
+          <!-- STEP 3: Review & Live Provisioning Progress -->
+          <div id="wizardPaneStep3" class="d-none">
+            <!-- Review Summary Card -->
+            <div class="card p-3 mb-3 border bg-light" style="border-radius:10px;">
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <strong id="wizardSummaryName" style="font-size:0.95rem;color:#0f172a;">Organization Name</strong>
+                <span class="badge bg-primary text-uppercase" id="wizardSummaryPlan">ENTERPRISE</span>
+              </div>
+              <div class="row g-2 text-muted" style="font-size:0.75rem;">
+                <div class="col-6">Schema: <code id="wizardSummarySchema">client_slug</code></div>
+                <div class="col-6">Account Quota: <strong id="wizardSummaryQuota" class="text-dark">30 accounts</strong></div>
+                <div class="col-6">Credits: <strong id="wizardSummaryCredits" class="text-dark">100,000 cr</strong></div>
+                <div class="col-6">Schedule: <code id="wizardSummaryCron">0 0 * * *</code></div>
+              </div>
+            </div>
+
+            <!-- Live Provisioning Checklist -->
+            <div class="border rounded p-3 bg-white" id="wizardProvisionChecklist" style="border-radius:10px;">
+              <h6 style="font-size:0.78rem;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:12px;">Live Provisioning Pipeline</h6>
+              <div class="d-flex flex-column gap-2" style="font-size:0.8rem;">
+                <div class="d-flex align-items-center gap-2 checklist-item" id="checkStep1">
+                  <i class="bi bi-circle text-muted" id="checkIcon1"></i>
+                  <span>1. Platform Registry Row Creation</span>
+                </div>
+                <div class="d-flex align-items-center gap-2 checklist-item" id="checkStep2">
+                  <i class="bi bi-circle text-muted" id="checkIcon2"></i>
+                  <span>2. PostgreSQL Schema Container Creation</span>
+                </div>
+                <div class="d-flex align-items-center gap-2 checklist-item" id="checkStep3">
+                  <i class="bi bi-circle text-muted" id="checkIcon3"></i>
+                  <span>3. Clone 58 Canonical Skeleton Tables &amp; PKs</span>
+                </div>
+                <div class="d-flex align-items-center gap-2 checklist-item" id="checkStep4">
+                  <i class="bi bi-circle text-muted" id="checkIcon4"></i>
+                  <span>4. Allocate Dedicated Column Sequences</span>
+                </div>
+                <div class="d-flex align-items-center gap-2 checklist-item" id="checkStep5">
+                  <i class="bi bi-circle text-muted" id="checkIcon5"></i>
+                  <span>5. Dynamic Intra-Tenant &amp; Platform Foreign Keys</span>
+                </div>
+                <div class="d-flex align-items-center gap-2 checklist-item" id="checkStep6">
+                  <i class="bi bi-circle text-muted" id="checkIcon6"></i>
+                  <span>6. Manifest Compliance Verification (Head: T0001)</span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div id="addClientErrorAlert" class="alert alert-danger d-none py-2 px-3" style="font-size:0.8rem;border-radius:8px;"></div>
+
+          <div id="addClientErrorAlert" class="alert alert-danger d-none py-2 px-3 mt-3" style="font-size:0.8rem;border-radius:8px;"></div>
         </form>
       </div>
+
       <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;border-radius:0 0 14px 14px;padding:14px 24px;">
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;">Cancel</button>
-        <button type="button" class="btn btn-sm btn-primary" id="btnSubmitAddClient" style="border-radius:8px;font-weight:600;padding:6px 18px;background:linear-gradient(135deg,#8A6248,#8A6248);border:none;">
-          <i class="bi bi-plus-circle me-1"></i> Provision Workspace
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" id="btnWizardCancel" style="border-radius:8px;font-weight:600;">Cancel</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="btnWizardBack" style="border-radius:8px;font-weight:600;">&larr; Back</button>
+        <button type="button" class="btn btn-sm btn-primary" id="btnWizardNext" style="border-radius:8px;font-weight:600;padding:6px 18px;background:linear-gradient(135deg,#8A6248,#8A6248);border:none;">
+          Next: Plan &amp; Limits &rarr;
+        </button>
+        <button type="button" class="btn btn-sm btn-primary d-none" id="btnSubmitAddClient" style="border-radius:8px;font-weight:600;padding:6px 18px;background:linear-gradient(135deg,#8A6248,#8A6248);border:none;">
+          <i class="bi bi-plus-circle me-1"></i> Start Provisioning
+        </button>
+        <button type="button" class="btn btn-sm btn-success d-none" id="btnWizardFinish" style="border-radius:8px;font-weight:600;padding:6px 18px;">
+          <i class="bi bi-check-circle-fill me-1"></i> Switch &amp; Add First Account
         </button>
       </div>
     </div>
@@ -2366,134 +2472,159 @@
 
 <!-- Modal: Manage All Clients (Enterprise Client Tenant Management Panel) -->
 <div class="modal fade" id="manageClientsModal" tabindex="-1" aria-labelledby="manageClientsModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered" style="max-width:1060px;">
-    <div class="modal-content" style="border-radius:14px;border:none;box-shadow:0 24px 48px rgba(0,0,0,0.18);">
-      <div class="modal-header" style="background:linear-gradient(135deg,#4A3528,#8A6248);color:#F3E7DA;border-bottom:1px solid #B88A64;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:1.25rem;">
-            <i class="bi bi-buildings-fill text-info"></i>
+  <div class="modal-dialog modal-dialog-centered" style="max-width:1280px;width:95vw;">
+    <div class="modal-content" style="border-radius:16px;border:1px solid rgba(184,138,100,0.3);box-shadow:0 25px 60px -15px rgba(43,36,31,0.35);overflow:hidden;">
+      <div class="modal-header" style="background:linear-gradient(135deg,#2B241F 0%, #4A3528 60%, #8A6248 100%);color:#F3E7DA;border-bottom:1px solid #B88A64;padding:16px 24px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:44px;height:44px;border-radius:12px;background:rgba(243,231,218,0.12);border:1px solid rgba(243,231,218,0.25);display:flex;align-items:center;justify-content:center;font-size:1.35rem;">
+            <i class="bi bi-buildings-fill text-warning"></i>
           </div>
           <div>
             <div class="d-flex align-items-center gap-2">
-              <h5 class="modal-title mb-0" id="manageClientsModalLabel" style="font-weight:700;font-size:1.1rem;">Client Tenant Management</h5>
-              <span class="badge bg-primary-subtle text-primary" style="font-size:0.68rem;font-weight:700;text-transform:uppercase;">Multi-Tenant Core</span>
+              <h5 class="modal-title mb-0" id="manageClientsModalLabel" style="font-weight:700;font-size:1.15rem;letter-spacing:-0.01em;">Client Tenant Management</h5>
+              <span class="badge" style="background:rgba(243,231,218,0.18);color:#F3E7DA;border:1px solid rgba(243,231,218,0.3);font-size:0.68rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;">Multi-Tenant Core</span>
             </div>
-            <div style="font-size:0.75rem;color:#94a3b8;margin-top:2px;">Isolated PostgreSQL schemas, per-client sequence isolation, quota governance &amp; credit telemetry</div>
+            <div style="font-size:0.75rem;color:#D3C2B1;margin-top:2px;">Dedicated PostgreSQL schemas &bull; Dynamic FK resolution &bull; Quota governance &bull; Credit telemetry</div>
           </div>
         </div>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
 
-      <div class="modal-body" style="padding:22px;max-height:75vh;overflow-y:auto;background:#f8fafc;">
+      <div class="modal-body" style="padding:22px;max-height:78vh;overflow-y:auto;background:#f8fafc;">
         <!-- Top Multi-Tenant System KPI Summary Strip -->
-        <div class="row g-2 mb-3" id="manageClientsKpiStrip">
-          <div class="col-md-3 col-sm-6">
-            <div class="card p-2 px-3 border-0 shadow-sm" style="border-radius:10px;background:#ffffff;">
-              <div class="d-flex align-items-center justify-content-between">
-                <span style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Registered Tenants</span>
-                <i class="bi bi-building text-primary" style="font-size:1rem;"></i>
+        <div class="row g-3 mb-3" id="manageClientsKpiStrip">
+          <div class="col-lg-3 col-sm-6">
+            <div class="tenant-kpi-card kpi-tenants shadow-sm">
+              <div class="d-flex align-items-center justify-content-between mb-1">
+                <span style="font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Registered Tenants</span>
+                <div class="tenant-kpi-icon"><i class="bi bi-buildings"></i></div>
               </div>
-              <div class="d-flex align-items-baseline gap-2 mt-1">
-                <h4 class="mb-0 fw-bold" id="kpiTotalClients" style="color:#0f172a;">1</h4>
-                <span class="badge bg-success-subtle text-success" id="kpiActiveClients" style="font-size:0.68rem;">1 Active</span>
+              <div class="d-flex align-items-baseline gap-2">
+                <h4 class="mb-0 fw-bold" id="kpiTotalClients" style="color:#0f172a;font-size:1.45rem;">1</h4>
+                <span class="badge bg-success-subtle text-success border border-success-subtle" id="kpiActiveClients" style="font-size:0.7rem;font-weight:600;">1 Active</span>
               </div>
+              <div class="text-muted mt-1" style="font-size:0.7rem;">Multi-tenant client workspaces</div>
             </div>
           </div>
-          <div class="col-md-3 col-sm-6">
-            <div class="card p-2 px-3 border-0 shadow-sm" style="border-radius:10px;background:#ffffff;">
-              <div class="d-flex align-items-center justify-content-between">
-                <span style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Schema Isolation</span>
-                <i class="bi bi-shield-check text-success" style="font-size:1rem;"></i>
+          <div class="col-lg-3 col-sm-6">
+            <div class="tenant-kpi-card kpi-schemas shadow-sm">
+              <div class="d-flex align-items-center justify-content-between mb-1">
+                <span style="font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Schema Isolation</span>
+                <div class="tenant-kpi-icon"><i class="bi bi-shield-check"></i></div>
               </div>
-              <div class="d-flex align-items-baseline gap-2 mt-1">
-                <h4 class="mb-0 fw-bold text-success" id="kpiTotalSchemas">100%</h4>
-                <span class="badge bg-info-subtle text-info" style="font-size:0.68rem;">16 Tables/Tenant</span>
+              <div class="d-flex align-items-baseline gap-2">
+                <h4 class="mb-0 fw-bold text-success" id="kpiTotalSchemas" style="font-size:1.45rem;">100%</h4>
+                <span class="badge bg-info-subtle text-info border border-info-subtle" style="font-size:0.7rem;font-weight:600;">58 Tables/Tenant</span>
               </div>
+              <div class="text-muted mt-1" style="font-size:0.7rem;">Manifest contract verified (T0001)</div>
             </div>
           </div>
-          <div class="col-md-3 col-sm-6">
-            <div class="card p-2 px-3 border-0 shadow-sm" style="border-radius:10px;background:#ffffff;">
-              <div class="d-flex align-items-center justify-content-between">
-                <span style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Tracked Targets</span>
-                <i class="bi bi-crosshair text-warning" style="font-size:1rem;"></i>
+          <div class="col-lg-3 col-sm-6">
+            <div class="tenant-kpi-card kpi-targets shadow-sm">
+              <div class="d-flex align-items-center justify-content-between mb-1">
+                <span style="font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Tracked Targets</span>
+                <div class="tenant-kpi-icon"><i class="bi bi-crosshair"></i></div>
               </div>
-              <div class="d-flex align-items-baseline gap-2 mt-1">
-                <h4 class="mb-0 fw-bold" id="kpiTotalAccounts" style="color:#0f172a;">6</h4>
-                <span class="text-muted" style="font-size:0.72rem;">across schemas</span>
+              <div class="d-flex align-items-baseline gap-2">
+                <h4 class="mb-0 fw-bold" id="kpiTotalAccounts" style="color:#0f172a;font-size:1.45rem;">6</h4>
+                <span class="badge bg-warning-subtle text-warning border border-warning-subtle" style="font-size:0.7rem;font-weight:600;">Monitored</span>
               </div>
+              <div class="text-muted mt-1" style="font-size:0.7rem;">Accounts isolated across schemas</div>
             </div>
           </div>
-          <div class="col-md-3 col-sm-6">
-            <div class="card p-2 px-3 border-0 shadow-sm" style="border-radius:10px;background:#ffffff;">
-              <div class="d-flex align-items-center justify-content-between">
-                <span style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;">Credit Budget</span>
-                <i class="bi bi-coin text-primary" style="font-size:1rem;"></i>
+          <div class="col-lg-3 col-sm-6">
+            <div class="tenant-kpi-card kpi-credits shadow-sm">
+              <div class="d-flex align-items-center justify-content-between mb-1">
+                <span style="font-size:0.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">Global Credit Budget</span>
+                <div class="tenant-kpi-icon"><i class="bi bi-coin"></i></div>
               </div>
-              <div class="d-flex align-items-baseline gap-2 mt-1">
-                <h4 class="mb-0 fw-bold" id="kpiCreditsUsed" style="color:#0f172a;">0</h4>
-                <span style="font-size:0.72rem;color:#64748b;">/ <span id="kpiCreditsAlloc">100k</span> (<strong id="kpiCreditPct">0%</strong>)</span>
+              <div class="d-flex align-items-baseline gap-2">
+                <h4 class="mb-0 fw-bold" id="kpiCreditsUsed" style="color:#0f172a;font-size:1.45rem;">0</h4>
+                <span class="text-muted" style="font-size:0.72rem;">/ <span id="kpiCreditsAlloc" class="fw-semibold">100k</span> (<strong id="kpiCreditPct" class="text-primary">0%</strong>)</span>
               </div>
+              <div class="text-muted mt-1" style="font-size:0.7rem;">Aggregate API consumption</div>
             </div>
           </div>
         </div>
 
-        <!-- Filter & Action Ribbon -->
-        <div class="card p-2 border-0 shadow-sm mb-3" style="border-radius:10px;background:#ffffff;">
+        <!-- Filter & Action Ribbon with View Switcher -->
+        <div class="tenant-filter-ribbon shadow-sm mb-3">
           <div class="row g-2 align-items-center">
-            <div class="col-md-5">
+            <div class="col-lg-3 col-md-5">
               <div class="input-group input-group-sm">
-                <span class="input-group-text bg-light border-end-0"><i class="bi bi-search text-muted"></i></span>
-                <input type="text" id="manageClientsSearchInput" class="form-control border-start-0" placeholder="Filter clients by name, slug, or legal name..." style="font-size:0.82rem;">
+                <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-search"></i></span>
+                <input type="text" id="manageClientsSearchInput" class="form-control border-start-0" placeholder="Filter by tenant name, slug, or legal entity...">
               </div>
             </div>
-            <div class="col-md-3">
-              <select id="manageClientsPlanFilter" class="form-select form-select-sm" style="font-size:0.8rem;">
-                <option value="all">All Plans</option>
+            <div class="col-lg-2 col-md-3">
+              <select id="manageClientsPlanFilter" class="form-select form-select-sm">
+                <option value="all">All Plan Tiers</option>
                 <option value="enterprise">Enterprise</option>
                 <option value="professional">Professional</option>
                 <option value="starter">Starter</option>
               </select>
             </div>
-            <div class="col-md-4 text-end d-flex gap-2 justify-content-end">
-              <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRefreshManageClients" title="Reload Tenant Telemetry" style="font-size:0.8rem;border-radius:8px;">
-                <i class="bi bi-arrow-clockwise"></i>
+            <div class="col-lg-2 col-md-4">
+              <select id="manageClientsStatusFilter" class="form-select form-select-sm">
+                <option value="all">All Statuses</option>
+                <option value="active">Active Only</option>
+                <option value="suspended">Suspended Only</option>
+              </select>
+            </div>
+            <div class="col-lg-2 col-md-4 text-center">
+              <div class="btn-group btn-group-sm w-100" role="group" id="tenantViewModeToggle">
+                <button type="button" class="btn btn-sm btn-outline-secondary active" data-view="cards" title="Spacious Workspace Cards View">
+                  <i class="bi bi-grid-fill me-1"></i> Cards
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-view="table" title="Streamlined Table View">
+                  <i class="bi bi-table me-1"></i> Table
+                </button>
+              </div>
+            </div>
+            <div class="col-lg-3 col-md-8 text-end d-flex gap-2 justify-content-end">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRefreshManageClients" title="Reload Tenant Telemetry" style="border-radius:8px;font-size:0.8rem;padding:6px 12px;">
+                <i class="bi bi-arrow-clockwise me-1"></i> Refresh
               </button>
-              <button type="button" class="btn btn-sm btn-primary" id="btnOpenAddClientFromManage" style="border-radius:8px;font-weight:600;font-size:0.8rem;background:linear-gradient(135deg,#8A6248,#8A6248);border:none;">
+              <button type="button" class="btn btn-sm text-white" id="btnOpenAddClientFromManage" style="border-radius:8px;font-weight:600;font-size:0.8rem;background:linear-gradient(135deg,#8A6248,#4A3528);border:none;padding:6px 14px;box-shadow:0 2px 6px rgba(74,53,40,0.25);">
                 <i class="bi bi-plus-lg me-1"></i> Add New Client
               </button>
             </div>
           </div>
         </div>
 
-        <!-- Clients Table Container -->
-        <div class="card border-0 shadow-sm overflow-hidden" style="border-radius:10px;background:#ffffff;">
-          <div class="table-responsive">
+        <!-- Section 1: Executive Workspace Cards Container (Default Spacious View) -->
+        <div id="manageClientsCardsContainer" class="d-flex flex-column gap-3 mb-2">
+          <!-- Dynamically populated by ClientWorkspaceManager.renderManageModal() -->
+        </div>
+
+        <!-- Section 2: Streamlined Table Container (Alternate Tabular View) -->
+        <div id="manageClientsTableContainer" class="card border-0 shadow-sm overflow-hidden d-none" style="border-radius:12px;background:#ffffff;border:1px solid #E2E8F0;">
+          <div class="table-responsive" style="max-height:500px;overflow-y:auto;">
             <table class="table table-hover align-middle mb-0" style="font-size:0.82rem;">
-              <thead style="background:#f1f5f9;font-weight:700;color:#475569;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.03em;">
+              <thead>
                 <tr>
-                  <th style="padding:12px 14px;">Client Organization</th>
-                  <th>Schema &amp; Health</th>
-                  <th>Plan</th>
-                  <th>Accounts</th>
-                  <th>Users</th>
-                  <th>API Credits Budget</th>
-                  <th>Status</th>
-                  <th style="text-align:right;padding-right:14px;">Governance &amp; Actions</th>
+                  <th style="width:25%;padding-left:18px;">Tenant Organization</th>
+                  <th style="width:16%;">Schema &amp; Health</th>
+                  <th style="width:14%;">Plan &amp; Users</th>
+                  <th style="width:15%;">Target Accounts</th>
+                  <th style="width:16%;">Credit Balance</th>
+                  <th style="width:6%;text-align:center;">Status</th>
+                  <th style="width:8%;text-align:right;padding-right:18px;">Governance</th>
                 </tr>
               </thead>
               <tbody id="manageClientsTableBody">
-                <!-- Dynamically populated by ClientWorkspaceManager.renderManageModal() -->
+                <!-- Dynamically populated when table view is selected -->
               </tbody>
             </table>
           </div>
         </div>
       </div>
 
-      <div class="modal-footer" style="background:#ffffff;border-top:1px solid #e2e8f0;border-radius:0 0 14px 14px;padding:12px 24px;">
+      <div class="modal-footer" style="background:#ffffff;border-top:1px solid #e2e8f0;border-radius:0 0 16px 16px;padding:14px 24px;">
         <div class="me-auto text-muted" style="font-size:0.75rem;">
-          <i class="bi bi-info-circle me-1"></i> Changes apply immediately with atomic PostgreSQL schema transactions.
+          <i class="bi bi-shield-lock-fill text-success me-1"></i> Multi-tenant data segregation enforced with PostgreSQL schemas &amp; tenant thread isolation.
         </div>
-        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;padding:6px 16px;">Close</button>
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;padding:6px 18px;">Close</button>
       </div>
     </div>
   </div>
@@ -2510,8 +2641,11 @@
             <i class="bi bi-pencil-square text-info"></i>
           </div>
           <div>
-            <h5 class="modal-title mb-0" id="editClientModalLabel" style="font-weight:700;font-size:1.02rem;">Edit Client Workspace</h5>
-            <div style="font-size:0.72rem;color:#94a3b8;" id="editClientModalSubtitle">Modify quotas, tier and legal parameters</div>
+            <div style="font-size:0.66rem;font-weight:700;color:#D3C2B1;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
+              <i class="bi bi-arrow-return-left me-1"></i> Client Workspaces &rsaquo; Organization Settings
+            </div>
+            <h5 class="modal-title mb-0" id="editClientModalLabel" style="font-weight:700;font-size:1.05rem;">Edit Client Workspace</h5>
+            <div style="font-size:0.72rem;color:#F3E7DA;opacity:0.85;" id="editClientModalSubtitle">Modify quotas, tier and legal parameters</div>
           </div>
         </div>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -2571,8 +2705,11 @@
             <i class="bi bi-shield-shaded text-success"></i>
           </div>
           <div>
+            <div style="font-size:0.66rem;font-weight:700;color:#D3C2B1;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
+              <i class="bi bi-arrow-return-left me-1"></i> Client Workspaces &rsaquo; Schema Health &amp; Integrity
+            </div>
             <h5 class="modal-title mb-0" id="schemaDiagnosticsModalLabel" style="font-weight:700;font-size:1.02rem;">Schema Health &amp; Integrity</h5>
-            <div style="font-size:0.72rem;color:#94a3b8;" id="schemaDiagnosticsSubtitle">Schema: client_stradit_india</div>
+            <div style="font-size:0.72rem;color:#F3E7DA;opacity:0.85;" id="schemaDiagnosticsSubtitle">Schema: client_stradit_india</div>
           </div>
         </div>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -2584,8 +2721,8 @@
             <div class="d-flex align-items-center gap-2">
               <i class="bi bi-check-circle-fill text-success" style="font-size:1.3rem;" id="schemaHealthIcon"></i>
               <div>
-                <strong id="schemaHealthStatusText" style="color:#166534;font-size:0.88rem;">100% Healthy — All 16 Schema Tables Verified</strong>
-                <div style="font-size:0.72rem;color:#15803d;" id="schemaHealthMeta">Total Rows: 40,706 &bull; Foreign Keys: 11 Active</div>
+                <strong id="schemaHealthStatusText" style="color:#166534;font-size:0.88rem;">100% Healthy — All 58 Schema Tables Verified</strong>
+                <div style="font-size:0.72rem;color:#15803d;" id="schemaHealthMeta">Total Rows: 40,706 &bull; Foreign Keys: 51 Active</div>
               </div>
             </div>
             <button type="button" class="btn btn-sm btn-outline-success" id="btnRunSchemaRepair" style="border-radius:8px;font-size:0.78rem;font-weight:600;">
@@ -2595,7 +2732,7 @@
           <div id="schemaRepairFeedback" class="mt-2 pt-2 border-top border-success-subtle d-none" style="font-size:0.74rem;"></div>
         </div>
 
-        <div style="font-weight:700;font-size:0.78rem;color:#475569;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em;">Schema Tables Breakdown (16 Cloned Tables)</div>
+        <div style="font-weight:700;font-size:0.78rem;color:#475569;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em;">Schema Tables Breakdown (58 Canonical Skeleton Tables)</div>
         <div class="table-responsive">
           <table class="table table-sm table-hover align-middle mb-0" style="font-size:0.78rem;">
             <thead class="table-light">
@@ -2613,7 +2750,7 @@
         </div>
       </div>
       <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;border-radius:0 0 14px 14px;padding:10px 20px;">
-        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal" style="border-radius:6px;">Close</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;"><i class="bi bi-arrow-left me-1"></i> Return to Client Workspaces</button>
       </div>
     </div>
   </div>
@@ -2630,8 +2767,11 @@
             <i class="bi bi-coin text-warning"></i>
           </div>
           <div>
+            <div style="font-size:0.66rem;font-weight:700;color:#D3C2B1;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
+              <i class="bi bi-arrow-return-left me-1"></i> Client Workspaces &rsaquo; Credit Allocation
+            </div>
             <h5 class="modal-title mb-0" id="adjustCreditsModalLabel" style="font-weight:700;font-size:1.02rem;">Adjust API Credits Budget</h5>
-            <div style="font-size:0.72rem;color:#94a3b8;" id="adjustCreditsModalSubtitle">Client: Stradit India</div>
+            <div style="font-size:0.72rem;color:#F3E7DA;opacity:0.85;" id="adjustCreditsModalSubtitle">Client: Stradit India</div>
           </div>
         </div>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -2699,8 +2839,11 @@
             <i class="bi bi-briefcase-fill text-primary"></i>
           </div>
           <div>
+            <div style="font-size:0.66rem;font-weight:700;color:#D3C2B1;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
+              <i class="bi bi-arrow-return-left me-1"></i> Client Workspaces &rsaquo; Target Accounts Explorer
+            </div>
             <h5 class="modal-title mb-0" id="clientAccountsModalLabel" style="font-weight:700;font-size:1.02rem;">Client Accounts Explorer</h5>
-            <div style="font-size:0.72rem;color:#94a3b8;" id="clientAccountsModalSubtitle">Accounts residing in tenant schema</div>
+            <div style="font-size:0.72rem;color:#F3E7DA;opacity:0.85;" id="clientAccountsModalSubtitle">Accounts residing in tenant schema</div>
           </div>
         </div>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -2730,7 +2873,7 @@
         </div>
       </div>
       <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;border-radius:0 0 14px 14px;padding:10px 20px;">
-        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal" style="border-radius:6px;">Close</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;"><i class="bi bi-arrow-left me-1"></i> Return to Client Workspaces</button>
       </div>
     </div>
   </div>
@@ -2747,8 +2890,11 @@
             <i class="bi bi-people-fill text-primary"></i>
           </div>
           <div>
+            <div style="font-size:0.66rem;font-weight:700;color:#D3C2B1;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
+              <i class="bi bi-arrow-return-left me-1"></i> Client Workspaces &rsaquo; User Access &amp; Permissions
+            </div>
             <h5 class="modal-title mb-0" id="clientUsersModalLabel" style="font-weight:700;font-size:1.02rem;">Client Users &amp; Permissions</h5>
-            <div style="font-size:0.72rem;color:#94a3b8;" id="clientUsersModalSubtitle">Client: Stradit India</div>
+            <div style="font-size:0.72rem;color:#F3E7DA;opacity:0.85;" id="clientUsersModalSubtitle">Client: Stradit India</div>
           </div>
         </div>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -2799,7 +2945,93 @@
         </div>
       </div>
       <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;border-radius:0 0 14px 14px;padding:10px 20px;">
-        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal" style="border-radius:6px;">Close</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;"><i class="bi bi-arrow-left me-1"></i> Return to Client Workspaces</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Credit Transaction Ledger (§7.3.C) -->
+<div class="modal fade" id="clientLedgerModal" tabindex="-1" aria-labelledby="clientLedgerModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content" style="border-radius:14px;border:none;box-shadow:0 24px 48px rgba(0,0,0,0.18);">
+      <div class="modal-header" style="background:linear-gradient(135deg,#4A3528,#8A6248);color:#F3E7DA;border-bottom:1px solid #B88A64;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:1.2rem;">
+            <i class="bi bi-journal-text text-warning"></i>
+          </div>
+          <div>
+            <div style="font-size:0.66rem;font-weight:700;color:#D3C2B1;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
+              <i class="bi bi-arrow-return-left me-1"></i> Client Workspaces &rsaquo; Credit Transaction Ledger
+            </div>
+            <h5 class="modal-title mb-0" id="clientLedgerModalLabel" style="font-weight:700;font-size:1.05rem;">Credit Audit Ledger</h5>
+            <div style="font-size:0.72rem;color:#F3E7DA;opacity:0.85;" id="clientLedgerModalSubtitle">Immutable history of credit reservations, settlements, refunds &amp; top-ups</div>
+          </div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="padding:20px;max-height:65vh;overflow-y:auto;">
+        <div class="table-responsive">
+          <table class="table table-sm align-middle table-hover mb-0" style="font-size:0.8rem;">
+            <thead class="table-light">
+              <tr>
+                <th>Date / Time</th>
+                <th>Operation / Reason</th>
+                <th>Delta</th>
+                <th>Run / Context</th>
+              </tr>
+            </thead>
+            <tbody id="clientLedgerTableBody">
+              <tr><td colspan="4" class="text-center py-3 text-muted">Loading ledger...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:12px 20px;">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;"><i class="bi bi-arrow-left me-1"></i> Return to Client Workspaces</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Client Activity & Audit Log (§7.3.C) -->
+<div class="modal fade" id="clientActivityModal" tabindex="-1" aria-labelledby="clientActivityModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content" style="border-radius:14px;border:none;box-shadow:0 24px 48px rgba(0,0,0,0.18);">
+      <div class="modal-header" style="background:linear-gradient(135deg,#4A3528,#8A6248);color:#F3E7DA;border-bottom:1px solid #B88A64;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:1.2rem;">
+            <i class="bi bi-clock-history text-info"></i>
+          </div>
+          <div>
+            <div style="font-size:0.66rem;font-weight:700;color:#D3C2B1;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">
+              <i class="bi bi-arrow-return-left me-1"></i> Client Workspaces &rsaquo; Workspace Audit Trail
+            </div>
+            <h5 class="modal-title mb-0" id="clientActivityModalLabel" style="font-weight:700;font-size:1.05rem;">Workspace Activity &amp; Audit Trail</h5>
+            <div style="font-size:0.72rem;color:#F3E7DA;opacity:0.85;" id="clientActivityModalSubtitle">Security, quota, membership, and lifecycle events</div>
+          </div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="padding:20px;max-height:65vh;overflow-y:auto;">
+        <div class="table-responsive">
+          <table class="table table-sm align-middle table-hover mb-0" style="font-size:0.8rem;">
+            <thead class="table-light">
+              <tr>
+                <th>Timestamp</th>
+                <th>Action</th>
+                <th>Actor User</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="clientActivityTableBody">
+              <tr><td colspan="4" class="text-center py-3 text-muted">Loading activity log...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:12px 20px;">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;"><i class="bi bi-arrow-left me-1"></i> Return to Client Workspaces</button>
       </div>
     </div>
   </div>

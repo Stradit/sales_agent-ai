@@ -11,13 +11,68 @@ Schema is created lazily on first successful connection — no separate
 migration step.
 """
 import json
+import os
+import re
+import sys
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Set
 
 from config import DATABASE_URL
 from store import post_key
 
 _SCHEMA_READY = False
+_ENSURED_SCHEMAS: Set[str] = set()
+
+_SLUG_REGEX = re.compile(r"^[a-z][a-z0-9_]{1,98}$")
+_RESERVED_SLUGS: Set[str] = {
+    "public", "information_schema", "pg_catalog", "template", "postgres",
+    "admin", "root", "system", "auth", "api", "default", "core"
+}
+
+
+def get_active_client_slug(client_slug: Optional[str] = None) -> Optional[str]:
+    """Resolves the active client/tenant slug with fallback order:
+    1. Explicit client_slug argument passed to function.
+    2. Active db.tenant ContextVar (e.g. get_current_slug()).
+    3. CLIENT_SLUG environment variable.
+
+    Returns normalized slug (e.g. 'stradit_india') or None if no tenant context is active.
+    """
+    slug = client_slug
+    if not slug:
+        try:
+            if "db.tenant" in sys.modules:
+                slug = sys.modules["db.tenant"].get_current_slug()
+            elif "_root_db_tenant" in sys.modules:
+                slug = sys.modules["_root_db_tenant"].get_current_slug()
+            else:
+                import importlib.util
+                curr_dir = os.path.dirname(os.path.abspath(__file__))
+                root_tenant_path = os.path.abspath(os.path.join(curr_dir, "..", "..", "db", "tenant.py"))
+                if os.path.isfile(root_tenant_path):
+                    spec = importlib.util.spec_from_file_location("_root_db_tenant", root_tenant_path)
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules["_root_db_tenant"] = mod
+                    spec.loader.exec_module(mod)
+                    slug = mod.get_current_slug()
+        except Exception:
+            slug = None
+
+    if not slug:
+        slug = os.environ.get("CLIENT_SLUG")
+
+    if not slug:
+        return None
+
+    cleaned = str(slug).strip().lower()
+    if cleaned.startswith("client_"):
+        cleaned = cleaned[7:]
+    if cleaned == "stradit":
+        cleaned = "stradit_india"
+
+    if not _SLUG_REGEX.match(cleaned) or cleaned in _RESERVED_SLUGS:
+        return None
+    return cleaned
 
 # Fields already broken out into their own columns — everything else on a
 # post goes into the `extra` JSONB column instead of being dropped.
@@ -119,34 +174,56 @@ _SCHEMA_STATEMENTS = [
 ]
 
 
-def _connect():
-    if not DATABASE_URL:
+def _normalize_dsn(url: str) -> str:
+    """Strips SQLAlchemy dialect prefixes like +psycopg2 so psycopg2 accepts the connection URI."""
+    if not url:
+        return ""
+    if url.startswith("postgresql+psycopg2://"):
+        return "postgresql://" + url[len("postgresql+psycopg2://"):]
+    if url.startswith("postgres+psycopg2://"):
+        return "postgresql://" + url[len("postgres+psycopg2://"):]
+    return url
+
+
+def _connect(client_slug: Optional[str] = None):
+    db_url = os.getenv("DATABASE_URL") or DATABASE_URL
+    if not db_url:
         return None
     import psycopg2
     try:
-        return psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(_normalize_dsn(db_url))
+        slug = get_active_client_slug(client_slug)
+        if slug:
+            schema = f"client_{slug}"
+            with conn.cursor() as cur:
+                cur.execute(f'SET search_path = "{schema}", public')
+            conn.commit()
+        return conn
     except Exception as e:
         print(f"⚠️  [DB] Could not connect ({e}); continuing with JSON only")
         return None
 
 
-def _ensure_schema(conn) -> None:
+def _ensure_schema(conn, client_slug: Optional[str] = None) -> None:
     global _SCHEMA_READY
-    if _SCHEMA_READY:
+    slug = get_active_client_slug(client_slug)
+    schema_key = f"client_{slug}" if slug else "public"
+    if schema_key in _ENSURED_SCHEMAS:
         return
     with conn.cursor() as cur:
         for statement in _SCHEMA_STATEMENTS:
             cur.execute(statement)
     conn.commit()
+    _ENSURED_SCHEMAS.add(schema_key)
     _SCHEMA_READY = True
 
 
-def upsert_target(kind: str, target: Dict[str, Any]) -> None:
-    conn = _connect()
+def upsert_target(kind: str, target: Dict[str, Any], client_slug: Optional[str] = None) -> None:
+    conn = _connect(client_slug)
     if conn is None:
         return
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -174,18 +251,18 @@ def upsert_target(kind: str, target: Dict[str, Any]) -> None:
         conn.close()
 
 
-def delete_target(kind: str, key: str) -> None:
+def delete_target(kind: str, key: str, client_slug: Optional[str] = None) -> None:
     """Remove a target and everything Postgres holds about it.
 
     Covers the row in `targets` plus every `posts`/`digests`/`run_history`
     row keyed to it — leaving those behind would let a "deleted" account
     keep reappearing via get_store()/get_digest()'s DB fallback.
     """
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             cur.execute("DELETE FROM targets WHERE key = %s AND kind = %s", (key, kind))
             cur.execute("DELETE FROM posts WHERE target_key = %s AND kind = %s", (key, kind))
@@ -201,7 +278,7 @@ def delete_target(kind: str, key: str) -> None:
         conn.close()
 
 
-def list_targets(kind: str) -> list:
+def list_targets(kind: str, client_slug: Optional[str] = None) -> list:
     """Every target of one kind Postgres knows about — key + full config.
 
     Includes ad-hoc targets that were scraped via /api/run and mirrored
@@ -210,11 +287,11 @@ def list_targets(kind: str) -> list:
     targets.py/people_targets.py/custom_targets.json at all, so this is
     the only place they're discoverable from.
     """
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return []
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT key, config FROM targets WHERE kind = %s ORDER BY key",
@@ -229,15 +306,15 @@ def list_targets(kind: str) -> list:
         conn.close()
 
 
-def upsert_posts(target_key: str, kind: str, data: Dict[str, Any]) -> None:
+def upsert_posts(target_key: str, kind: str, data: Dict[str, Any], client_slug: Optional[str] = None) -> None:
     """Mirror one scrape's posts. `data` is a store document's "data" block:
     {channel: {"posts": [...]}, ...} — same shape store.py writes to JSON.
     """
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             for channel, block in (data or {}).items():
                 if not isinstance(block, dict):
@@ -327,13 +404,13 @@ def _upsert_linkedin_job(cur, target_key: str, post: Dict[str, Any]) -> None:
     )
 
 
-def get_linkedin_jobs(target_key: str) -> list:
+def get_linkedin_jobs(target_key: str, client_slug: Optional[str] = None) -> list:
     """All job postings on file for one account, newest-posted first."""
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return []
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -356,12 +433,12 @@ def get_linkedin_jobs(target_key: str) -> list:
         conn.close()
 
 
-def upsert_digest(target_key: str, kind: str, digest: Dict[str, Any]) -> None:
-    conn = _connect()
+def upsert_digest(target_key: str, kind: str, digest: Dict[str, Any], client_slug: Optional[str] = None) -> None:
+    conn = _connect(client_slug)
     if conn is None:
         return
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         email = digest.get("email") or {}
         with conn.cursor() as cur:
             cur.execute(
@@ -393,12 +470,12 @@ def upsert_digest(target_key: str, kind: str, digest: Dict[str, Any]) -> None:
         conn.close()
 
 
-def insert_run_history(entry: Dict[str, Any]) -> None:
-    conn = _connect()
+def insert_run_history(entry: Dict[str, Any], client_slug: Optional[str] = None) -> None:
+    conn = _connect(client_slug)
     if conn is None:
         return
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -433,17 +510,17 @@ def insert_run_history(entry: Dict[str, Any]) -> None:
 # freshly deployed instance that's never scraped anything itself, but
 # shares DATABASE_URL with one that has.
 
-def get_store(target_key: str):
+def get_store(target_key: str, client_slug: Optional[str] = None):
     """Posts for one target, reconstructed from Postgres into the same
     {"data": {channel: {"posts": [...], "count": N}}} shape the JSON
     store file uses — or None if nothing's there (DB unreachable, or
     genuinely never scraped anywhere).
     """
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return None
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT channel, raw FROM posts WHERE target_key = %s ORDER BY channel, rank",
@@ -472,12 +549,12 @@ def get_store(target_key: str):
         conn.close()
 
 
-def get_digest(target_key: str):
-    conn = _connect()
+def get_digest(target_key: str, client_slug: Optional[str] = None):
+    conn = _connect(client_slug)
     if conn is None:
         return None
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             cur.execute("SELECT digest FROM digests WHERE target_key = %s", (target_key,))
             row = cur.fetchone()
@@ -489,15 +566,15 @@ def get_digest(target_key: str):
         conn.close()
 
 
-def get_summary(target_key: str):
+def get_summary(target_key: str, client_slug: Optional[str] = None):
     """Cheap total_posts/last_run for the list endpoint — avoids pulling
     every post's full JSON just to count them.
     """
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return None
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT count(*), max(last_seen) FROM posts WHERE target_key = %s",
@@ -517,12 +594,12 @@ def get_summary(target_key: str):
         conn.close()
 
 
-def has_digest(target_key: str) -> bool:
-    conn = _connect()
+def has_digest(target_key: str, client_slug: Optional[str] = None) -> bool:
+    conn = _connect(client_slug)
     if conn is None:
         return False
     try:
-        _ensure_schema(conn)
+        _ensure_schema(conn, client_slug)
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM digests WHERE target_key = %s", (target_key,))
             return cur.fetchone() is not None
@@ -533,7 +610,7 @@ def has_digest(target_key: str) -> bool:
         conn.close()
 
 
-def get_person_bio(person_key: str, full_name_hint: str = None):
+def get_person_bio(person_key: str, full_name_hint: str = None, client_slug: Optional[str] = None):
     """Biographical context for the Personality Profile feature — read-only,
     from the `personas`/`cxo_movements` tables that belong to the sibling
     sales_ai app's schema (see MERGE_PLAN.md), not this app's own tables.
@@ -550,7 +627,7 @@ def get_person_bio(person_key: str, full_name_hint: str = None):
     by full_name instead (pass the person's display_name minus any
     trailing "(Title, Company)" annotation — see pipeline.py's call site).
     """
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return None
     try:
@@ -743,17 +820,17 @@ def get_person_bio(person_key: str, full_name_hint: str = None):
         conn.close()
 
 
-def get_person_psychological_context(person_key: str, full_name_hint: str = None) -> Dict[str, Any]:
+def get_person_psychological_context(person_key: str, full_name_hint: str = None, client_slug: Optional[str] = None) -> Dict[str, Any]:
     """Rich context query for the Psychological Profile — pulls full persona
     traits, KPIs, objections, career milestones, and account firmographics.
     """
-    bio = get_person_bio(person_key, full_name_hint=full_name_hint) or {}
+    bio = get_person_bio(person_key, full_name_hint=full_name_hint, client_slug=client_slug) or {}
     # get_person_bio may have resolved a different key via the full_name_hint
     # fallback (content_pipeline's registered key often doesn't match the
     # main app's personas.key) — reuse that same row here instead of
     # re-querying with the original, possibly-wrong key.
     resolved_key = bio.get("resolved_key", person_key)
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return bio
     try:
@@ -794,13 +871,13 @@ def get_person_psychological_context(person_key: str, full_name_hint: str = None
         conn.close()
 
 
-def get_person_identity(person_key: str):
+def get_person_identity(person_key: str, client_slug: Optional[str] = None):
     """Returns (persona_id, account_id) for a person, or (None, None) if not
     found. Separate from get_person_bio() so that function's existing return
     shape (consumed by build_personality_profile) doesn't change — this is
     only needed by the newer create_llm_suggested_action_items() below.
     """
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return None, None
     try:
@@ -819,7 +896,7 @@ def get_person_identity(person_key: str):
         conn.close()
 
 
-def create_llm_suggested_action_items(person_key: str, suggestions: list):
+def create_llm_suggested_action_items(person_key: str, suggestions: list, client_slug: Optional[str] = None):
     """Writes LLM-suggested action items for one person into the sibling
     sales_ai app's `action_items` table — a plain cross-app INSERT, same
     pattern as get_person_bio()'s cross-app SELECT (both apps share one
@@ -839,12 +916,12 @@ def create_llm_suggested_action_items(person_key: str, suggestions: list):
     """
     if not suggestions:
         return 0
-    persona_id, account_id = get_person_identity(person_key)
+    persona_id, account_id = get_person_identity(person_key, client_slug=client_slug)
     if persona_id is None or account_id is None:
         print(f"⚠️  [DB] Could not resolve persona/account for '{person_key}' — skipping action item suggestions")
         return 0
 
-    conn = _connect()
+    conn = _connect(client_slug)
     if conn is None:
         return 0
     inserted = 0

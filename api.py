@@ -161,15 +161,24 @@ if FASTAPI_AVAILABLE:
         allow_headers=["*"],
     )
 
-    from db.routing import set_client_schema, reset_client_schema, get_client_slug, DEFAULT_CLIENT_SLUG
+    from db.routing import set_client_schema, reset_client_schema, get_client_slug, DEFAULT_CLIENT_SLUG, spawn_tenant_thread
+    from db.tenant import validate_slug, TenantContextError
     import re
     _SLUG_REGEX = re.compile(r"^[a-z][a-z0-9_]{1,98}$")
 
     @app.middleware("http")
     async def tenant_context_middleware(request: Request, call_next):
-        # Skip static assets
+        # Skip static assets, health, and docs
         path = request.url.path
-        if path.startswith("/frontend") or path.startswith("/docs") or path == "/favicon.ico":
+        if (
+            path.startswith("/frontend")
+            or path.startswith("/docs")
+            or path.startswith("/redoc")
+            or path == "/openapi.json"
+            or path == "/favicon.ico"
+            or path == "/api/health"
+            or path.startswith("/api/auth/")
+        ):
             return await call_next(request)
 
         client_slug = request.headers.get("X-Client-Slug") or request.query_params.get("client_slug")
@@ -185,19 +194,52 @@ if FASTAPI_AVAILABLE:
         if not client_slug and payload:
             client_slug = payload.get("client_slug")
 
-        resolved_slug = (client_slug or DEFAULT_CLIENT_SLUG).strip().lower()
+        # Auto-resolve or validate user workspace grants if authenticated and no explicit slug passed
+        if not client_slug and payload and auth.AUTH_ENFORCED and payload.get("role") != "super_admin":
+            user_id = int(payload.get("sub", 0))
+            session = SessionLocal()
+            try:
+                from db.models import Client, UserClientAccess
+                user_grants = (
+                    session.query(Client.slug)
+                    .join(UserClientAccess, UserClientAccess.client_id == Client.id)
+                    .filter(UserClientAccess.user_id == user_id, Client.is_active == True)
+                    .all()
+                )
+                if len(user_grants) == 1:
+                    client_slug = user_grants[0][0]
+                elif len(user_grants) > 1:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"detail": "Multiple client workspaces available. Specify X-Client-Slug header."}
+                    )
+                else:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "No active client workspace access granted to this user."}
+                    )
+            finally:
+                session.close()
 
-        # Validate slug syntax
-        if not _SLUG_REGEX.match(resolved_slug):
+        resolved_slug = (client_slug or (DEFAULT_CLIENT_SLUG if not auth.AUTH_ENFORCED else "")).strip().lower()
+
+        if not resolved_slug:
+            # Unbound platform requests (e.g. super admin client listing) continue with public schema
+            return await call_next(request)
+
+        # Validate slug syntax & check reserved keywords
+        try:
+            resolved_slug = validate_slug(resolved_slug)
+        except ValueError as err:
             return JSONResponse(
                 status_code=400,
-                content={"detail": f"Invalid client slug '{resolved_slug}'. Slugs must contain only lowercase letters, numbers, and underscores."}
+                content={"detail": str(err)}
             )
 
         # Enforce tenant isolation if user is authenticated and not super_admin
         if auth.AUTH_ENFORCED and payload and payload.get("role") != "super_admin":
             user_id = int(payload.get("sub", 0))
-            session = get_session()
+            session = SessionLocal()
             try:
                 from db.models import Client, UserClientAccess
                 has_access = (
@@ -343,6 +385,12 @@ if FASTAPI_AVAILABLE:
 
     @app.on_event("startup")
     def on_startup():
+        # Production security assertion (F9)
+        if os.getenv("ENV", "").lower() in ("production", "prod") and not auth.AUTH_ENFORCED:
+            raise RuntimeError(
+                "FATAL SECURITY MISCONFIGURATION: Application cannot start in production "
+                "with AUTH_ENFORCED=false. Set AUTH_ENFORCED=true in production environment."
+            )
         try:
             from db.migrate import state
             st = state()
@@ -1420,8 +1468,7 @@ if FASTAPI_AVAILABLE:
             finally:
                 reset_client_schema(tok)
 
-        import threading
-        threading.Thread(target=_bg_auto, daemon=False, name=f"auto-acct-{job_id}").start()
+        spawn_tenant_thread(target=_bg_auto, daemon=False, name=f"auto-acct-{job_id}")
 
         return {
             "status": "started",
@@ -1446,13 +1493,12 @@ if FASTAPI_AVAILABLE:
             account_id=account_id,
             client_slug=client.slug,
         )
-        import threading
         job_id = _jreg_create(TYPE_ACCOUNT, meta={
             "account_id": account_id,
             "entity_id": account_id,
             "mode": "single_account_pipeline",
         }, client_slug=client.slug)
-        threading.Thread(target=engine.run, kwargs={"job_id": job_id}, daemon=False, name=f"auto-acct-single-{job_id}").start()
+        spawn_tenant_thread(target=engine.run, kwargs={"job_id": job_id}, daemon=False, name=f"auto-acct-single-{job_id}")
         return {"status": "started", "client_slug": client.slug, "account_id": account_id, "job_id": job_id}
 
     class AccountRetrySourcesRequest(BaseModel):
@@ -1759,7 +1805,7 @@ if FASTAPI_AVAILABLE:
             finally:
                 reset_client_schema(tok)
 
-        threading.Thread(target=_bg_account, daemon=False, name=f"acct-{job_id}").start()
+        spawn_tenant_thread(target=_bg_account, daemon=False, name=f"acct-{job_id}")
         return {
             "status":   "queued",
             "job_id":   job_id,
@@ -2835,8 +2881,7 @@ if FASTAPI_AVAILABLE:
             finally:
                 reset_client_schema(tok)
 
-        import threading
-        threading.Thread(target=_bg_lob_auto, daemon=False, name=f"auto-lob-{job_id}").start()
+        spawn_tenant_thread(target=_bg_lob_auto, daemon=False, name=f"auto-lob-{job_id}")
 
         return {
             "status": "started",
@@ -2860,13 +2905,12 @@ if FASTAPI_AVAILABLE:
             lob_id=lob_id,
             client_slug=client.slug,
         )
-        import threading
         job_id = _jreg_create(TYPE_LOB, meta={
             "lob_id": lob_id,
             "entity_id": lob_id,
             "mode": "single_lob_pipeline",
         }, client_slug=client.slug)
-        threading.Thread(target=engine.run, kwargs={"job_id": job_id}, daemon=False, name=f"auto-lob-single-{job_id}").start()
+        spawn_tenant_thread(target=engine.run, kwargs={"job_id": job_id}, daemon=False, name=f"auto-lob-single-{job_id}")
         return {"status": "started", "client_slug": client.slug, "lob_id": lob_id, "job_id": job_id}
 
     @lobs_router.post("/enrich-phased-batch")
@@ -3361,7 +3405,7 @@ if FASTAPI_AVAILABLE:
             finally:
                 reset_client_schema(tok)
 
-        threading.Thread(target=_bg_lob, daemon=False, name=f"lob-{job_id}").start()
+        spawn_tenant_thread(target=_bg_lob, daemon=False, name=f"lob-{job_id}")
         return {
             "status":   "queued",
             "job_id":   job_id,
@@ -3852,8 +3896,7 @@ if FASTAPI_AVAILABLE:
             finally:
                 reset_client_schema(tok)
 
-        import threading
-        threading.Thread(target=_bg_persona_auto, daemon=False, name=f"auto-persona-{job_id}").start()
+        spawn_tenant_thread(target=_bg_persona_auto, daemon=False, name=f"auto-persona-{job_id}")
 
         return {
             "status": "started",
@@ -3877,13 +3920,12 @@ if FASTAPI_AVAILABLE:
             persona_id=persona_id,
             client_slug=client.slug,
         )
-        import threading
         job_id = _jreg_create(TYPE_PERSONA, meta={
             "persona_id": persona_id,
             "entity_id": persona_id,
             "mode": "single_persona_pipeline",
         }, client_slug=client.slug)
-        threading.Thread(target=engine.run, kwargs={"job_id": job_id}, daemon=False, name=f"auto-persona-single-{job_id}").start()
+        spawn_tenant_thread(target=engine.run, kwargs={"job_id": job_id}, daemon=False, name=f"auto-persona-single-{job_id}")
         return {"status": "started", "client_slug": client.slug, "persona_id": persona_id, "job_id": job_id}
 
     @personas_router.post("/enrich-phased-batch")
@@ -4256,7 +4298,7 @@ if FASTAPI_AVAILABLE:
             finally:
                 reset_client_schema(tok)
 
-        threading.Thread(target=_bg_persona, daemon=False, name=f"persona-{job_id}").start()
+        spawn_tenant_thread(target=_bg_persona, daemon=False, name=f"persona-{job_id}")
         return {
             "status":   "queued",
             "job_id":   job_id,
@@ -5026,7 +5068,7 @@ if FASTAPI_AVAILABLE:
 
     # ── Background Job Status Polling ─────────────────────────────────────────
     @pipeline_router.get("/job/{job_id}", tags=["4. Pipeline Orchestration"])
-    def get_background_job_status(job_id: str):
+    def get_background_job_status(job_id: str, request: Request):
         """
         Poll the status of any background pipeline job started via a /fetch-background endpoint.
 
@@ -5045,10 +5087,32 @@ if FASTAPI_AVAILABLE:
                     "It may have expired (24h retention) or the job_id is invalid."
                 ),
             )
+
+        # Enforce tenant isolation on job polling (F8)
+        job_slug = job.get("client_slug")
+        active_slug = get_client_slug()
+
+        auth_header = request.headers.get("authorization", "")
+        is_super = False
+        if auth_header.lower().startswith("bearer "):
+            try:
+                payload = auth.decode_access_token(auth_header[7:].strip())
+                is_super = payload and payload.get("role") == "super_admin"
+            except Exception:
+                pass
+
+        if not is_super and job_slug and active_slug:
+            if job_slug != active_slug:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Job '{job_id}' not found in active workspace."
+                )
+
         return job
 
     @pipeline_router.get("/jobs", tags=["4. Pipeline Orchestration"])
     def list_background_jobs(
+        request: Request,
         job_type: Optional[str] = Query(None, description="Filter: account_enrich | lob_enrich | persona_enrich"),
         client_slug: Optional[str] = Query(None, description="Client slug to filter jobs for"),
     ):
@@ -5056,8 +5120,19 @@ if FASTAPI_AVAILABLE:
         List all in-memory background jobs (newest first).
         Optionally filter by job_type: account_enrich, lob_enrich, persona_enrich and client_slug.
         """
-        active_slug = client_slug or get_client_slug()
-        jobs = _jreg_list(job_type=job_type, client_slug=active_slug)
+        active_slug = get_client_slug()
+
+        auth_header = request.headers.get("authorization", "")
+        is_super = False
+        if auth_header.lower().startswith("bearer "):
+            try:
+                payload = auth.decode_access_token(auth_header[7:].strip())
+                is_super = payload and payload.get("role") == "super_admin"
+            except Exception:
+                pass
+
+        target_slug = (client_slug if is_super and client_slug else active_slug)
+        jobs = _jreg_list(job_type=job_type, client_slug=target_slug)
         return {
             "total": len(jobs),
             "jobs":  jobs,
@@ -6792,6 +6867,14 @@ if FASTAPI_AVAILABLE:
         # all session for this app's own Windows-console encoding issue
         # (main.py's banner prints a Unicode box-drawing character).
         proc_env = dict(os.environ, PYTHONIOENCODING="utf-8")
+        active_slug = None
+        try:
+            from db.tenant import get_current_slug
+            active_slug = get_current_slug()
+        except Exception:
+            pass
+        if active_slug:
+            proc_env["CLIENT_SLUG"] = active_slug
 
         # Shared OpenRouter quota (apps/sales_copilot/README.md §10.4): one request per
         # channel with posts + personality + psychological. Reserve up front so a click
@@ -6808,10 +6891,13 @@ if FASTAPI_AVAILABLE:
         log_fd, log_path = tempfile.mkstemp(suffix=".log", prefix="profile_gen_")
         os.close(log_fd)
         output = ""
+        sub_cmd = [sys.executable, "main.py", "digest", target_key, "--person", "--all-posts", "--profiles-only", "--since-days", "3650"]
+        if active_slug:
+            sub_cmd.extend(["--client", active_slug])
         try:
             with open(log_path, "w", encoding="utf-8") as log_fh:
                 result = subprocess.run(
-                    [sys.executable, "main.py", "digest", target_key, "--person", "--all-posts", "--profiles-only", "--since-days", "3650"],
+                    sub_cmd,
                     cwd=str(content_pipeline_dir), env=proc_env,
                     stdout=log_fh, stderr=subprocess.STDOUT, timeout=300,
                 )

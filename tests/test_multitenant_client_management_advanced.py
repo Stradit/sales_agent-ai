@@ -74,8 +74,9 @@ def test_schema_health_and_repair_workflow(admin_headers):
     assert data["slug"] == "stradit_india"
     assert data["exists"] is True
     assert data["is_healthy"] is True
-    assert data["tables_found"] == 16
-    assert data["tables_total"] == 16
+    from db.provisioning import CLIENT_TABLES_ORDERED
+    assert data["tables_found"] == len(CLIENT_TABLES_ORDERED)
+    assert data["tables_total"] == len(CLIENT_TABLES_ORDERED)
     assert data["total_rows"] > 0
 
     # 2. Trigger self-healing repair (idempotent, does not drop tables)
@@ -166,6 +167,73 @@ def test_client_accounts_drilldown_metrics(admin_headers):
         assert "personas_count" in a
         assert isinstance(a["lobs_count"], int)
         assert isinstance(a["personas_count"], int)
+
+
+def test_client_serialization_lifecycle_and_skeleton_fields(admin_headers):
+    res = client.get("/api/clients/stradit_india", headers=admin_headers)
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert "status" in data
+    assert data["status"] in ("active", "suspended", "deleted")
+    assert "skeleton_version" in data
+    assert "skeleton_head" in data
+    assert "is_behind" in data
+    assert "refresh_cron" in data
+    assert "max_concurrent_jobs" in data
+    assert data["skeleton_version"] == "T0001"
+    assert data["skeleton_head"] == "T0001"
+    assert data["is_behind"] is False
+
+
+def test_suspend_and_activate_lifecycle(admin_headers):
+    # 1. Primary platform client cannot be suspended
+    res_primary = client.post("/api/clients/stradit_india/suspend", headers=admin_headers)
+    assert res_primary.status_code == 400
+    assert "Cannot suspend the primary platform client" in res_primary.json()["detail"]
+
+    # 2. Suspend a non-primary client (e.g. acme_corp)
+    res = client.post("/api/clients/acme_corp/suspend", headers=admin_headers)
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["ok"] is True
+    assert data["status"] == "suspended"
+
+    # Verify GET returns suspended
+    c_res = client.get("/api/clients/acme_corp", headers=admin_headers)
+    assert c_res.json()["status"] == "suspended"
+    assert c_res.json()["is_active"] is False
+
+    # 3. Reactivate acme_corp
+    act_res = client.post("/api/clients/acme_corp/activate", headers=admin_headers)
+    assert act_res.status_code == 200, act_res.text
+    act_data = act_res.json()
+    assert act_data["ok"] is True
+    assert act_data["status"] == "active"
+
+    # Verify GET returns active
+    c2_res = client.get("/api/clients/acme_corp", headers=admin_headers)
+    assert c2_res.json()["status"] == "active"
+    assert c2_res.json()["is_active"] is True
+
+
+def test_credit_ledger_endpoint(admin_headers):
+    res = client.get("/api/clients/stradit_india/credits/ledger", headers=admin_headers)
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["client_slug"] == "stradit_india"
+    assert "ledger" in data
+    assert "total" in data
+    assert isinstance(data["ledger"], list)
+
+
+def test_activity_log_endpoint(admin_headers):
+    res = client.get("/api/clients/stradit_india/activity", headers=admin_headers)
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["client_slug"] == "stradit_india"
+    assert "events" in data
+    assert "total" in data
+    assert isinstance(data["events"], list)
 
 
 if __name__ == "__main__":

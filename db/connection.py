@@ -33,11 +33,10 @@ def get_session() -> Session:
     """Returns a new database session, automatically scoped to current client schema if set."""
     session = SessionLocal()
     try:
-        from db.routing import get_client_schema
-        schema = get_client_schema()
+        from db.tenant import get_current_schema
+        schema = get_current_schema()
         if schema and schema != "public":
-            from sqlalchemy import text
-            session.execute(text(f'SET search_path = "{schema}", public'))
+            session.info["schema"] = schema
     except Exception:
         pass
     return session

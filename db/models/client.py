@@ -5,7 +5,7 @@ schema_name = f"client_{slug}" (e.g. "client_stradit_india").
 """
 
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from db.models.base import Base
 
@@ -22,6 +22,17 @@ class Client(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     max_accounts = Column(Integer, default=20, nullable=False)
     
+    # Client lifecycle state machine (§4.3)
+    # Allowed states: "pending", "provisioning", "active", "suspended", "archived", "failed", "deleted"
+    status = Column(String(50), default="active", nullable=False)
+    skeleton_version = Column(String(32), default="T0001", nullable=False)
+    provisioned_at = Column(DateTime(timezone=True), nullable=True)
+    suspended_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    refresh_cron = Column(String(64), default="0 0 * * *", nullable=False)
+    max_concurrent_jobs = Column(Integer, default=3, nullable=False)
+    last_error = Column(Text, nullable=True)
+
     # API credits tracking per client
     api_credits_total = Column(Integer, default=0, nullable=False)
     api_credits_used = Column(Integer, default=0, nullable=False)

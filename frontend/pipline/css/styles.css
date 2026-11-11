@@ -8924,3 +8924,379 @@ a:not(.btn):hover {
   border-color: var(--c-steel-muted, #B88A64) !important;
   box-shadow: 0 0 0 0.25rem rgba(138, 98, 72, 0.25) !important;
 }
+
+/* ==========================================================================
+   Multi-Tenant Enterprise Client Management Modal & Telemetry Styles
+   ========================================================================== */
+#manageClientsModal .modal-dialog {
+  max-width: 1240px;
+  width: 95vw;
+  margin: 1.5rem auto;
+}
+
+#manageClientsModal .modal-content {
+  border-radius: 16px;
+  border: 1px solid rgba(184, 138, 100, 0.3);
+  box-shadow: 0 25px 60px -15px rgba(43, 36, 31, 0.35);
+  overflow: hidden;
+}
+
+#manageClientsModal .modal-header {
+  background: linear-gradient(135deg, #2B241F 0%, #4A3528 60%, #8A6248 100%);
+  color: #F3E7DA;
+  border-bottom: 1px solid #B88A64;
+  padding: 16px 24px;
+}
+
+/* Tenant Summary KPI Cards */
+.tenant-kpi-card {
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #E2E8F0;
+  padding: 14px 16px;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.tenant-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px -4px rgba(43, 36, 31, 0.12);
+}
+
+.tenant-kpi-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 4px 0 0 4px;
+}
+
+.tenant-kpi-card.kpi-tenants::before { background: #8A6248; }
+.tenant-kpi-card.kpi-schemas::before { background: #10B981; }
+.tenant-kpi-card.kpi-targets::before { background: #F59E0B; }
+.tenant-kpi-card.kpi-credits::before { background: #3B82F6; }
+
+.tenant-kpi-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+.kpi-tenants .tenant-kpi-icon { background: #F3E7DA; color: #8A6248; }
+.kpi-schemas .tenant-kpi-icon { background: #ECFDF5; color: #059669; }
+.kpi-targets .tenant-kpi-icon { background: #FEF3C7; color: #D97706; }
+.kpi-credits .tenant-kpi-icon { background: #EFF6FF; color: #2563EB; }
+
+/* Filter & Ribbon Controls */
+.tenant-filter-ribbon {
+  background: #ffffff;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+.tenant-filter-ribbon .form-control,
+.tenant-filter-ribbon .form-select {
+  border-color: #CBD5E1;
+  font-size: 0.82rem;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.tenant-filter-ribbon .form-control:focus,
+.tenant-filter-ribbon .form-select:focus {
+  border-color: #8A6248;
+  box-shadow: 0 0 0 3px rgba(138, 98, 72, 0.15);
+}
+
+/* Tenant Table Styling & Sticky Header */
+#manageClientsModal thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #F8FAFC;
+  color: #475569;
+  font-size: 0.73rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid #E2E8F0;
+  padding: 12px 16px;
+  white-space: nowrap;
+}
+
+#manageClientsModal .table tbody tr td {
+  padding: 14px 16px;
+  vertical-align: middle;
+  border-bottom: 1px solid #EDF2F7;
+}
+
+#manageClientsModal .table-hover tbody tr:hover {
+  background-color: #F8FAFC !important;
+}
+
+/* Tenant Avatar & Elements */
+.tenant-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #F3E7DA, #E8D9C8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4A3528;
+  font-weight: 800;
+  font-size: 0.88rem;
+  border: 1px solid #D3C2B1;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(43, 36, 31, 0.06);
+}
+
+.tenant-schema-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.74rem;
+  background: #F1F5F9;
+  color: #334155;
+  border: 1px solid #CBD5E1;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.tenant-quota-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.73rem;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.tenant-quota-meter:hover {
+  transform: translateY(-1px);
+}
+
+.tenant-action-btn {
+  border-radius: 7px;
+  font-size: 0.75rem;
+  padding: 5px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.tenant-action-btn:hover {
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   Spacious Executive Workspace Cards & View Switcher Styles
+   ========================================================================== */
+.tenant-workspace-card {
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid #E2E8F0;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+  overflow: hidden;
+  box-shadow: 0 4px 14px -2px rgba(43, 36, 31, 0.05);
+}
+
+.tenant-workspace-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px -4px rgba(43, 36, 31, 0.1);
+  border-color: #CBD5E1;
+}
+
+.tenant-workspace-card.border-active-workspace {
+  border: 2px solid #8A6248 !important;
+  box-shadow: 0 6px 24px rgba(138, 98, 72, 0.12) !important;
+}
+
+.tenant-card-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid #EDF2F7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: #ffffff;
+}
+
+.tenant-card-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #F3E7DA 0%, #E8D9C8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4A3528;
+  font-weight: 800;
+  font-size: 1.05rem;
+  border: 1px solid #D3C2B1;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(43, 36, 31, 0.08);
+}
+
+.tenant-card-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0F172A;
+  letter-spacing: -0.01em;
+}
+
+.badge-current-workspace {
+  background: linear-gradient(135deg, #2B241F, #4A3528);
+  color: #F3E7DA;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tenant-card-body {
+  padding: 18px 24px;
+  background: #FAFCFE;
+}
+
+.tenant-tile {
+  background: #ffffff;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+}
+
+.tenant-tile:hover {
+  border-color: #B88A64;
+  box-shadow: 0 4px 14px rgba(43, 36, 31, 0.06);
+}
+
+.tenant-tile-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748B;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tenant-tile-link {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #8A6248;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s ease;
+}
+
+.tenant-tile-link:hover {
+  color: #4A3528;
+  text-decoration: underline;
+}
+
+.tenant-card-footer {
+  padding: 14px 24px;
+  background: #ffffff;
+  border-top: 1px solid #EDF2F7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.tenant-card-footer .btn {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.tenant-card-footer .btn:hover {
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   Nested Modal Stacking & Scrim Dimming System
+   Prevents background visual noise when opening child workspace inspectors
+   ========================================================================== */
+
+/* Parent modal when any child modal is open - very subtle, non-intrusive focus */
+#manageClientsModal.is-parent-modal-dimmed {
+  z-index: 1040 !important;
+}
+
+#manageClientsModal.is-parent-modal-dimmed .modal-dialog {
+  filter: blur(1.5px) brightness(0.92) !important;
+  opacity: 0.88 !important;
+  pointer-events: none !important;
+  transition: filter 0.2s ease, opacity 0.2s ease !important;
+}
+
+#manageClientsModal .modal-dialog {
+  transition: filter 0.2s ease, opacity 0.2s ease;
+}
+
+/* Child Modals Elevated Stacking Context */
+#editClientModal,
+#schemaDiagnosticsModal,
+#clientAccountsModal,
+#clientUsersModal,
+#adjustCreditsModal,
+#clientLedgerModal,
+#clientActivityModal,
+#addClientModal {
+  z-index: 1070 !important;
+}
+
+/* Child Modal Dialog styling & crisp luxury drop shadows */
+#editClientModal .modal-content,
+#schemaDiagnosticsModal .modal-content,
+#clientAccountsModal .modal-content,
+#clientUsersModal .modal-content,
+#adjustCreditsModal .modal-content,
+#clientLedgerModal .modal-content,
+#clientActivityModal .modal-content,
+#addClientModal .modal-content {
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(184, 138, 100, 0.35) !important;
+  border: 1px solid rgba(184, 138, 100, 0.35) !important;
+  border-radius: 14px !important;
+  overflow: hidden;
+}
+
+/* Intermediate Backdrop for Child Modals - soft, light and non-intrusive */
+.modal-backdrop.child-modal-backdrop {
+  z-index: 1060 !important;
+  background-color: rgba(0, 0, 0, 0.2) !important;
+  backdrop-filter: blur(1px) !important;
+  -webkit-backdrop-filter: blur(1px) !important;
+  opacity: 0.25 !important;
+}
+
+
+

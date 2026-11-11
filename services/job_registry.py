@@ -55,8 +55,17 @@ def create_job(job_type: str, meta: Optional[Dict[str, Any]] = None, client_slug
     """
     job_id = f"pjob_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
+    resolved_slug = client_slug or (meta.get("client_slug") if meta else None)
+    if not resolved_slug:
+        try:
+            from db.tenant import get_current_slug
+            resolved_slug = get_current_slug()
+        except Exception:
+            resolved_slug = None
+    if not resolved_slug:
+        resolved_slug = "stradit_india"
+
     with _lock:
-        resolved_slug = client_slug or (meta.get("client_slug") if meta else None) or "stradit_india"
         _jobs[job_id] = {
             "job_id":       job_id,
             "job_type":     job_type,
@@ -74,40 +83,71 @@ def create_job(job_type: str, meta: Optional[Dict[str, Any]] = None, client_slug
             "meta":         meta or {},
         }
     _purge_old_finished_jobs()
+
+    # Persist to database in public.pipeline_jobs for cross-restart survival
+    try:
+        from services.job_store import JobStore
+        JobStore.create_job(job_type=job_type, meta=meta, client_slug=resolved_slug, job_id=job_id)
+    except Exception:
+        pass
+
     return job_id
 
 
 def update_job(job_id: str, **kwargs: Any) -> None:
     """
-    Thread-safe update of any fields on a job.
-
-    Common usage:
-        update_job(job_id, status="running", progress_pct=20, message="Running Wikidata...")
-        update_job(job_id, status="done",    progress_pct=100, result={...})
-        update_job(job_id, status="failed",  error="Something went wrong")
+    Thread-safe update of any fields on a job in both memory and persistent storage.
     """
     with _lock:
-        if job_id not in _jobs:
-            return
-        _jobs[job_id].update(kwargs)
-        _jobs[job_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if job_id in _jobs:
+            _jobs[job_id].update(kwargs)
+            _jobs[job_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    try:
+        from services.job_store import JobStore
+        JobStore.update_job(job_id, **kwargs)
+    except Exception:
+        pass
 
 
 def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     """
     Return a snapshot copy of the job dict, or None if not found / expired.
+    Falls back to public.pipeline_jobs if uvicorn restarted.
     Safe to call from any thread.
     """
     with _lock:
         job = _jobs.get(job_id)
-        return dict(job) if job else None
+        if job:
+            return dict(job)
+
+    # Cross-restart persistence fallback
+    try:
+        from services.job_store import JobStore
+        db_job = JobStore.get_job(job_id)
+        if db_job:
+            with _lock:
+                _jobs[job_id] = db_job
+            return dict(db_job)
+    except Exception:
+        pass
+
+    return None
 
 
 def list_jobs(job_type: Optional[str] = None, client_slug: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Return all jobs sorted newest-first, optionally filtered by job_type and client_slug.
-    Each entry is a copy (safe to mutate).
+    Queries persistent DB store with in-memory fallback.
     """
+    try:
+        from services.job_store import JobStore
+        db_jobs = JobStore.list_jobs(job_type=job_type, client_slug=client_slug)
+        if db_jobs:
+            return db_jobs
+    except Exception:
+        pass
+
     with _lock:
         jobs = [dict(j) for j in _jobs.values()]
     if job_type:
