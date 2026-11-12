@@ -50,6 +50,62 @@ def get_platform_db():
         session.close()
 
 
+def resolve_target_client(
+    request: Request,
+    user: auth.User,
+    session: Session,
+    permission: str,
+    explicit_slug: Optional[str] = None,
+) -> str:
+    """Resolves and re-authorizes target client slug for tenant catalog operations.
+    
+    Rules:
+    1. Compute ctx_slug = auth.resolve_request_client_slug(request, user).
+    2. If user.role == 'super_admin': the explicit body/query slug wins if provided,
+       else ctx_slug; must exist and be 'active'.
+    3. Otherwise: the explicit slug must be absent or equal to ctx_slug after normalize_client_slug;
+       any mismatch -> 403 ('Target client does not match your active client context').
+       ctx_slug is required (400 if missing).
+    4. After resolving, re-authorise against that exact slug:
+       auth.get_effective_role(session, user, target) then auth.has_permission(role, permission);
+       deny -> 403.
+    """
+    ctx_slug = auth.resolve_request_client_slug(request, user)
+
+    if getattr(user, "role", None) == "super_admin":
+        target = auth.normalize_client_slug(explicit_slug) if explicit_slug else ctx_slug
+        if not target:
+            raise HTTPException(status_code=400, detail="Target client slug required")
+        client = session.query(Client).filter_by(slug=target).first()
+        if not client or not client.is_active or client.status != "active":
+            raise HTTPException(status_code=404, detail=f"Target client '{target}' not found or inactive")
+        return target
+
+    # Non-super-admin
+    if not ctx_slug:
+        raise HTTPException(status_code=400, detail="Client context required (pass X-Client-Slug header)")
+
+    if explicit_slug:
+        norm_explicit = auth.normalize_client_slug(explicit_slug)
+        if norm_explicit != ctx_slug:
+            raise HTTPException(
+                status_code=403,
+                detail="Target client does not match your active client context",
+            )
+
+    target = ctx_slug
+    client = session.query(Client).filter_by(slug=target).first()
+    if not client or not client.is_active or client.status != "active":
+        raise HTTPException(status_code=404, detail=f"Target client '{target}' not found or inactive")
+
+    # Re-authorize against that exact slug
+    effective_role = auth.get_effective_role(session, user, target)
+    if not effective_role or not auth.has_permission(effective_role, permission):
+        raise HTTPException(status_code=403, detail="Not authorized for this client")
+
+    return target
+
+
 # ── Pydantic Request & Response Schemas ──────────────────────────────────────
 
 class HydrateRequest(BaseModel):
@@ -96,7 +152,7 @@ def reuse_check(
     identifier: str = Query(..., min_length=2, description="Domain, CIK, LEI, or company key"),
     client: Optional[str] = Query(None, description="Client slug context"),
     request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission("account:reuse_check")),
+    current_user: auth.User = Depends(auth.require_permission("account:reuse_check", require_client_context=True)),
     session: Session = Depends(get_platform_db),
 ):
     """Anti-Oracle verified intelligence lookup.
@@ -105,14 +161,13 @@ def reuse_check(
     - NEVER reveals source client identity or presence of other clients.
     - Returns identical 'available: false' for unknown companies or non-ready snapshots.
     """
-    client_slug = client or auth.resolve_request_client_slug(request, current_user)
-    if not client_slug:
-        raise HTTPException(
-            status_code=400,
-            detail="Client context required (pass X-Client-Slug header or client query parameter)",
-        )
-
-    clean_slug = auth.normalize_client_slug(client_slug)
+    clean_slug = resolve_target_client(
+        request=request,
+        user=current_user,
+        session=session,
+        permission="account:reuse_check",
+        explicit_slug=client,
+    )
 
     try:
         result = AccountReuseService.check_reuse_available(session, identifier, clean_slug)
@@ -138,18 +193,22 @@ def reuse_check(
 def hydrate_account(
     req: HydrateRequest,
     request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission("account:write")),
+    current_user: auth.User = Depends(auth.require_permission("account:write", require_client_context=True)),
     session: Session = Depends(get_platform_db),
 ):
     """Atomically imports verified intelligence into the target client workspace."""
-    client_slug = req.client_slug or auth.resolve_request_client_slug(request, current_user)
-    if not client_slug:
-        raise HTTPException(status_code=400, detail="Target client slug required")
+    clean_slug = resolve_target_client(
+        request=request,
+        user=current_user,
+        session=session,
+        permission="account:write",
+        explicit_slug=req.client_slug,
+    )
 
-    clean_slug = auth.normalize_client_slug(client_slug)
-
-    # 1. Validate cryptographic preview token
-    if not AccountReuseService.validate_preview_token(req.preview_token, clean_slug, req.snapshot_id):
+    # 1. Validate cryptographic preview token (binds snapshot, slug, and user_id)
+    if not AccountReuseService.validate_preview_token(
+        req.preview_token, clean_slug, req.snapshot_id, current_user.id
+    ):
         raise HTTPException(
             status_code=400,
             detail="Invalid or expired preview token. Please re-run the intelligence check.",
@@ -198,17 +257,21 @@ def hydrate_account(
 def submit_reuse_request(
     req: ReuseRequestCreate,
     request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission("account:reuse_request")),
+    current_user: auth.User = Depends(auth.require_permission("account:reuse_request", require_client_context=True)),
     session: Session = Depends(get_platform_db),
 ):
     """Submits a reuse request for super admin approval when reuse_requires_approval is true."""
-    client_slug = req.client_slug or auth.resolve_request_client_slug(request, current_user)
-    if not client_slug:
-        raise HTTPException(status_code=400, detail="Target client slug required")
+    clean_slug = resolve_target_client(
+        request=request,
+        user=current_user,
+        session=session,
+        permission="account:reuse_request",
+        explicit_slug=req.client_slug,
+    )
 
-    clean_slug = auth.normalize_client_slug(client_slug)
-
-    if not AccountReuseService.validate_preview_token(req.preview_token, clean_slug, req.snapshot_id):
+    if not AccountReuseService.validate_preview_token(
+        req.preview_token, clean_slug, req.snapshot_id, current_user.id
+    ):
         raise HTTPException(status_code=400, detail="Invalid or expired preview token.")
 
     target_client = session.query(Client).filter_by(slug=clean_slug).first()
@@ -260,12 +323,21 @@ def list_reuse_requests(
     client: Optional[str] = Query(None, description="Filter by client slug"),
     status: Optional[str] = Query(None, description="Filter by status (pending_approval, done, rejected)"),
     request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission("account:reuse_request")),
+    current_user: auth.User = Depends(auth.require_permission("account:reuse_request", require_client_context=True)),
     session: Session = Depends(get_platform_db),
 ):
     """Lists intelligence reuse requests."""
     is_super = getattr(current_user, "role", None) == "super_admin"
-    client_slug = client or auth.resolve_request_client_slug(request, current_user)
+    if not is_super:
+        clean_slug = resolve_target_client(
+            request=request,
+            user=current_user,
+            session=session,
+            permission="account:reuse_request",
+            explicit_slug=client,
+        )
+    else:
+        clean_slug = auth.normalize_client_slug(client) if client else None
 
     query = session.query(
         ShareEvent,
@@ -279,18 +351,32 @@ def list_reuse_requests(
      .join(Company, Company.id == Snapshot.company_id)
 
     if not is_super:
-        if not client_slug:
-            raise HTTPException(status_code=400, detail="Client context required")
-        clean_slug = auth.normalize_client_slug(client_slug)
         query = query.filter(Client.slug == clean_slug)
-    elif client_slug:
-        clean_slug = auth.normalize_client_slug(client_slug)
+    elif clean_slug:
         query = query.filter(Client.slug == clean_slug)
 
     if status:
         query = query.filter(ShareEvent.status == status)
 
     rows = query.order_by(desc(ShareEvent.created_at)).limit(100).all()
+    results = []
+    for event, c_slug, c_name, snap_ver, comp_name, canon_key in rows:
+        results.append({
+            "request_id": event.id,
+            "status": event.status,
+            "client_slug": c_slug,
+            "client_name": c_name,
+            "snapshot_id": event.snapshot_id,
+            "snapshot_version": snap_ver,
+            "company_name": comp_name,
+            "canonical_key": canon_key,
+            "mode": event.mode,
+            "fee_credits": event.fee_credits,
+            "reason": event.reason,
+            "created_at": event.created_at.isoformat() if event.created_at else None,
+            "completed_at": event.completed_at.isoformat() if event.completed_at else None,
+        })
+    return {"requests": results, "total": len(results)}
     results = []
     for event, c_slug, c_name, snap_ver, comp_name, canon_key in rows:
         results.append({

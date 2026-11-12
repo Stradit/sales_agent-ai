@@ -355,3 +355,64 @@ def test_super_admin_catalog_management(setup_catalog_router_environment):
 
     finally:
         auth.AUTH_ENFORCED = original_enforced
+
+
+def test_cross_tenant_slug_override_prevention(setup_catalog_router_environment):
+    """Verifies that client admins cannot override target tenant via body, query, or params."""
+    env = setup_catalog_router_environment
+    headers_b = _headers_for(env["admin_b_id"], CLIENT_B_SLUG)
+    super_headers = _headers_for(env["super_id"])
+
+    original_enforced = auth.AUTH_ENFORCED
+    auth.AUTH_ENFORCED = True
+    try:
+        # 1. Query client override on reuse-check -> 403
+        res = api_client.get(
+            f"/api/catalog/reuse-check?identifier=veritasglobal.com&client={CLIENT_A_SLUG}",
+            headers=headers_b,
+        )
+        assert res.status_code == 403
+        assert "Target client does not match your active client context" in res.json()["detail"]
+
+        # 2. Body client_slug override on hydrate -> 403
+        res = api_client.post(
+            "/api/catalog/hydrate",
+            headers=headers_b,
+            json={
+                "snapshot_id": env["snapshot_id"],
+                "preview_token": "fake-token",
+                "client_slug": CLIENT_A_SLUG,
+            },
+        )
+        assert res.status_code == 403
+        assert "Target client does not match your active client context" in res.json()["detail"]
+
+        # 3. Body client_slug override on requests -> 403
+        res = api_client.post(
+            "/api/catalog/requests",
+            headers=headers_b,
+            json={
+                "snapshot_id": env["snapshot_id"],
+                "preview_token": "fake-token",
+                "client_slug": CLIENT_A_SLUG,
+            },
+        )
+        assert res.status_code == 403
+        assert "Target client does not match your active client context" in res.json()["detail"]
+
+        # 4. Query client override on GET requests -> 403
+        res = api_client.get(
+            f"/api/catalog/requests?client={CLIENT_A_SLUG}",
+            headers=headers_b,
+        )
+        assert res.status_code == 403
+
+        # 5. Super admin can target any active client
+        res = api_client.get(
+            f"/api/catalog/reuse-check?identifier=veritasglobal.com&client={CLIENT_B_SLUG}",
+            headers=super_headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["available"] is True
+    finally:
+        auth.AUTH_ENFORCED = original_enforced

@@ -320,9 +320,11 @@ def test_publish_and_anti_oracle_lookup():
             target_client_slug=TARGET_SLUG,
             user_id=1,
         )
-        assert AccountReuseService.validate_preview_token(token, TARGET_SLUG, snapshot.id) is True
+        assert AccountReuseService.validate_preview_token(token, TARGET_SLUG, snapshot.id, 1) is True
         # Tampered slug fails
-        assert AccountReuseService.validate_preview_token(token, "evil_client", snapshot.id) is False
+        assert AccountReuseService.validate_preview_token(token, "evil_client", snapshot.id, 1) is False
+        # Tampered user_id fails
+        assert AccountReuseService.validate_preview_token(token, TARGET_SLUG, snapshot.id, 999) is False
 
     finally:
         session.close()

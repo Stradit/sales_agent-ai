@@ -51,7 +51,16 @@ from services.credit_service import (
 
 logger = logging.getLogger("account_reuse_service")
 
-SECRET_KEY = getattr(config, "JWT_SECRET_KEY", None) or os.getenv("JWT_SECRET_KEY", "fallback-catalog-secret-key-32b")
+CATALOG_TOKEN_SECRET = os.getenv("CATALOG_TOKEN_SECRET", "")
+if not CATALOG_TOKEN_SECRET:
+    if getattr(config, "AUTH_ENFORCED", False) or os.getenv("AUTH_ENFORCED", "").lower() == "true":
+        raise RuntimeError("CATALOG_TOKEN_SECRET environment variable is required when AUTH_ENFORCED is true")
+    base_secret = getattr(config, "JWT_SECRET_KEY", None) or os.getenv("JWT_SECRET_KEY", "dev-jwt-secret")
+    CATALOG_TOKEN_SECRET = hmac.new(
+        base_secret.encode("utf-8"),
+        b"catalog_preview_token_secret_key",
+        hashlib.sha256,
+    ).hexdigest()
 
 
 class AccountReuseError(Exception):
@@ -304,7 +313,7 @@ class AccountReuseService:
         """Generates a tamper-proof signed preview token."""
         exp = int(datetime.now(timezone.utc).timestamp()) + expires_in_seconds
         payload = f"{snapshot_id}:{target_client_slug}:{user_id}:{exp}"
-        signature = hmac.new(SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        signature = hmac.new(CATALOG_TOKEN_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
         token_data = {"payload": payload, "sig": signature}
         return base64.urlsafe_b64encode(json.dumps(token_data).encode("utf-8")).decode("utf-8")
 
@@ -314,6 +323,7 @@ class AccountReuseService:
         token: str,
         target_client_slug: str,
         snapshot_id: int,
+        user_id: int,
     ) -> bool:
         """Validates that a preview token is authentic, untampered, and unexpired."""
         try:
@@ -322,7 +332,7 @@ class AccountReuseService:
             payload = data.get("payload", "")
             sig = data.get("sig", "")
 
-            expected_sig = hmac.new(SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+            expected_sig = hmac.new(CATALOG_TOKEN_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
             if not hmac.compare_digest(sig, expected_sig):
                 return False
 
@@ -330,10 +340,12 @@ class AccountReuseService:
             if len(parts) != 4:
                 return False
 
-            token_sid, token_slug, _uid, exp = parts
+            token_sid, token_slug, token_uid, exp = parts
             if int(token_sid) != snapshot_id:
                 return False
             if token_slug != target_client_slug:
+                return False
+            if int(token_uid) != user_id:
                 return False
             if int(exp) < int(datetime.now(timezone.utc).timestamp()):
                 return False

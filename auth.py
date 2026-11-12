@@ -14,7 +14,7 @@ import hashlib
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 import jwt
 from sqlalchemy import text
@@ -243,6 +243,28 @@ ROLE_LABELS = {
 }
 CLIENT_ROLES = ("client_admin", "analyst", "viewer")
 READ_ONLY_ROLES = ("viewer", "partner")
+
+# Unified Permission Matrix (Specification v2 §8)
+PERMISSION_ROLES: Dict[str, Set[str]] = {
+    # Platform catalog admin operations (super_admin only)
+    "catalog:view_library": {"super_admin"},
+    "catalog:publish": {"super_admin"},
+    "catalog:assign": {"super_admin"},
+    "catalog:approve": {"super_admin"},
+    "catalog:rollback": {"super_admin"},
+
+    # Account reuse & client management (super_admin and client_admin)
+    "account:reuse_check": {"super_admin", "client_admin"},
+    "account:reuse_request": {"super_admin", "client_admin"},
+    "client:manage": {"super_admin", "client_admin"},
+
+    # Pipeline execution and writes (super_admin, client_admin, analyst)
+    "account:write": {"super_admin", "client_admin", "analyst"},
+    "auto_pipeline:run": {"super_admin", "client_admin", "analyst"},
+
+    # Read-only operations
+    "account:read": {"super_admin", "client_admin", "analyst", "viewer"},
+}
 
 
 def get_granted_account_ids(session, user_id: int) -> list:
@@ -546,6 +568,138 @@ def get_user_client_grants(session, user_id: int) -> list:
     ]
 
 
+def normalize_client_slug(slug: Optional[str]) -> Optional[str]:
+    """Strips leading 'client_' schema prefix if present, and canonicalizes 'stradit' -> 'stradit_india'."""
+    if not slug:
+        return None
+    s = str(slug).strip().lower()
+    if s.startswith("client_"):
+        s = s[7:]
+    return "stradit_india" if s == "stradit" else s
+
+
+def resolve_request_client_slug(request: Request, user: Optional[User] = None) -> Optional[str]:
+    """Resolves client slug from request path params, headers, query params, or user token."""
+    # 1. Path parameters (e.g. /api/clients/{slug}/... or /{client_slug}/...)
+    if hasattr(request, "path_params") and request.path_params:
+        slug = request.path_params.get("slug") or request.path_params.get("client_slug")
+        if slug:
+            return normalize_client_slug(slug)
+
+    # 2. Header
+    header_slug = request.headers.get("X-Client-Slug")
+    if header_slug:
+        return normalize_client_slug(header_slug)
+
+    # 3. Query params
+    if hasattr(request, "query_params") and request.query_params:
+        q_slug = request.query_params.get("client_slug") or request.query_params.get("slug")
+        if q_slug:
+            return normalize_client_slug(q_slug)
+
+    # 4. Token client slug
+    if user and getattr(user, "token_client_slug", None):
+        return normalize_client_slug(getattr(user, "token_client_slug"))
+
+    return None
+
+
+def get_effective_role(session, user: User, client_slug: Optional[str] = None) -> Optional[str]:
+    """Returns the effective role for a user in the given client context.
+    
+    Rules (§8 Specification v2):
+    1. super_admin is always super_admin across all platform contexts.
+    2. Global READ_ONLY_ROLES (viewer, partner) are capped to 'viewer' regardless of tenant grants.
+    3. If client_slug is specified, resolves UserClientAccess.role for that client.
+    4. If client_slug is not specified, returns client_admin if user has that grant in any active client,
+       otherwise returns user.role.
+    """
+    if not AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
+        return "super_admin"
+
+    # Global read-only roles cap to 'viewer'
+    if getattr(user, "role", None) in READ_ONLY_ROLES:
+        return "viewer"
+
+    if client_slug:
+        clean_slug = normalize_client_slug(client_slug)
+        grant = (
+            session.query(UserClientAccess.role)
+            .join(Client, Client.id == UserClientAccess.client_id)
+            .filter(
+                UserClientAccess.user_id == user.id,
+                Client.slug == clean_slug,
+                Client.is_active == True,
+            )
+            .scalar()
+        )
+        return grant
+
+    # When no client_slug is specified, check if user has client_admin grant in any active client
+    has_client_admin = (
+        session.query(UserClientAccess.id)
+        .join(Client, Client.id == UserClientAccess.client_id)
+        .filter(
+            UserClientAccess.user_id == user.id,
+            UserClientAccess.role == "client_admin",
+            Client.is_active == True,
+        )
+        .first()
+    )
+    if has_client_admin:
+        return "client_admin"
+
+    return getattr(user, "role", None)
+
+
+def has_permission(effective_role: Optional[str], permission: str) -> bool:
+    """Evaluates whether an effective role satisfies the requested permission according to role hierarchy."""
+    if not effective_role:
+        return False
+    if effective_role == "super_admin":
+        return True
+    allowed_roles = PERMISSION_ROLES.get(permission)
+    if not allowed_roles:
+        return False
+    if effective_role in allowed_roles:
+        return True
+    if effective_role == "client_admin" and any(r in ("analyst", "viewer") for r in allowed_roles):
+        return True
+    if effective_role == "analyst" and "viewer" in allowed_roles:
+        return True
+    return False
+
+
+def require_permission(permission: str, require_client_context: bool = False):
+    """FastAPI dependency verifying the user has the required permission in the active context."""
+    def dependency(request: Request, user: User = Depends(get_current_user)) -> User:
+        if not AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
+            return user
+
+        allowed_roles = PERMISSION_ROLES.get(permission)
+        if allowed_roles is None:
+            raise HTTPException(status_code=500, detail=f"Unknown permission '{permission}'")
+
+        client_slug = resolve_request_client_slug(request, user)
+        if require_client_context and not client_slug:
+            raise HTTPException(
+                status_code=400,
+                detail="Client context required (pass X-Client-Slug header or client parameter)",
+            )
+
+        session = get_session()
+        try:
+            effective = get_effective_role(session, user, client_slug)
+            if not effective or not has_permission(effective, permission):
+                raise HTTPException(status_code=403, detail="Not authorized")
+
+            user.effective_role = effective
+            return user
+        finally:
+            session.close()
+    return dependency
+
+
 def user_has_client_access(session, user: User, client_slug: str) -> bool:
     """Returns True if user has access to client_slug."""
     if not AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
@@ -564,7 +718,9 @@ def require_client_role(*roles: str):
     def dependency(request: Request, user: User = Depends(get_current_user)) -> User:
         if not AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
             return user
-        client_slug = request.headers.get("X-Client-Slug") or getattr(user, "token_client_slug", None) or "stradit_india"
+        client_slug = resolve_request_client_slug(request, user)
+        if not client_slug:
+            raise HTTPException(status_code=400, detail="Client context required (pass X-Client-Slug header or client parameter)")
         session = get_session()
         try:
             grant = (
