@@ -590,5 +590,154 @@ def test_catalog_flags_enforcement(setup_catalog_router_environment):
             ca.status = "active"
         if cb:
             cb.catalog_consume = True
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."account_origin"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."personas"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."sub_lobs"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."lobs"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."accounts"'))
         session.commit()
+        session.close()
+
+
+def test_safe_rollback_with_introspection_guard(setup_catalog_router_environment):
+    """Verifies S-5: complete and safe rollback with dynamic introspection guard."""
+    env = setup_catalog_router_environment
+    super_headers = _headers_for(env["super_id"])
+    session = SessionLocal()
+    try:
+        # Hermetic cleanup of client B workspace before test
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."account_origin"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."personas"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."sub_lobs"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."lobs"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."targets"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."accounts"'))
+        session.commit()
+
+        # 1. Clean hydration in client B via super admin direct assign
+        res_assign = api_client.post(
+            "/api/catalog/assign",
+            json={"snapshot_id": env["snapshot_id"], "target_client_slug": CLIENT_B_SLUG, "mode": "instant"},
+            headers=super_headers,
+        )
+        assert res_assign.status_code == 200
+        assign_data = res_assign.json()
+        share_event_id = assign_data["share_event_id"]
+        account_id = assign_data["account_id"]
+        assert account_id is not None
+
+        # Seed a targets row in client B to verify targets deletion on rollback
+        session.execute(
+            text(f"""
+                INSERT INTO "{SCHEMA_B}"."targets" (key, kind, display_name, config)
+                VALUES ('veritas_holdings', 'enterprise', 'Veritas Target', '{{}}'::jsonb)
+                ON CONFLICT (key) DO NOTHING
+            """)
+        )
+        session.commit()
+
+        # Guard Test (a): Tenant-added persona blocks rollback
+        per_id = session.execute(
+            text(f"""
+                INSERT INTO "{SCHEMA_B}"."personas" (account_id, key, display_name, full_name, title, hierarchy_level, tier, created_by_user_id)
+                VALUES (:aid, 'p_custom_tenant', 'Private Persona', 'Private Persona', 'VP Engineering', 2, 'Tier 2', :uid)
+                RETURNING id
+            """),
+            {"aid": account_id, "uid": env["super_id"]},
+        ).scalar()
+        session.commit()
+
+        res_rb = api_client.post(
+            f"/api/catalog/share-events/{share_event_id}/rollback",
+            json={"reason": "Testing blocked rollback on tenant persona"},
+            headers=super_headers,
+        )
+        assert res_rb.status_code == 409
+        detail = res_rb.json()["detail"]
+        assert "personas" in detail["breakdown"]
+        assert detail["breakdown"]["personas"] >= 1
+
+        # Delete tenant persona
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."personas" WHERE id = :id'), {"id": per_id})
+        session.commit()
+
+        # Guard Test (b): Tenant-added deal blocks rollback
+        deal_id = session.execute(
+            text(f"""
+                INSERT INTO "{SCHEMA_B}"."deals" (account_id, name, stage, value_amount, probability)
+                VALUES (:aid, 'Q4 Enterprise Deal', 'discovery', 250000, 30)
+                RETURNING id
+            """),
+            {"aid": account_id},
+        ).scalar()
+        session.commit()
+
+        res_rb = api_client.post(
+            f"/api/catalog/share-events/{share_event_id}/rollback",
+            json={"reason": "Testing blocked rollback on deal"},
+            headers=super_headers,
+        )
+        assert res_rb.status_code == 409
+        detail = res_rb.json()["detail"]
+        assert "deals" in detail["breakdown"]
+
+        # Delete tenant deal
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."deals" WHERE id = :id'), {"id": deal_id})
+        session.commit()
+
+        # Guard Test (c): Tenant-added user_account_access blocks rollback
+        acc_id = session.execute(
+            text(f"""
+                INSERT INTO "{SCHEMA_B}"."user_account_access" (user_id, account_id)
+                VALUES (:uid, :aid)
+                RETURNING id
+            """),
+            {"uid": env["admin_b_id"], "aid": account_id},
+        ).scalar()
+        session.commit()
+
+        res_rb = api_client.post(
+            f"/api/catalog/share-events/{share_event_id}/rollback",
+            json={"reason": "Testing blocked rollback on user_account_access"},
+            headers=super_headers,
+        )
+        assert res_rb.status_code == 409
+        detail = res_rb.json()["detail"]
+        assert "user_account_access" in detail["breakdown"]
+
+        # Delete user_account_access
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."user_account_access" WHERE id = :id'), {"id": acc_id})
+        session.commit()
+
+        # Clean Case: Rollback succeeds
+        res_clean = api_client.post(
+            f"/api/catalog/share-events/{share_event_id}/rollback",
+            json={"reason": "Clean rehearsal rollback"},
+            headers=super_headers,
+        )
+        assert res_clean.status_code == 200
+        assert res_clean.json()["rolled_back"] is True
+
+        # Verify account deleted
+        assert session.execute(text(f'SELECT 1 FROM "{SCHEMA_B}"."accounts" WHERE id = :aid'), {"aid": account_id}).scalar() is None
+        # Verify targets row deleted
+        assert session.execute(text(f'SELECT 1 FROM "{SCHEMA_B}"."targets" WHERE key = :k'), {"k": "veritas_holdings"}).scalar() is None
+        # Verify LOBs deleted
+        assert session.execute(text(f'SELECT 1 FROM "{SCHEMA_B}"."lobs" WHERE account_id = :aid'), {"aid": account_id}).scalar() is None
+
+        # Verify share_event audit fields
+        event = session.query(ShareEvent).filter_by(id=share_event_id).first()
+        assert event.status == "rolled_back"
+        assert event.rolled_back_at is not None
+        assert event.rolled_back_by == env["super_id"]
+        assert event.rollback_reason == "Clean rehearsal rollback"
+
+        # Rollback twice -> 400
+        res_repeat = api_client.post(
+            f"/api/catalog/share-events/{share_event_id}/rollback",
+            json={"reason": "Repeat rollback"},
+            headers=super_headers,
+        )
+        assert res_repeat.status_code == 400
+    finally:
         session.close()

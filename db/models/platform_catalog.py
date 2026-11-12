@@ -175,6 +175,8 @@ class ShareEvent(Base):
     )
     completed_at = Column(DateTime(timezone=True), nullable=True)
     rolled_back_at = Column(DateTime(timezone=True), nullable=True)
+    rolled_back_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    rollback_reason = Column(Text, nullable=True)
 
     snapshot = relationship("Snapshot", back_populates="share_events")
 

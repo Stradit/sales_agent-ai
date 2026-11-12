@@ -75,7 +75,9 @@ class DuplicateAccountError(AccountReuseError):
 
 class RollbackBlockedError(AccountReuseError):
     """Raised when rollback cannot proceed due to private tenant children."""
-    pass
+    def __init__(self, message: str, breakdown: Optional[Dict[str, int]] = None):
+        super().__init__(message)
+        self.breakdown = breakdown or {}
 
 
 def _bind_params(row: dict, kinds: dict) -> dict:
@@ -776,124 +778,343 @@ class AccountReuseService:
         """Safely rolls back a catalog hydration if no private CRM children exist.
         
         Rollback Invariants:
-        - Blocks rollback if private deals, action items, introductions or copilot sessions exist.
-        - Deletes created entities in reverse topological order.
-        - Refunds fee credits in public.credit_ledger.
-        - Marks share_event status = 'rolled_back'.
+        - 1. Row lock on share_event (SELECT ... FOR UPDATE) and status == 'done' required.
+        - 2. Transaction advisory lock taken before inspecting children.
+        - 3. Dynamic introspection guard checks all FKs and columns referencing accounts/lobs/sub_lobs/personas.
+        - 4. Non-manifest rows in posts/cxo/jobs and tenant-added lobs/personas/sub_lobs block rollback.
+        - 5. Reverse topological deletion: posts/cxo/jobs -> targets -> personas -> sub_lobs -> lobs -> account_origin -> account.
+        - 6. Delete counts verified against manifest; count mismatch aborts transaction.
+        - 7. Refunds fee in credit_ledger and decrements api_credits_used.
+        - 8. Records status='rolled_back', rolled_back_at, rolled_back_by, rollback_reason.
         """
-        share_event = session.query(ShareEvent).filter_by(id=share_event_id).first()
+        # 1. SELECT ... FOR UPDATE share_event
+        share_event = (
+            session.query(ShareEvent)
+            .filter_by(id=share_event_id)
+            .with_for_update()
+            .first()
+        )
         if not share_event:
             raise ValueError(f"ShareEvent ID {share_event_id} not found.")
 
         if share_event.status != "done":
-            raise AccountReuseError(f"ShareEvent {share_event_id} is in status '{share_event.status}' and cannot be rolled back.")
+            raise AccountReuseError(
+                f"ShareEvent {share_event_id} is in status '{share_event.status}' and cannot be rolled back."
+            )
 
         target_client = session.query(Client).filter_by(id=share_event.target_client_id).first()
         if not target_client:
             raise ValueError("Target client not found.")
 
-        target_schema = schema_for(target_client.slug)
+        clean_slug = validate_slug(target_client.slug)
+        target_schema = schema_for(clean_slug)
+
+        # 2. Advisory lock before reading children
+        snapshot = session.query(Snapshot).filter_by(id=share_event.snapshot_id).first()
+        company = session.query(Company).filter_by(id=snapshot.company_id).first() if snapshot else None
+        canonical_key = company.canonical_key if company else f"snap:{share_event.snapshot_id}"
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+            {"k": f"catalog:hydrate:{clean_slug}:{canonical_key}"},
+        )
+
         created_ids = share_event.created_ids or {}
         acct_ids = created_ids.get("accounts", [])
         if not acct_ids:
             raise AccountReuseError("No account ID found in share event manifest.")
         target_account_id = acct_ids[0]
 
-        # 1. Private Child Work Verification Guard
-        deals_cnt = session.execute(
-            text(f'SELECT count(*) FROM "{target_schema}"."deals" WHERE account_id = :aid'),
-            {"aid": target_account_id},
-        ).scalar() or 0
+        lob_ids = created_ids.get("lobs", [])
+        sub_ids = created_ids.get("sub_lobs", [])
+        per_ids = created_ids.get("personas", [])
+        post_ids = created_ids.get("posts", [])
+        cxo_ids = created_ids.get("cxo_movements", [])
+        job_ids = created_ids.get("linkedin_jobs", [])
 
-        actions_cnt = session.execute(
-            text(f'SELECT count(*) FROM "{target_schema}"."action_items" WHERE account_id = :aid'),
+        # Fetch account key for targets / feed checking
+        acct_key_row = session.execute(
+            text(f'SELECT key FROM "{target_schema}"."accounts" WHERE id = :aid'),
             {"aid": target_account_id},
-        ).scalar() or 0
+        ).fetchone()
+        target_acct_key = acct_key_row[0] if acct_key_row else None
 
-        copilot_cnt = session.execute(
-            text(f'SELECT count(*) FROM "{target_schema}"."copilot_sessions" WHERE account_id = :aid'),
-            {"aid": target_account_id},
-        ).scalar() or 0
+        # 3. Dynamic Introspection Guard
+        breakdown: Dict[str, int] = {}
 
-        if deals_cnt > 0 or actions_cnt > 0 or copilot_cnt > 0:
+        # 3a. Introspect foreign keys
+        fk_rows = session.execute(
+            text("""
+                SELECT
+                    tc.table_name,
+                    kcu.column_name,
+                    ccu.table_name AS foreign_table_name
+                FROM information_schema.table_constraints AS tc
+                JOIN information_schema.key_column_usage AS kcu
+                  ON tc.constraint_name = kcu.constraint_name
+                  AND tc.table_schema = kcu.table_schema
+                JOIN information_schema.constraint_column_usage AS ccu
+                  ON ccu.constraint_name = tc.constraint_name
+                  AND ccu.table_schema = tc.table_schema
+                WHERE tc.constraint_type = 'FOREIGN KEY'
+                  AND tc.table_schema = :s
+                  AND ccu.table_name IN ('accounts', 'lobs', 'sub_lobs', 'personas')
+            """),
+            {"s": target_schema},
+        ).fetchall()
+
+        # 3b. Introspect columns for unconstrained foreign references
+        col_rows = session.execute(
+            text("""
+                SELECT table_name, column_name,
+                       CASE 
+                         WHEN column_name = 'account_id' THEN 'accounts'
+                         WHEN column_name = 'lob_id' THEN 'lobs'
+                         WHEN column_name = 'sub_lob_id' THEN 'sub_lobs'
+                         WHEN column_name = 'persona_id' THEN 'personas'
+                       END as parent_table
+                FROM information_schema.columns
+                WHERE table_schema = :s
+                  AND column_name IN ('account_id', 'lob_id', 'sub_lob_id', 'persona_id')
+            """),
+            {"s": target_schema},
+        ).fetchall()
+
+        all_refs = set()
+        for r in fk_rows:
+            all_refs.add((r[0], r[1], r[2]))
+        for r in col_rows:
+            all_refs.add((r[0], r[1], r[2]))
+
+        # Count referencing rows
+        for t_name, c_name, parent_table in sorted(all_refs):
+            if t_name in ("accounts", "account_origin", "targets"):
+                continue
+
+            if t_name == "lobs":
+                if lob_ids:
+                    extra = session.execute(
+                        text(f'SELECT count(*) FROM "{target_schema}"."lobs" WHERE account_id = :aid AND id != ALL(:lids)'),
+                        {"aid": target_account_id, "lids": lob_ids},
+                    ).scalar() or 0
+                else:
+                    extra = session.execute(
+                        text(f'SELECT count(*) FROM "{target_schema}"."lobs" WHERE account_id = :aid'),
+                        {"aid": target_account_id},
+                    ).scalar() or 0
+                if extra > 0:
+                    breakdown["lobs"] = breakdown.get("lobs", 0) + extra
+
+            elif t_name == "sub_lobs":
+                if lob_ids:
+                    if sub_ids:
+                        extra = session.execute(
+                            text(f'SELECT count(*) FROM "{target_schema}"."sub_lobs" WHERE lob_id = ANY(:lids) AND id != ALL(:sids)'),
+                            {"lids": lob_ids, "sids": sub_ids},
+                        ).scalar() or 0
+                    else:
+                        extra = session.execute(
+                            text(f'SELECT count(*) FROM "{target_schema}"."sub_lobs" WHERE lob_id = ANY(:lids)'),
+                            {"lids": lob_ids},
+                        ).scalar() or 0
+                    if extra > 0:
+                        breakdown["sub_lobs"] = breakdown.get("sub_lobs", 0) + extra
+
+            elif t_name == "personas":
+                clauses = ["account_id = :aid"]
+                params = {"aid": target_account_id}
+                if lob_ids:
+                    clauses.append("lob_id = ANY(:lids)")
+                    params["lids"] = lob_ids
+                where_clause = f"({' OR '.join(clauses)})"
+                if per_ids:
+                    where_clause += " AND id != ALL(:pids)"
+                    params["pids"] = per_ids
+                extra = session.execute(
+                    text(f'SELECT count(*) FROM "{target_schema}"."personas" WHERE {where_clause}'),
+                    params,
+                ).scalar() or 0
+                if extra > 0:
+                    breakdown["personas"] = breakdown.get("personas", 0) + extra
+
+            else:
+                # Other referencing tables (deals, action_items, user_account_access, copilot_sessions, etc.)
+                if parent_table == "accounts":
+                    cnt = session.execute(
+                        text(f'SELECT count(*) FROM "{target_schema}"."{t_name}" WHERE "{c_name}" = :aid'),
+                        {"aid": target_account_id},
+                    ).scalar() or 0
+                    if cnt > 0:
+                        breakdown[t_name] = breakdown.get(t_name, 0) + cnt
+                elif parent_table == "lobs" and lob_ids:
+                    cnt = session.execute(
+                        text(f'SELECT count(*) FROM "{target_schema}"."{t_name}" WHERE "{c_name}" = ANY(:lids)'),
+                        {"lids": lob_ids},
+                    ).scalar() or 0
+                    if cnt > 0:
+                        breakdown[t_name] = breakdown.get(t_name, 0) + cnt
+                elif parent_table == "sub_lobs" and sub_ids:
+                    cnt = session.execute(
+                        text(f'SELECT count(*) FROM "{target_schema}"."{t_name}" WHERE "{c_name}" = ANY(:sids)'),
+                        {"sids": sub_ids},
+                    ).scalar() or 0
+                    if cnt > 0:
+                        breakdown[t_name] = breakdown.get(t_name, 0) + cnt
+                elif parent_table == "personas" and per_ids:
+                    cnt = session.execute(
+                        text(f'SELECT count(*) FROM "{target_schema}"."{t_name}" WHERE "{c_name}" = ANY(:pids)'),
+                        {"pids": per_ids},
+                    ).scalar() or 0
+                    if cnt > 0:
+                        breakdown[t_name] = breakdown.get(t_name, 0) + cnt
+
+        # 3c. Activity links guard
+        has_act_links = session.execute(
+            text("SELECT 1 FROM information_schema.tables WHERE table_schema = :s AND table_name = 'activity_links'"),
+            {"s": target_schema},
+        ).scalar()
+        if has_act_links:
+            clauses = ["(object_type = 'account' AND object_id = :aid)"]
+            params = {"aid": target_account_id}
+            if lob_ids:
+                clauses.append("(object_type = 'lob' AND object_id = ANY(:lids))")
+                params["lids"] = lob_ids
+            if per_ids:
+                clauses.append("(object_type = 'persona' AND object_id = ANY(:pids))")
+                params["pids"] = per_ids
+            act_cnt = session.execute(
+                text(f'SELECT count(*) FROM "{target_schema}"."activity_links" WHERE {" OR ".join(clauses)}'),
+                params,
+            ).scalar() or 0
+            if act_cnt > 0:
+                breakdown["activity_links"] = breakdown.get("activity_links", 0) + act_cnt
+
+        # 3d. Check posts, cxo_movements, linkedin_jobs keyed by target_key
+        if target_acct_key:
+            for feed_table, manifest_items in [
+                ("posts", post_ids),
+                ("cxo_movements", cxo_ids),
+                ("linkedin_jobs", job_ids),
+            ]:
+                if manifest_items:
+                    feed_cnt = session.execute(
+                        text(f'SELECT count(*) FROM "{target_schema}"."{feed_table}" WHERE target_key = :k AND id != ALL(:ids)'),
+                        {"k": target_acct_key, "ids": manifest_items},
+                    ).scalar() or 0
+                else:
+                    feed_cnt = session.execute(
+                        text(f'SELECT count(*) FROM "{target_schema}"."{feed_table}" WHERE target_key = :k'),
+                        {"k": target_acct_key},
+                    ).scalar() or 0
+                if feed_cnt > 0:
+                    breakdown[feed_table] = breakdown.get(feed_table, 0) + feed_cnt
+
+        if breakdown:
             raise RollbackBlockedError(
-                f"Rollback blocked: account contains private tenant CRM data "
-                f"({deals_cnt} deals, {actions_cnt} action items, {copilot_cnt} copilot sessions). "
-                f"Rollback refused to prevent catastrophic data loss."
+                f"Rollback blocked: account contains private tenant CRM data: {breakdown}",
+                breakdown=breakdown,
             )
 
-        # 2. Reverse Topological Deletion
-        # 2a. Delete account_origin
+        # 4. Reverse Topological Deletion
+        # 4a. Posts, CXO, Jobs (by manifest ids)
+        if post_ids:
+            res_del = session.execute(
+                text(f'DELETE FROM "{target_schema}"."posts" WHERE id = ANY(:ids) RETURNING id'),
+                {"ids": post_ids},
+            ).fetchall()
+            if len(res_del) != len(post_ids):
+                raise AccountReuseError(f"Posts deletion count mismatch: expected {len(post_ids)}, deleted {len(res_del)}")
+
+        if cxo_ids:
+            res_del = session.execute(
+                text(f'DELETE FROM "{target_schema}"."cxo_movements" WHERE id = ANY(:ids) RETURNING id'),
+                {"ids": cxo_ids},
+            ).fetchall()
+            if len(res_del) != len(cxo_ids):
+                raise AccountReuseError(f"CXO movements deletion count mismatch: expected {len(cxo_ids)}, deleted {len(res_del)}")
+
+        if job_ids:
+            res_del = session.execute(
+                text(f'DELETE FROM "{target_schema}"."linkedin_jobs" WHERE id = ANY(:ids) RETURNING id'),
+                {"ids": job_ids},
+            ).fetchall()
+            if len(res_del) != len(job_ids):
+                raise AccountReuseError(f"LinkedIn jobs deletion count mismatch: expected {len(job_ids)}, deleted {len(res_del)}")
+
+        # 4b. Targets row (by key from manifest or account key)
+        tgt_keys = created_ids.get("targets", [])
+        if not tgt_keys and target_acct_key:
+            has_tgt = session.execute(
+                text(f'SELECT 1 FROM "{target_schema}"."targets" WHERE key = :k'),
+                {"k": target_acct_key},
+            ).scalar()
+            if has_tgt:
+                tgt_keys = [target_acct_key]
+
+        if tgt_keys:
+            res_del = session.execute(
+                text(f'DELETE FROM "{target_schema}"."targets" WHERE key = ANY(:keys) RETURNING key'),
+                {"keys": tgt_keys},
+            ).fetchall()
+            if len(res_del) != len(tgt_keys):
+                raise AccountReuseError(f"Targets deletion count mismatch: expected {len(tgt_keys)}, deleted {len(res_del)}")
+
+        # 4c. Personas
+        if per_ids:
+            res_del = session.execute(
+                text(f'DELETE FROM "{target_schema}"."personas" WHERE id = ANY(:pids) RETURNING id'),
+                {"pids": per_ids},
+            ).fetchall()
+            if len(res_del) != len(per_ids):
+                raise AccountReuseError(f"Personas deletion count mismatch: expected {len(per_ids)}, deleted {len(res_del)}")
+
+        # 4d. Sub-LOBs
+        if sub_ids:
+            res_del = session.execute(
+                text(f'DELETE FROM "{target_schema}"."sub_lobs" WHERE id = ANY(:sids) RETURNING id'),
+                {"sids": sub_ids},
+            ).fetchall()
+            if len(res_del) != len(sub_ids):
+                raise AccountReuseError(f"Sub-LOBs deletion count mismatch: expected {len(sub_ids)}, deleted {len(res_del)}")
+
+        # 4e. LOBs
+        if lob_ids:
+            res_del = session.execute(
+                text(f'DELETE FROM "{target_schema}"."lobs" WHERE id = ANY(:lids) RETURNING id'),
+                {"lids": lob_ids},
+            ).fetchall()
+            if len(res_del) != len(lob_ids):
+                raise AccountReuseError(f"LOBs deletion count mismatch: expected {len(lob_ids)}, deleted {len(res_del)}")
+
+        # 4f. Account Origin
         session.execute(
             text(f'DELETE FROM "{target_schema}"."account_origin" WHERE account_id = :aid'),
             {"aid": target_account_id},
         )
 
-        # 2b. Delete Personas
-        per_ids = created_ids.get("personas", [])
-        if per_ids:
-            session.execute(
-                text(f'DELETE FROM "{target_schema}"."personas" WHERE id = ANY(:pids)'),
-                {"pids": per_ids},
-            )
-
-        # 2c. Delete Sub-LOBs
-        sub_ids = created_ids.get("sub_lobs", [])
-        if sub_ids:
-            session.execute(
-                text(f'DELETE FROM "{target_schema}"."sub_lobs" WHERE id = ANY(:sids)'),
-                {"sids": sub_ids},
-            )
-
-        # 2d. Delete LOBs
-        lob_ids = created_ids.get("lobs", [])
-        if lob_ids:
-            session.execute(
-                text(f'DELETE FROM "{target_schema}"."lobs" WHERE id = ANY(:lids)'),
-                {"lids": lob_ids},
-            )
-
-        # 2e. Delete Posts, CXO, Jobs
-        post_ids = created_ids.get("posts", [])
-        if post_ids:
-            session.execute(
-                text(f'DELETE FROM "{target_schema}"."posts" WHERE id = ANY(:ids)'),
-                {"ids": post_ids},
-            )
-
-        cxo_ids = created_ids.get("cxo_movements", [])
-        if cxo_ids:
-            session.execute(
-                text(f'DELETE FROM "{target_schema}"."cxo_movements" WHERE id = ANY(:ids)'),
-                {"ids": cxo_ids},
-            )
-
-        job_ids = created_ids.get("linkedin_jobs", [])
-        if job_ids:
-            session.execute(
-                text(f'DELETE FROM "{target_schema}"."linkedin_jobs" WHERE id = ANY(:ids)'),
-                {"ids": job_ids},
-            )
-
-        # 2f. Delete Account
-        session.execute(
-            text(f'DELETE FROM "{target_schema}"."accounts" WHERE id = :aid'),
+        # 4g. Account
+        res_del = session.execute(
+            text(f'DELETE FROM "{target_schema}"."accounts" WHERE id = :aid RETURNING id'),
             {"aid": target_account_id},
-        )
+        ).fetchall()
+        if len(res_del) != 1:
+            raise AccountReuseError(f"Account deletion count mismatch: expected 1, deleted {len(res_del)}")
 
-        # 3. Credit Refund in Ledger
+        # 5. Credit Refund in Ledger
         if share_event.fee_credits > 0:
             target_client.api_credits_used = max(0, target_client.api_credits_used - share_event.fee_credits)
+            ledger_reason = f"Catalog reuse rollback refund: {reason}" if reason else f"Catalog reuse rollback refund: Event #{share_event.id}"
             refund_entry = CreditLedger(
                 client_id=target_client.id,
                 delta=share_event.fee_credits,
-                reason=f"Catalog reuse rollback refund: Event #{share_event.id}",
+                reason=ledger_reason,
             )
             session.add(refund_entry)
 
-        # 4. Mark ShareEvent rolled_back
+        # 6. Mark ShareEvent rolled_back
         share_event.status = "rolled_back"
         share_event.rolled_back_at = datetime.now(timezone.utc)
+        share_event.rolled_back_by = admin_user_id
+        share_event.rollback_reason = reason
         session.commit()
 
         return {

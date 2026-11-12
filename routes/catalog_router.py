@@ -638,7 +638,13 @@ def rollback_share_event(
         )
         return res
     except RollbackBlockedError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "breakdown": getattr(e, "breakdown", {}),
+            },
+        )
     except AccountReuseError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
