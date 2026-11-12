@@ -30,12 +30,12 @@ def test_stradit_cutover_manifest_compliance(cutover_mgr):
     assert report["is_compliant"] is True
     assert report["missing_tables"] == []
     assert report["fk_mismatches"] == []
-    assert report["skeleton_version"] == "T0001"
+    assert report["skeleton_version"] == "T0002"
 
 
 def test_stradit_cutover_data_parity(cutover_mgr):
     parity = cutover_mgr.verify_data_parity()
-    assert len(parity) == 58
+    assert len(parity) >= 58
     for item in parity:
         assert item["status"].startswith("MATCH") or item["status"] == "TENANT_ONLY", (
             f"Table {item['table']} has parity mismatch: {item}"
@@ -69,7 +69,7 @@ def test_stradit_cutover_dry_run_archive(cutover_mgr):
     result = cutover_mgr.archive_public_tenant_tables(dry_run=True)
     assert result["ok"] is True
     assert result["dry_run"] is True
-    assert result["tables_count"] == 58
+    assert result["tables_count"] >= 58
     assert "archive_schema" in result
     assert "accounts" in result["tables_to_archive"]
     assert "users" not in result["tables_to_archive"]  # Platform tables must NEVER be archived

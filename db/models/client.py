@@ -37,6 +37,11 @@ class Client(Base):
     api_credits_total = Column(Integer, default=0, nullable=False)
     api_credits_used = Column(Integer, default=0, nullable=False)
 
+    # Verified Intelligence Catalog Settings (§6, Phase 1)
+    catalog_publish = Column(Boolean, default=False, nullable=False)
+    catalog_consume = Column(Boolean, default=False, nullable=False)
+    reuse_requires_approval = Column(Boolean, default=True, nullable=False)
+
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),

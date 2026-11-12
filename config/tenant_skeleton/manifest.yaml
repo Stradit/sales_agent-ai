@@ -1,5 +1,5 @@
-skeleton_version: T0001
-total_tables: 58
+skeleton_version: T0002
+total_tables: 59
 platform_references:
 - ref_table: users
   ref_schema: public
@@ -557,3 +557,18 @@ tables:
   - id
   intra_tenant_fks: []
   platform_fks: []
+- name: account_origin
+  primary_key:
+  - account_id
+  intra_tenant_fks:
+  - columns:
+    - account_id
+    ref_table: accounts
+    ref_columns:
+    - id
+    on_delete: CASCADE
+  platform_fks:
+  - columns:
+    - hydrated_by
+    ref: public.users.id
+    on_delete: SET NULL

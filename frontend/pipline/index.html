@@ -7,27 +7,30 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css?v=3.71.0">
+  <link rel="stylesheet" href="css/styles.css?v=3.83.0">
 
   <style>
     .chip-toggle {
       border: 1.5px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 8px 12px;
-      font-size: 0.76rem;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 0.71rem;
       font-weight: 600;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      transition: all 0.2s;
-      background: #f8fafc;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+      background: #FAF7F4;
+      border: 1px solid #D3C2B1;
       color: #334155;
       user-select: none;
+      white-space: nowrap;
     }
     .chip-toggle:hover {
-      border-color: #cbd5e1;
-      background: #f1f5f9;
+      border-color: #8A6248;
+      background: #F3ECE2;
     }
     .chip-toggle.active {
       border-color: #8A6248;
@@ -51,7 +54,8 @@
         <div class="brand-name">Sales Intel</div>
         <div class="brand-sub">Account Explorer</div>
       </div>
-      <button type="button" class="sidebar-collapse-btn" id="sidebarCollapseBtn" title="Shrink sidebar"><i class="bi bi-layout-sidebar-inset"></i></button>
+      <button type="button" class="sidebar-collapse-btn d-none d-md-block" id="sidebarCollapseBtn" title="Shrink sidebar"><i class="bi bi-layout-sidebar-inset"></i></button>
+      <button type="button" class="btn btn-sm btn-link text-muted d-md-none sidebar-close-btn ms-auto" title="Close Menu" style="font-size:1.1rem;padding:0 6px;"><i class="bi bi-x-lg"></i></button>
     </div>
 
     <!-- Active Client Workspace Badge Card in Sidebar -->
@@ -114,11 +118,14 @@
       <!-- Top Brand Header Bar -->
       <div class="pipeline-top-bar">
         <div class="pipeline-top-left">
+          <button type="button" class="btn btn-sm d-md-none me-2" id="mobileSidebarToggle" title="Open Navigation Menu" style="padding:4px 8px;border-radius:6px;background:#FAF7F4;border:1px solid #D3C2B1;color:#4A3528;">
+            <i class="bi bi-list fs-5"></i>
+          </button>
           <div class="pipeline-top-logo"><i class="bi bi-diagram-3-fill"></i></div>
           <div class="pipeline-top-title">Sales Intelligence</div>
           
           <!-- Live Global Telemetry Strip -->
-          <div class="topbar-telemetry-strip" id="topbarTelemetry">
+          <div class="topbar-telemetry-strip d-none d-lg-flex" id="topbarTelemetry">
             <span class="telemetry-pill" title="Total Enterprise Accounts Active in Database">
               <i class="bi bi-buildings"></i> <strong id="topbarAccountsCount">0</strong> Accounts
             </span>
@@ -154,6 +161,11 @@
               <li>
                 <a class="dropdown-item py-2 text-secondary" href="#" id="topbarManageClientsBtn">
                   <i class="bi bi-gear me-2"></i>Manage All Clients...
+                </a>
+              </li>
+              <li>
+                <a class="dropdown-item py-2 text-secondary" href="#" id="topbarAccountLibraryBtn">
+                  <i class="bi bi-collection-fill me-2" style="color:#8A6248;"></i>Platform Account Library...
                 </a>
               </li>
             </ul>
@@ -569,41 +581,43 @@
           <!-- Account Hero Header -->
           <div id="accountHeroContainer" class="modern-view-card fade-in"></div>
 
-          <!-- Data Completeness Section -->
-          <div id="completenessContainer" class="modern-view-card fade-in"></div>
-
-
-          <!-- Tabs Strip Bar (Overview, LOBs, Personas, Feeds, Activity) -->
+          <!-- Tabs Strip Bar (Overview, LOBs, Personas, Feeds, Activity) - Docked Immediately Below Hero -->
           <div id="tabsContainer" class="pipeline-tabs-bar"></div>
 
-          <!-- Deferrable LOB Ingestion Action Ribbon (shown when account is ingested but LOBs not yet run, or when user selects "Review Account First") -->
-          <div id="lobHandoffActionRibbon" class="lob-handoff-action-ribbon alert alert-primary d-none fade-in" style="background:linear-gradient(135deg, #F3E7DA 0%, #F3ECE2 100%);border:1.5px solid #D3C2B1;border-radius:14px;padding:16px 20px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 16px rgba(59,130,246,0.08);gap:16px;">
-            <div style="display:flex;align-items:center;gap:14px;">
-              <div style="width:42px;height:42px;border-radius:12px;background:#F3E7DA;color:#4A3528;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;">
-                <i class="bi bi-diagram-3-fill"></i>
-              </div>
-              <div>
-                <div style="font-weight:700;font-size:0.92rem;color:#0f172a;display:flex;align-items:center;gap:8px;">
-                  <span>Account Enriched &amp; Verified</span>
-                  <span class="badge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.68rem;padding:3px 8px;">Ready for LOBs</span>
-                </div>
-                <div style="font-size:0.77rem;color:#475569;margin-top:2px;">
-                  Review metrics, 10-K filings, and executive personas at your own pace. When ready, kick off autonomous Line of Business extraction.
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-              <button type="button" class="btn btn-sm btn-primary" id="btnRibbonStartLobs" style="font-weight:700;border-radius:8px;padding:7px 18px;background:linear-gradient(135deg, #4A3528 0%, #8A6248 100%);color:#F3E7DA;border:1px solid #B88A64;box-shadow:0 3px 10px rgba(43, 36, 31,0.3);display:inline-flex;align-items:center;gap:6px;">
-                <i class="bi bi-lightning-charge-fill"></i> Ingest LOBs Now (<span id="ribbonLobCredits">40</span> cr) &rarr;
-              </button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRibbonDismiss" title="Dismiss banner" style="border-radius:8px;padding:7px 12px;">
-                <i class="bi bi-x-lg"></i>
-              </button>
-            </div>
-          </div>
+          <!-- Overview Tab Pane: wraps completeness score, handoff ribbon, and 2-column overview -->
+          <div id="overviewTabPane" class="fade-in">
+            <!-- Data Completeness Section -->
+            <div id="completenessContainer" class="modern-view-card fade-in"></div>
 
-          <!-- Account Overview Content (2-Column Grid) -->
-          <div id="accountOverviewContainer" class="fade-in"></div>
+            <!-- Deferrable LOB Ingestion Action Ribbon (shown when account is ingested but LOBs not yet run, or when user selects "Review Account First") -->
+            <div id="lobHandoffActionRibbon" class="lob-handoff-action-ribbon alert alert-primary d-none fade-in" style="background:linear-gradient(135deg, #F3E7DA 0%, #F3ECE2 100%);border:1.5px solid #D3C2B1;border-radius:14px;padding:16px 20px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 4px 16px rgba(59,130,246,0.08);gap:16px;">
+              <div style="display:flex;align-items:center;gap:14px;">
+                <div style="width:42px;height:42px;border-radius:12px;background:#F3E7DA;color:#4A3528;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0;">
+                  <i class="bi bi-diagram-3-fill"></i>
+                </div>
+                <div>
+                  <div style="font-weight:700;font-size:0.92rem;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                    <span>Account Enriched &amp; Verified</span>
+                    <span class="badge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.68rem;padding:3px 8px;">Ready for LOBs</span>
+                  </div>
+                  <div style="font-size:0.77rem;color:#475569;margin-top:2px;">
+                    Review metrics, 10-K filings, and executive personas at your own pace. When ready, kick off autonomous Line of Business extraction.
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+                <button type="button" class="btn btn-sm btn-primary" id="btnRibbonStartLobs" style="font-weight:700;border-radius:8px;padding:7px 18px;background:linear-gradient(135deg, #4A3528 0%, #8A6248 100%);color:#F3E7DA;border:1px solid #B88A64;box-shadow:0 3px 10px rgba(43, 36, 31,0.3);display:inline-flex;align-items:center;gap:6px;">
+                  <i class="bi bi-lightning-charge-fill"></i> Ingest LOBs Now (<span id="ribbonLobCredits">40</span> cr) &rarr;
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRibbonDismiss" title="Dismiss banner" style="border-radius:8px;padding:7px 12px;">
+                  <i class="bi bi-x-lg"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Account Overview Content (2-Column Grid) -->
+            <div id="accountOverviewContainer" class="fade-in"></div>
+          </div>
         </div>
 
         <!-- Backward compatible accountDataSection (hidden, handled in overview) -->
@@ -611,20 +625,22 @@
 
         <!-- Section 1: Lines of Business (LOB Cards) -->
         <div id="lobSection" class="mt-4 d-none">
-          <div class="section-header">
-            <span><i class="bi bi-folder2-open"></i>&nbsp; Lines of Business (LOB)</span>
+          <div class="section-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <span><i class="bi bi-folder2-open"></i>&nbsp; Lines of Business (LOB)</span>
+              <span class="badge rounded-pill" id="lobCountBadge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.75rem;font-weight:700;"></span>
+            </div>
             <div class="batch-pipeline-actions" id="lobBatchActions">
-                            <button type="button" class="batch-btn batch-btn-auto-lob" id="lobAutoPipelineBtn"
+              <button type="button" class="batch-btn batch-btn-auto-lob" id="lobAutoPipelineBtn"
                       title="Run Autonomous Phased LOB Discovery & Ingestion"
                       style="background:linear-gradient(135deg, #4A3528 0%, #8A6248 100%);color:#F3E7DA;border:1px solid #B88A64;box-shadow:0 2px 8px rgba(43, 36, 31,0.35);font-weight:600;display:inline-flex;align-items:center;gap:6px;">
                 <i class="bi bi-magic"></i> Auto-Ingest LOBs
               </button>
               <button type="button" class="batch-btn batch-btn-pull" id="lobBatchPull"
-                      title="Open Batch Console &mdash; discover and enrich Lines of Business">
-                <i class="bi bi-grid-3x3-gap-fill"></i> Batch Console
+                      title="Open Batch Console to discover and enrich Lines of Business">
+                <i class="bi bi-sliders"></i> Advanced LOB Batch
               </button>
             </div>
-            <span class="text-muted" style="font-size: .75rem; font-weight: normal;" id="lobCountBadge"></span>
           </div>
           <div class="batch-progress-container d-none" id="lobBatchProgress">
             <div class="batch-progress-bar"><div class="batch-progress-fill" id="lobProgressFill"></div></div>
@@ -646,10 +662,13 @@
 
         <!-- Section 2: Personas / Hierarchy Cards (Visible after LOB click) -->
         <div id="personaSection" class="mt-4 d-none">
-          <div class="section-header">
-            <span id="personaSectionTitle">
-              <i class="bi bi-people-fill"></i>&nbsp; Organizational Hierarchy &amp; Contacts
-            </span>
+          <div class="section-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <span id="personaSectionTitle">
+                <i class="bi bi-people-fill"></i>&nbsp; Organizational Hierarchy &amp; Contacts
+              </span>
+              <span class="badge rounded-pill" id="personaCountBadge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.75rem;font-weight:700;"></span>
+            </div>
             <div class="batch-pipeline-actions" id="personaBatchActions">
               <button type="button" class="batch-btn batch-btn-auto-persona" id="personaAutoPipelineBtn"
                       title="Run Autonomous Phased Persona Discovery & Ingestion"
@@ -658,10 +677,9 @@
               </button>
               <button type="button" class="batch-btn batch-btn-pull" id="personaBatchPull"
                       title="Open Batch Console to discover and enrich personas for this LOB">
-                <i class="bi bi-grid-3x3-gap-fill"></i> Batch Console
+                <i class="bi bi-sliders"></i> Advanced People Batch
               </button>
             </div>
-            <span class="text-muted" style="font-size: .75rem; font-weight: normal;" id="personaCountBadge"></span>
           </div>
           <div class="batch-progress-container d-none" id="personaBatchProgress">
             <div class="batch-progress-bar"><div class="batch-progress-fill" id="personaProgressFill"></div></div>
@@ -675,14 +693,13 @@
         </div>
 
         <!-- Section 2.5: All Other Account Personas & Executive Directory (Complete Enterprise Hierarchy) -->
-        <div id="allPersonasSection" class="mt-4">
+        <div id="allPersonasSection" class="mt-4 d-none">
           <div class="section-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <div class="d-flex align-items-center gap-2">
               <span id="allPersonasSectionTitle">
                 <i class="bi bi-person-lines-fill"></i>&nbsp; All Account Executive Personas &amp; Directory
               </span>
-              <span class="text-muted" style="font-size: .75rem; font-weight: normal;"
-                    id="allPersonasCountBadge"></span>
+              <span class="badge rounded-pill" id="allPersonasCountBadge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.75rem;font-weight:700;"></span>
             </div>
             <div class="d-flex align-items-center gap-2 flex-wrap">
               <div class="batch-pipeline-actions" id="allPersonasBatchActions">
@@ -693,7 +710,7 @@
                 </button>
                 <button type="button" class="batch-btn batch-btn-pull" id="allPersonasBatchPull"
                         title="Open Batch Console to discover and enrich all personas for this account">
-                  <i class="bi bi-grid-3x3-gap-fill"></i> Batch Console
+                  <i class="bi bi-sliders"></i> Advanced People Batch
                 </button>
               </div>
               <!-- Live Search Bar -->
@@ -768,56 +785,6 @@
   </div><!-- /content -->
 </div><!-- /app-shell -->
 
-<!-- --- Floating Chatbot --- -->
-<button type="button" class="chatbot-fab" id="chatbotFab" title="Ask the Sales Assistant">
-  <i class="bi bi-robot"></i>
-  <span class="chatbot-fab-dot"></span>
-</button>
-
-<div class="chatbot-panel" id="chatbotPanel">
-  <div class="chatbot-header">
-    <div class="chatbot-avatar"><i class="bi bi-robot"></i></div>
-    <div class="chatbot-header-text">
-      <div class="chatbot-title">Sales Assistant <span class="chatbot-badge">AI</span></div>
-      <div class="chatbot-subtitle" id="chatbotSubtitle">Account Intelligence</div>
-    </div>
-    <span class="chatbot-status"><span class="chatbot-status-dot"></span>Online</span>
-    <button type="button" class="chatbot-close" id="chatbotClose" title="Close"><i class="bi bi-x-lg"></i></button>
-  </div>
-
-  <div class="chatbot-quicktabs" id="chatbotQuickTabs">
-    <button type="button" class="chatbot-chip" data-query="Give me a summary of this account">
-      <i class="bi bi-clipboard-data"></i> Account Summary
-    </button>
-    <button type="button" class="chatbot-chip" data-query="Who are the key personas?">
-      <i class="bi bi-people"></i> Key Personas
-    </button>
-    <button type="button" class="chatbot-chip" data-query="What lines of business are active?">
-      <i class="bi bi-folder2-open"></i> Lines of Business
-    </button>
-    <button type="button" class="chatbot-chip" data-query="Give me an icebreaker">
-      <i class="bi bi-chat-quote"></i> Icebreaker
-    </button>
-  </div>
-
-  <div class="chatbot-messages" id="chatbotMessages"></div>
-
-  <div class="chatbot-suggestions" id="chatbotSuggestions">
-    <button type="button" class="chatbot-suggestion"
-            data-query="Summarize this account">Summarize this account</button>
-    <button type="button" class="chatbot-suggestion" data-query="List the personas">List the personas</button>
-    <button type="button" class="chatbot-suggestion"
-            data-query="Which LOB has the most contacts?">
-      Which LOB has the most contacts?
-    </button>
-  </div>
-
-  <form class="chatbot-input-row" id="chatbotForm">
-    <input type="text" id="chatbotInput" placeholder="Ask about the selected account..." autocomplete="off">
-    <button type="submit" class="chatbot-send" title="Send"><i class="bi bi-send-fill"></i></button>
-  </form>
-</div>
-
 <!-- --- Intelligence Feed Summary Modal --- -->
 <div class="feed-modal-backdrop d-none" id="feedModalBackdrop">
   <div class="feed-modal-card fade-in" id="feedModalCard">
@@ -853,200 +820,211 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="js/app.js?v=3.74.0"></script>
-<script src="js/chatbot.js?v=2.3.6"></script>
+<script src="js/app.js?v=3.83.0"></script>
 
 <!-- --- Enhanced Add New Account Modal --- -->
 <div class="modal fade" id="addAccountModal" tabindex="-1"
      aria-labelledby="addAccountModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered add-account-dialog" style="max-width:760px !important;">
+  <div class="modal-dialog modal-dialog-centered add-account-dialog" style="max-width:880px !important;">
     <div class="modal-content add-account-card">
-      <div class="modal-header add-account-header" style="background:linear-gradient(135deg,#4A3528,#8A6248);color:#F3E7DA;border-bottom:1px solid #B88A64;padding:18px 24px;">
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="width:40px;height:40px;border-radius:12px;
+      <div class="modal-header add-account-header" style="background:linear-gradient(135deg,#4A3528,#8A6248);color:#F3E7DA;border-bottom:1px solid #B88A64;padding:12px 20px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:34px;height:34px;border-radius:8px;
                       background:rgba(255,255,255,0.2);backdrop-filter:blur(4px);
                       display:flex;align-items:center;justify-content:center;
-                      color:#fff;font-size:1.25rem;">
+                      color:#fff;font-size:1.15rem;">
             <i class="bi bi-building-add"></i>
           </div>
           <div>
             <h5 class="modal-title" id="addAccountModalLabel"
-                style="margin:0;font-size:1.05rem;font-weight:700;color:#fff;">Add New Enterprise Account</h5>
-            <p style="margin:0;font-size:.74rem;color:rgba(255,255,255,0.88);">
+                style="margin:0;font-size:1.0rem;font-weight:700;color:#fff;">Add New Enterprise Account</h5>
+            <p style="margin:0;font-size:.70rem;color:rgba(255,255,255,0.85);">
               Autonomous multi-source intelligence harvesting &amp; lossless golden record DB merge
             </p>
           </div>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body" style="padding:24px 28px;">
+      <div class="modal-body" style="padding:14px 20px;">
         <form id="addAccountForm" autocomplete="off">
-          <div style="display:flex;flex-direction:column;gap:16px;">
-            <!-- Target Client Workspace Selector (§12.6) -->
-            <div class="add-field-group" id="newAccountClientGroup" style="background:#f8fafc;padding:12px 14px;border-radius:10px;border:1px solid #e2e8f0;">
-              <label for="newAccountClientSlug" class="add-field-label" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <span><i class="bi bi-buildings-fill" style="color:#F3E7DA;"></i> Assign to Client Workspace <span style="color:#ef4444;">*</span></span>
-                <span class="badge bg-primary-subtle text-primary" style="font-size:0.68rem;">Isolated Schema</span>
-              </label>
-              <select id="newAccountClientSlug" class="form-select form-select-sm" style="font-size:0.84rem;border-radius:8px;font-weight:600;border:1px solid #cbd5e1;background:#fff;">
-                <!-- Populated dynamically via ClientWorkspaceManager -->
-              </select>
-              <div style="font-size:.68rem;color:#64748b;margin-top:4px;">The account, its LOBs, personas, and audit runs will be stored exclusively in this client's schema.</div>
-            </div>
-            <div class="add-field-group">
-              <label for="newAccountName" class="add-field-label" style="display:flex;justify-content:space-between;align-items:center;">
-                <span><i class="bi bi-building"></i> Company Name <span style="color:#ef4444;">*</span></span>
-                <span id="accountCikBadge" class="badge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.7rem;display:none;">
-                  <i class="bi bi-patch-check-fill"></i> SEC CIK Autodetected
-                </span>
-              </label>
-              <input type="text" id="newAccountName" class="add-field-input"
-                     placeholder="e.g. BlackRock, Inc., JPMorgan Chase, Goldman Sachs" required
-                     autocomplete="off" data-lpignore="true">
-              <div style="font-size:.68rem;color:#64748b;">Official corporate identity as recognized by SEC, GLEIF &amp; market regulators</div>
-            </div>
-
-            <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:14px;">
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <!-- 2x2 Clean Proportional Inputs Grid -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;">
+              <!-- Row 1, Col 1: Company Name -->
               <div class="add-field-group">
-                <label for="newAccountDomain" class="add-field-label">
-                  <i class="bi bi-globe"></i> Primary Corporate Domain
-                  <span style="font-size:0.7rem;font-weight:400;color:#94a3b8;">(recommended)</span>
+                <label for="newAccountName" class="add-field-label" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;font-size:0.77rem;font-weight:700;">
+                  <span><i class="bi bi-building text-primary"></i> Company Name <span style="color:#ef4444;">*</span></span>
+                  <span id="accountCikBadge" class="badge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.67rem;display:none;padding:2px 6px;">
+                    <i class="bi bi-patch-check-fill"></i> SEC CIK Autodetected
+                  </span>
+                </label>
+                <input type="text" id="newAccountName" class="add-field-input"
+                       placeholder="e.g. BlackRock, Inc., JPMorgan Chase" required
+                       autocomplete="off" data-lpignore="true"
+                       style="height:34px;font-size:0.82rem;padding:5px 10px;border-radius:6px;"
+                       title="Official corporate identity as recognized by SEC, GLEIF &amp; market regulators">
+              </div>
+
+              <!-- Row 1, Col 2: Target Client Workspace Selector (§12.6) -->
+              <div class="add-field-group" id="newAccountClientGroup">
+                <label for="newAccountClientSlug" class="add-field-label" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;font-size:0.77rem;font-weight:700;">
+                  <span><i class="bi bi-buildings-fill" style="color:#8A6248;"></i> Assign to Workspace <span style="color:#ef4444;">*</span></span>
+                  <span class="badge" style="background:#F3E7DA;color:#4A3528;border:1px solid #D3C2B1;font-size:0.65rem;padding:2px 6px;">Isolated Schema</span>
+                </label>
+                <select id="newAccountClientSlug" class="form-select form-select-sm"
+                        style="height:34px;font-size:0.80rem;border-radius:6px;font-weight:600;border:1px solid #cbd5e1;background:#fff;padding:4px 10px;"
+                        title="The account, its LOBs, personas, and audit runs will be stored exclusively in this client's schema">
+                  <!-- Populated dynamically via ClientWorkspaceManager -->
+                </select>
+              </div>
+
+              <!-- Row 2, Col 1: Primary Corporate Domain -->
+              <div class="add-field-group">
+                <label for="newAccountDomain" class="add-field-label" style="margin-bottom:3px;font-size:0.77rem;font-weight:700;">
+                  <i class="bi bi-globe text-primary"></i> Primary Corporate Domain
+                  <span style="font-size:0.68rem;font-weight:400;color:#94a3b8;">(recommended)</span>
                 </label>
                 <input type="text" id="newAccountDomain" class="add-field-input"
                        placeholder="e.g. blackrock.com"
-                       autocomplete="off" data-lpignore="true">
-                <div style="font-size:.68rem;color:#64748b;">Used for deep web scraper &amp; sitelinks discovery</div>
+                       autocomplete="off" data-lpignore="true"
+                       style="height:34px;font-size:0.82rem;padding:5px 10px;border-radius:6px;"
+                       title="Used for deep web scraper &amp; sitelinks discovery">
               </div>
+
+              <!-- Row 2, Col 2: Stock Ticker -->
               <div class="add-field-group">
-                <label for="newAccountTicker" class="add-field-label">
-                  <i class="bi bi-graph-up-arrow"></i> Stock Ticker
-                  <span style="font-size:0.7rem;font-weight:400;color:#94a3b8;">(optional)</span>
+                <label for="newAccountTicker" class="add-field-label" style="margin-bottom:3px;font-size:0.77rem;font-weight:700;">
+                  <i class="bi bi-graph-up-arrow text-primary"></i> Stock Ticker
+                  <span style="font-size:0.68rem;font-weight:400;color:#94a3b8;">(optional)</span>
                 </label>
                 <input type="text" id="newAccountTicker" class="add-field-input"
                        placeholder="e.g. BLK, JPM, GS"
-                       autocomplete="off" data-lpignore="true" style="text-transform:uppercase;">
-                <div style="font-size:.68rem;color:#64748b;">Enables market filings &amp; news lookup</div>
+                       autocomplete="off" data-lpignore="true"
+                       style="text-transform:uppercase;height:34px;font-size:0.82rem;padding:5px 10px;border-radius:6px;"
+                       title="Enables market filings &amp; news lookup">
               </div>
             </div>
 
-            <!-- Autonomous Execution & Credit Gatekeeper Toggle Card -->
-            <div class="form-check form-switch" style="background:#f0fdf4;padding:14px 18px 14px 48px;border-radius:12px;border:1.5px solid #bbf7d0;margin-top:2px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-              <div style="flex:1;min-width:260px;">
-                <input class="form-check-input" type="checkbox" role="switch" id="autoEnrichAccountToggle" checked style="cursor:pointer;width:2.4em;height:1.25em;margin-left:-2.6em;">
-                <label class="form-check-label" for="autoEnrichAccountToggle" style="font-weight:800;font-size:0.88rem;color:#166534;cursor:pointer;display:flex;align-items:center;gap:6px;">
-                  <i class="bi bi-cpu-fill" style="color:#8A6248;"></i> Auto-Enrich &amp; Ingest (Autonomous Pipeline)
+            <!-- Catalog Reuse Verified Intelligence Callout (v2 Dual-Mode) -->
+            <div id="catalogReuseCallout" style="display:none;margin-top:2px;margin-bottom:2px;">
+              <!-- Dynamically populated when domain/CIK matches catalog -->
+            </div>
+
+            <!-- Autonomous Execution & Credit Gatekeeper Toggle Card (Compact Banner) -->
+            <div class="form-check form-switch" style="background:#f0fdf4;padding:7px 14px 7px 42px;border-radius:8px;border:1px solid #bbf7d0;margin-top:0;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input class="form-check-input" type="checkbox" role="switch" id="autoEnrichAccountToggle" checked style="cursor:pointer;width:2.2em;height:1.15em;margin-left:-2.4em;margin-top:0;">
+                <label class="form-check-label" for="autoEnrichAccountToggle" style="font-weight:800;font-size:0.80rem;color:#166534;cursor:pointer;display:inline-flex;align-items:center;gap:6px;margin:0;">
+                  <i class="bi bi-cpu-fill" style="color:#8A6248;"></i> Auto-Enrich &amp; Ingest <small style="font-size:0.71rem;font-weight:500;color:#15803d;margin-left:4px;">(11-Source harvest &bull; Self-healing retry &bull; Lossless golden record merge)</small>
                 </label>
-                <div style="font-size:0.72rem;color:#15803d;margin-top:2px;line-height:1.4;">
-                  11-Source harvest &bull; Self-healing retry &bull; Lossless golden record DB merge
-                </div>
               </div>
-              <span id="accountCreditSummaryBadge" class="badge" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:0.75rem;font-weight:700;padding:6px 12px;border-radius:8px;">
+              <span id="accountCreditSummaryBadge" class="badge" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:0.72rem;font-weight:700;padding:4px 9px;border-radius:6px;white-space:nowrap;">
                 <i class="bi bi-shield-check"></i> 5 Billable Credits &bull; Pre-Approved
               </span>
             </div>
 
-            <!-- Complete 11-Source Intelligence Harvest Matrix -->
-            <div id="accountExtractionControls" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;transition:all 0.25s ease;">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
-                <div style="font-size:0.78rem;font-weight:800;text-transform:uppercase;color:#334155;letter-spacing:0.04em;display:flex;align-items:center;gap:6px;">
-                  <i class="bi bi-sliders text-primary"></i> Complete 11-Source Intelligence Harvest Matrix
+            <!-- Complete 11-Source Intelligence Harvest Matrix (Sleek Single-View Layout) -->
+            <div id="accountExtractionControls" style="background:#FAF7F4;border:1px solid #D3C2B1;border-radius:10px;padding:10px 14px;transition:all 0.25s ease;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;">
+                <div style="font-size:0.74rem;font-weight:800;text-transform:uppercase;color:#4A3528;letter-spacing:0.04em;display:flex;align-items:center;gap:6px;">
+                  <i class="bi bi-sliders" style="color:#8A6248;"></i> Complete 11-Source Intelligence Harvest Matrix
                 </div>
-                <div style="display:flex;align-items:center;gap:6px;">
-                  <button type="button" class="btn btn-xs btn-outline-secondary matrix-preset-btn" id="btnSelectAllSources" style="font-size:0.68rem;padding:2px 8px;border-radius:4px;font-weight:600;">
+                <div style="display:flex;align-items:center;gap:5px;">
+                  <button type="button" class="btn btn-xs matrix-preset-btn" id="btnSelectAllSources" style="font-size:0.67rem;padding:2px 7px;border-radius:4px;font-weight:600;background:#fff;border:1px solid #D3C2B1;">
                     All (11)
                   </button>
-                  <button type="button" class="btn btn-xs btn-outline-secondary matrix-preset-btn" id="btnSelectFreeSources" style="font-size:0.68rem;padding:2px 8px;border-radius:4px;font-weight:600;">
+                  <button type="button" class="btn btn-xs matrix-preset-btn" id="btnSelectFreeSources" style="font-size:0.67rem;padding:2px 7px;border-radius:4px;font-weight:600;background:#fff;border:1px solid #D3C2B1;">
                     Free Only (6)
                   </button>
-                  <button type="button" class="btn btn-xs btn-outline-secondary matrix-preset-btn" id="btnSelectRecommendedSources" style="font-size:0.68rem;padding:2px 8px;border-radius:4px;font-weight:600;">
-                    Recommended
+                  <button type="button" class="btn btn-xs matrix-preset-btn" id="btnSelectRecommendedSources" style="font-size:0.67rem;padding:2px 7px;border-radius:4px;font-weight:700;background:#F3E7DA;border:1px solid #8A6248;color:#4A3528;">
+                    ★ Recommended (2 cr)
                   </button>
                 </div>
               </div>
 
-              <!-- Category 1: Free Regulatory & Public Registries (6 Sources) -->
-              <div style="font-size:0.7rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+              <!-- Category 1: Free Regulatory & Public Registries (6 Sources in 1 Row) -->
+              <div style="font-size:0.68rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;display:flex;align-items:center;gap:5px;">
                 <i class="bi bi-bank text-success"></i> Regulatory Filings &amp; Public Registries (6 Sources &bull; 0 Credits)
               </div>
-              <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-bottom:14px;">
-                <div class="chip-toggle active source-pill" data-source="sec_edgar" data-billable="false" title="SEC Form 10-K & Items 1/7/8 Regulatory Filings">
+              <div style="display:grid;grid-template-columns:repeat(6, 1fr);gap:6px;margin-bottom:8px;">
+                <div class="chip-toggle active source-pill" data-source="sec_edgar" data-billable="false" title="SEC Form 10-K &amp; Items 1/7/8 Regulatory Filings">
                   <i class="bi bi-check-circle-fill text-success"></i>
-                  <span>SEC 10-K &amp; Items (0 cr)</span>
+                  <span>SEC 10-K (0 cr)</span>
                 </div>
                 <div class="chip-toggle active source-pill" data-source="sec_ex21" data-billable="false" title="SEC Form 10-K Exhibit 21 Legal Subsidiaries Index">
                   <i class="bi bi-check-circle-fill text-success"></i>
-                  <span>Exhibit 21 Subs (0 cr)</span>
+                  <span>Exhibit 21 (0 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="gleif" data-billable="false" title="G20 GLEIF Corporate Ownership Tree & LEI">
+                <div class="chip-toggle active source-pill" data-source="gleif" data-billable="false" title="G20 GLEIF Corporate Ownership Tree &amp; LEI">
                   <i class="bi bi-check-circle-fill text-success"></i>
-                  <span>GLEIF LEI Tree (0 cr)</span>
+                  <span>GLEIF Tree (0 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="wikipedia" data-billable="false" title="Wikipedia & DBpedia Verified Entity Knowledge Profile">
+                <div class="chip-toggle active source-pill" data-source="wikipedia" data-billable="false" title="Wikipedia &amp; DBpedia Verified Entity Knowledge Profile">
                   <i class="bi bi-check-circle-fill text-success"></i>
-                  <span>Wikipedia Profile (0 cr)</span>
+                  <span>Wikipedia (0 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="patents" data-billable="false" title="USPTO & Google Patents Innovation & IP Indexer">
+                <div class="chip-toggle active source-pill" data-source="patents" data-billable="false" title="USPTO &amp; Google Patents Innovation &amp; IP Indexer">
                   <i class="bi bi-check-circle-fill text-success"></i>
-                  <span>Google Patents (0 cr)</span>
+                  <span>Patents (0 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="courtlistener" data-billable="false" title="Federal Court Dockets & Litigation RECAP">
+                <div class="chip-toggle active source-pill" data-source="courtlistener" data-billable="false" title="Federal Court Dockets &amp; Litigation RECAP">
                   <i class="bi bi-check-circle-fill text-success"></i>
                   <span>Court RECAP (0 cr)</span>
                 </div>
               </div>
 
-              <!-- Category 2: Metered Commercial Intelligence APIs (5 Sources) -->
-              <div style="font-size:0.7rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
-                <i class="bi bi-lightning-charge-fill text-warning"></i> Metered Commercial APIs &amp; Web Scrapers (5 Sources &bull; 5 Credits)
+              <!-- Category 2: Metered Commercial Intelligence APIs (5 Sources in 1 Row) -->
+              <div style="font-size:0.68rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;display:flex;align-items:center;gap:5px;">
+                <i class="bi bi-lightning-charge-fill text-warning"></i> Metered Commercial APIs &amp; Scrapers (5 Sources &bull; 5 Credits)
               </div>
-              <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-bottom:12px;">
-                <div class="chip-toggle active source-pill" data-source="serper" data-billable="true" title="Google Serper Domain & C-Suite Search (1 credit)">
+              <div style="display:grid;grid-template-columns:repeat(5, 1fr);gap:6px;margin-bottom:6px;">
+                <div class="chip-toggle active source-pill" data-source="serper" data-billable="true" title="Google Serper Domain &amp; C-Suite Search (1 credit)">
                   <i class="bi bi-check-circle-fill text-primary"></i>
                   <span>Google Serper (1 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="tavily" data-billable="true" title="Tavily Strategic Market & Competitor Search (1 credit)">
+                <div class="chip-toggle active source-pill" data-source="tavily" data-billable="true" title="Tavily Strategic Market &amp; Competitor Search (1 credit)">
                   <i class="bi bi-check-circle-fill text-primary"></i>
-                  <span>Tavily AI Search (1 cr)</span>
+                  <span>Tavily AI (1 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="firecrawl" data-billable="true" title="Firecrawl v1 Deep Sitelinks & Corporate Web Scraper (1 credit)">
+                <div class="chip-toggle active source-pill" data-source="firecrawl" data-billable="true" title="Firecrawl v1 Deep Sitelinks &amp; Corporate Web Scraper (1 credit)">
                   <i class="bi bi-check-circle-fill text-primary"></i>
-                  <span>Firecrawl Scraper (1 cr)</span>
+                  <span>Firecrawl (1 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="diffbot" data-billable="true" title="Diffbot Knowledge Graph & Organization Intelligence (1 credit)">
+                <div class="chip-toggle active source-pill" data-source="diffbot" data-billable="true" title="Diffbot Knowledge Graph &amp; Organization Intelligence (1 credit)">
                   <i class="bi bi-check-circle-fill text-primary"></i>
                   <span>Diffbot Graph (1 cr)</span>
                 </div>
-                <div class="chip-toggle active source-pill" data-source="finnhub" data-billable="true" title="Finnhub & FMP Market Watchlist Intelligence (1 credit)">
+                <div class="chip-toggle active source-pill" data-source="finnhub" data-billable="true" title="Finnhub &amp; FMP Market Watchlist Intelligence (1 credit)">
                   <i class="bi bi-check-circle-fill text-primary"></i>
                   <span>Finnhub &amp; FMP (1 cr)</span>
                 </div>
               </div>
 
-              <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px dashed #cbd5e1;padding-top:10px;font-size:0.74rem;color:#64748b;flex-wrap:wrap;gap:8px;">
-                <span><i class="bi bi-shield-check text-success"></i> Gatekeeper Status: <strong class="text-success">Approved (Metered Rate Card)</strong></span>
-                <span><i class="bi bi-arrow-repeat text-primary"></i> Self-Healing Micro-Retries: <strong class="text-primary">Enabled (2.5s backoff)</strong></span>
+              <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px dashed #D3C2B1;padding-top:6px;font-size:0.71rem;color:#64748b;flex-wrap:wrap;gap:6px;">
+                <span><i class="bi bi-shield-check text-success"></i> Gatekeeper: <strong class="text-success">Approved (Metered Rate Card)</strong></span>
+                <span><i class="bi bi-arrow-repeat text-primary"></i> Micro-Retries: <strong class="text-primary">Enabled (2.5s backoff)</strong></span>
               </div>
             </div>
           </div>
         </form>
       </div>
       <div class="modal-footer"
-           style="border-top:1px solid #e2e8f0;padding:16px 28px;gap:10px;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;">
+           style="border-top:1px solid #D3C2B1;padding:10px 20px;gap:8px;background:#FAF7F4;display:flex;justify-content:space-between;align-items:center;">
         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"
-                style="border-radius:8px;padding:9px 20px;font-weight:600;">Cancel</button>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <button type="button" id="btnModalSaveStubOnly" class="btn btn-sm btn-outline-primary" style="border-radius:8px;padding:9px 20px;font-weight:600;display:inline-flex;align-items:center;gap:6px;">
+                style="border-radius:6px;padding:6px 16px;font-weight:600;font-size:0.80rem;">Cancel</button>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button type="button" id="btnModalSaveStubOnly" class="btn btn-sm btn-outline-primary" style="border-radius:6px;padding:6px 16px;font-weight:600;font-size:0.80rem;display:inline-flex;align-items:center;gap:6px;">
             <i class="bi bi-database"></i> Save Stub Only (0 cr)
           </button>
           <button type="button" id="startNewAccountBtn"
-                  style="border-radius:8px;font-size:.86rem;padding:9px 26px;
+                  style="border-radius:6px;font-size:.82rem;padding:6px 20px;
                          background:linear-gradient(135deg,#8A6248,#4A3528);color:#fff;
-                         border:none;font-weight:700;display:inline-flex;align-items:center;gap:8px;cursor:pointer;
-                         box-shadow:0 4px 14px rgba(14,165,233,0.35);">
-            <i class="bi bi-play-fill" style="font-size:1.1rem;"></i>
+                         border:none;font-weight:700;display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+                         box-shadow:0 3px 10px rgba(43,36,31,0.25);">
+            <i class="bi bi-play-fill" style="font-size:1.05rem;"></i>
             <span id="startAccountBtnText">Start Autonomous Pipeline</span>
-            <span class="badge bg-white text-primary" id="modalBtnCreditBadge" style="font-size:0.75rem;padding:3px 7px;border-radius:6px;">5 cr</span>
-            <i class="bi bi-arrow-right" style="font-size:0.85rem;"></i>
+            <span class="badge bg-white text-primary" id="modalBtnCreditBadge" style="font-size:0.72rem;padding:2px 6px;border-radius:4px;">5 cr</span>
+            <i class="bi bi-arrow-right" style="font-size:0.80rem;"></i>
           </button>
         </div>
       </div>
@@ -1859,60 +1837,70 @@
 <!-- Enterprise Batch Multi-Enrichment Console Modal -->
 <div id="batchEnrichmentBackdrop" class="batch-console-backdrop d-none"></div>
 <div id="batchEnrichmentModal" class="batch-console-modal d-none" aria-modal="true" role="dialog">
-  <!-- Console Header -->
+  <!-- Console Header (2-Tier Enterprise Architecture) -->
   <div class="batch-console-header">
-    <div class="batch-console-header-left">
-      <div class="batch-console-icon" id="batchConsoleHeaderIcon">
-        <i class="bi bi-people-fill"></i>
-      </div>
-      <div>
-        <div class="batch-console-title-row">
+    <!-- Top Tier: Workspace Context, Title, Entity Switcher, Window Controls -->
+    <div class="batch-header-top-row">
+      <div class="batch-header-title-block">
+        <div class="batch-console-icon" id="batchConsoleHeaderIcon">
+          <i class="bi bi-people-fill"></i>
+        </div>
+        <div class="batch-title-text-group">
           <h2 class="batch-console-title" id="batchConsoleTitle">Batch People Enrichment Console</h2>
+          <span class="badge" id="batchActiveWorkspaceBadge" style="background:#f3e7da;color:#4a3528;border:1px solid #d3c2b1;font-size:0.72rem;padding:3px 9px;border-radius:6px;font-weight:700;display:inline-flex;align-items:center;gap:5px;">
+            <i class="bi bi-building-gear text-primary"></i> <span id="batchWorkspaceNameText">Workspace: StradIT India</span>
+          </span>
         </div>
-        <div class="batch-company-meta">
-          <label for="batchCompanySelector" class="batch-company-label">
-            <i class="bi bi-building-check text-primary"></i> Target Enterprise:
-          </label>
-          <div class="batch-company-select-wrap">
-            <select id="batchCompanySelector" class="batch-company-dropdown" aria-label="Select Target Enterprise Account">
-              <!-- Dynamically populated with accounts -->
-            </select>
-            <i class="bi bi-chevron-down batch-dropdown-caret"></i>
-          </div>
-        </div>
+      </div>
+
+      <!-- 3-Way Entity Switcher (Accounts / LOBs / People) -->
+      <div class="batch-entity-switcher" id="batchEntitySwitcher" role="tablist">
+        <button type="button" class="batch-entity-tab" data-entity="account" title="Switch to Accounts Console">
+          <i class="bi bi-building"></i> <span>Accounts</span> <span class="batch-entity-badge" id="batchEntityAccountBadge">1</span>
+        </button>
+        <button type="button" class="batch-entity-tab" data-entity="lob" title="Switch to Lines of Business Console">
+          <i class="bi bi-diagram-3-fill"></i> <span>LOBs</span> <span class="batch-entity-badge" id="batchEntityLobBadge">0</span>
+        </button>
+        <button type="button" class="batch-entity-tab active" data-entity="persona" title="Switch to People / Executive Directory Console">
+          <i class="bi bi-people-fill"></i> <span>People</span> <span class="batch-entity-badge" id="batchEntityPersonaBadge">0</span>
+        </button>
+      </div>
+
+      <!-- Window Actions -->
+      <div class="batch-console-header-right">
+        <button type="button" class="batch-console-btn-icon" id="batchConsoleFullscreenBtn" title="Toggle Fullscreen">
+          <i class="bi bi-arrows-fullscreen"></i>
+        </button>
+        <button type="button" class="batch-close-btn" id="closeBatchConsoleBtn" title="Close Console (Esc)">
+          <i class="bi bi-x-lg"></i>
+        </button>
       </div>
     </div>
 
-    <!-- 3-Way Entity Switcher (Accounts / LOBs / People) - Switch without closing! -->
-    <div class="batch-entity-switcher" id="batchEntitySwitcher" role="tablist">
-      <button type="button" class="batch-entity-tab" data-entity="account" title="Switch to Accounts Console">
-        <i class="bi bi-building"></i> <span>Accounts</span> <span class="batch-entity-badge" id="batchEntityAccountBadge">1</span>
-      </button>
-      <button type="button" class="batch-entity-tab" data-entity="lob" title="Switch to Lines of Business Console">
-        <i class="bi bi-diagram-3-fill"></i> <span>LOBs</span> <span class="batch-entity-badge" id="batchEntityLobBadge">0</span>
-      </button>
-      <button type="button" class="batch-entity-tab active" data-entity="persona" title="Switch to People / Executive Directory Console">
-        <i class="bi bi-people-fill"></i> <span>People</span> <span class="batch-entity-badge" id="batchEntityPersonaBadge">0</span>
-      </button>
-    </div>
+    <!-- Sub-Header Tier: Navigation Tabs & Target Scope Ribbon -->
+    <div class="batch-header-sub-row">
+      <!-- Dual Screen Navigation Tabs -->
+      <div class="batch-screen-tabs">
+        <button type="button" class="batch-screen-tab active" id="batchTabDirectoryBtn">
+          <i class="bi bi-people-fill"></i> Directory &amp; Batch Queue
+        </button>
+        <button type="button" class="batch-screen-tab" id="batchTabHistoryBtn">
+          <i class="bi bi-clock-history"></i> Recent Runs History
+        </button>
+      </div>
 
-    <!-- Dual Screen Navigation Tabs (from Screenshot 1 & 3) -->
-    <div class="batch-screen-tabs">
-      <button type="button" class="batch-screen-tab active" id="batchTabDirectoryBtn">
-        <i class="bi bi-people-fill"></i> Directory &amp; Batch Queue
-      </button>
-      <button type="button" class="batch-screen-tab" id="batchTabHistoryBtn">
-        <i class="bi bi-clock-history"></i> Recent Runs History
-      </button>
-    </div>
-
-    <div class="batch-console-header-right">
-      <button type="button" class="batch-console-btn-icon" id="batchConsoleFullscreenBtn" title="Toggle Fullscreen">
-        <i class="bi bi-arrows-fullscreen"></i>
-      </button>
-      <button type="button" class="batch-close-btn" id="closeBatchConsoleBtn" title="Close Console (Esc)">
-        <i class="bi bi-x-lg"></i>
-      </button>
+      <!-- Target Enterprise Scope Selector -->
+      <div class="batch-company-meta">
+        <label for="batchCompanySelector" class="batch-company-label">
+          <i class="bi bi-building-check text-primary"></i> Target Enterprise:
+        </label>
+        <div class="batch-company-select-wrap">
+          <select id="batchCompanySelector" class="batch-company-dropdown" aria-label="Select Target Enterprise Account">
+            <!-- Dynamically populated with accounts -->
+          </select>
+          <i class="bi bi-chevron-down batch-dropdown-caret"></i>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2006,10 +1994,10 @@
 
       <div class="batch-action-right">
         <!-- Metered Rate Card & Batch Est Quota Indicator -->
-        <div class="batch-credits-indicator" id="batchCreditsIndicator" style="display:inline-flex;align-items:center;gap:8px;background:#f8fafc;padding:6px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:0.78rem;font-weight:600;" title="Live Metered Gateway Billing: Rate per unit and estimated consumption for this batch">
+        <div class="batch-credits-indicator" id="batchCreditsIndicator" style="display:inline-flex;align-items:center;gap:6px;background:#FAF7F4;padding:4px 10px;border-radius:6px;border:1px solid #D3C2B1;font-size:0.75rem;font-weight:600;white-space:nowrap;flex-shrink:0;" title="Metered rate and estimated credits for selected batch">
           <span class="text-muted"><i class="bi bi-cpu-fill text-primary"></i> Metered Rate: <strong id="batchMeteredRateText" class="text-dark">4 cr / LOB</strong></span>
-          <span id="batchReqCreditsBadge" class="badge bg-primary-subtle text-primary border border-primary-subtle ms-1 d-none" style="font-size:0.72rem;padding:4px 8px;">
-            <i class="bi bi-lightning-charge"></i> Est: <strong id="batchReqCreditsVal">0</strong> cr
+          <span id="batchReqCreditsBadge" class="badge ms-1 d-none" style="background:#F3E7DA;color:#8A6248;border:1px solid #D3C2B1;font-size:0.72rem;padding:3px 7px;">
+            <i class="bi bi-lightning-charge-fill"></i> Est: <strong id="batchReqCreditsVal">0</strong> cr
           </span>
         </div>
         <button type="button" class="btn-batch-action btn-batch-autonomous d-none" id="batchRunAutonomousPhasedBtn"
@@ -2756,6 +2744,190 @@
   </div>
 </div>
 
+<!-- Modal: Platform Account Library & Verified Intelligence Sharing -->
+<div class="modal fade" id="catalogLibraryModal" tabindex="-1" aria-labelledby="catalogLibraryModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:1240px;width:95vw;">
+    <div class="modal-content" style="border-radius:16px;border:1px solid rgba(184,138,100,0.3);box-shadow:0 25px 60px -15px rgba(43,36,31,0.35);overflow:hidden;">
+      <div class="modal-header" style="background:linear-gradient(135deg,#2B241F 0%, #4A3528 60%, #8A6248 100%);color:#F3E7DA;border-bottom:1px solid #B88A64;padding:16px 24px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:44px;height:44px;border-radius:12px;background:rgba(243,231,218,0.12);border:1px solid rgba(243,231,218,0.25);display:flex;align-items:center;justify-content:center;font-size:1.35rem;">
+            <i class="bi bi-collection-fill text-warning"></i>
+          </div>
+          <div>
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="modal-title mb-0" id="catalogLibraryModalLabel" style="font-weight:700;font-size:1.15rem;letter-spacing:-0.01em;">Platform Account Library</h5>
+              <span class="badge" style="background:rgba(243,231,218,0.18);color:#F3E7DA;border:1px solid rgba(243,231,218,0.3);font-size:0.68rem;font-weight:700;text-transform:uppercase;">Verified Intelligence</span>
+            </div>
+            <div style="font-size:0.75rem;color:#D3C2B1;margin-top:2px;">Canonical enterprise entity catalog &bull; Cross-tenant sharing &bull; Quality gates &bull; Exact rollback</div>
+          </div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body" style="padding:20px 24px;background:#f8fafc;max-height:78vh;overflow-y:auto;">
+        <!-- Navigation Tabs -->
+        <ul class="nav nav-pills mb-3" id="catalogTabNav" style="gap:8px;">
+          <li class="nav-item">
+            <button class="nav-link active" id="tabCatalogCompaniesBtn" type="button" style="font-size:0.82rem;font-weight:700;padding:7px 16px;border-radius:8px;">
+              <i class="bi bi-buildings-fill me-1"></i> Canonical Companies (<span id="catalogCompaniesCount">0</span>)
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" id="tabCatalogRequestsBtn" type="button" style="font-size:0.82rem;font-weight:700;padding:7px 16px;border-radius:8px;">
+              <i class="bi bi-clock-history me-1"></i> Reuse Requests <span class="badge bg-danger ms-1" id="catalogPendingRequestsBadge" style="display:none;font-size:0.68rem;">0</span>
+            </button>
+          </li>
+        </ul>
+
+        <!-- Tab 1: Canonical Companies Content -->
+        <div id="catalogCompaniesPanel">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div class="input-group input-group-sm" style="max-width:380px;">
+              <span class="input-group-text bg-white border-end-0 text-muted"><i class="bi bi-search"></i></span>
+              <input type="text" id="catalogCompanySearchInput" class="form-control border-start-0 bg-white" placeholder="Search display name, legal name, or CIK/LEI...">
+            </div>
+            <div class="d-flex gap-2 align-items-center">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRefreshCatalogCompanies" style="border-radius:8px;font-size:0.8rem;padding:6px 14px;">
+                <i class="bi bi-arrow-clockwise me-1"></i> Refresh Catalog
+              </button>
+            </div>
+          </div>
+
+          <div class="card border-0 shadow-sm overflow-hidden" style="border-radius:12px;background:#fff;border:1px solid #e2e8f0;">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0" style="font-size:0.82rem;">
+                <thead class="table-light">
+                  <tr>
+                    <th style="width:28%;padding-left:18px;">Canonical Entity</th>
+                    <th style="width:20%;">Snapshot Quality</th>
+                    <th style="width:16%;">Freshness</th>
+                    <th style="width:22%;">Tenant Holders</th>
+                    <th style="width:14%;text-align:right;padding-right:18px;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="catalogCompaniesTableBody">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Reuse Requests Content -->
+        <div id="catalogRequestsPanel" style="display:none;">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div class="d-flex gap-2">
+              <select id="catalogRequestStatusFilter" class="form-select form-select-sm" style="font-size:0.8rem;border-radius:8px;max-width:200px;">
+                <option value="">All Statuses</option>
+                <option value="pending_approval" selected>Pending Approval Only</option>
+                <option value="done">Completed / Hydrated</option>
+                <option value="rejected">Rejected</option>
+                <option value="failed">Failed</option>
+              </select>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRefreshCatalogRequests" style="border-radius:8px;font-size:0.8rem;padding:6px 14px;">
+              <i class="bi bi-arrow-clockwise me-1"></i> Refresh Requests
+            </button>
+          </div>
+
+          <div class="card border-0 shadow-sm overflow-hidden" style="border-radius:12px;background:#fff;border:1px solid #e2e8f0;">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0" style="font-size:0.82rem;">
+                <thead class="table-light">
+                  <tr>
+                    <th style="width:10%;padding-left:18px;">Req ID</th>
+                    <th style="width:22%;">Target Client</th>
+                    <th style="width:22%;">Company / Snapshot</th>
+                    <th style="width:16%;">Mode / Fee</th>
+                    <th style="width:16%;">Status</th>
+                    <th style="width:14%;text-align:right;padding-right:18px;">Decision</th>
+                  </tr>
+                </thead>
+                <tbody id="catalogRequestsTableBody">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:12px 24px;">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;padding:7px 18px;">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Assign Catalog Account to Client Workspace (Direct Drawer) -->
+<div class="modal fade" id="catalogAssignModal" tabindex="-1" aria-labelledby="catalogAssignModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:540px;">
+    <div class="modal-content" style="border-radius:14px;border:none;box-shadow:0 20px 40px rgba(0,0,0,0.18);overflow:hidden;">
+      <div class="modal-header" style="background:linear-gradient(135deg,#4A3528,#8A6248);color:#F3E7DA;border-bottom:1px solid #B88A64;padding:16px 20px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:1.15rem;">
+            <i class="bi bi-box-arrow-in-right text-warning"></i>
+          </div>
+          <div>
+            <h5 class="modal-title mb-0" id="catalogAssignModalLabel" style="font-weight:700;font-size:1.05rem;">Assign Intelligence to Workspace</h5>
+            <div style="font-size:0.72rem;color:#D3C2B1;">Super Admin direct hydration drawer</div>
+          </div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body" style="padding:20px 24px;background:#fff;">
+        <div id="catalogAssignPreviewBox" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:16px;">
+          <!-- Dynamically populated snapshot preview -->
+        </div>
+
+        <div class="mb-3">
+          <label for="catalogAssignTargetSlug" class="form-label" style="font-size:0.8rem;font-weight:700;color:#334155;">
+            Target Client Workspace <span style="color:#ef4444;">*</span>
+          </label>
+          <select id="catalogAssignTargetSlug" class="form-select form-select-sm" style="font-size:0.84rem;border-radius:8px;font-weight:600;">
+            <!-- Populated dynamically with active clients -->
+          </select>
+          <div style="font-size:0.68rem;color:#64748b;margin-top:4px;">Golden record will be hydrated exclusively into this isolated schema.</div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" style="font-size:0.8rem;font-weight:700;color:#334155;">Hydration Mode</label>
+          <div class="d-flex gap-3">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="catalogAssignMode" id="assignModeInstant" value="instant" checked>
+              <label class="form-check-label" for="assignModeInstant" style="font-size:0.8rem;font-weight:600;">
+                Instant Hydration (0 Fee)
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="catalogAssignMode" id="assignModeRefresh" value="refresh">
+              <label class="form-check-label" for="assignModeRefresh" style="font-size:0.8rem;font-weight:600;">
+                Hydrate + Queue Refresh
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-2">
+          <label for="catalogAssignReason" class="form-label" style="font-size:0.8rem;font-weight:700;color:#334155;">
+            Assignment Reason (Audit Trail)
+          </label>
+          <input type="text" id="catalogAssignReason" class="form-control form-control-sm" placeholder="e.g. Platform direct enterprise onboarding..." style="font-size:0.8rem;border-radius:8px;">
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:12px 24px;display:flex;justify-content:space-between;">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;padding:7px 18px;">Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary" id="btnConfirmCatalogAssign" style="border-radius:8px;padding:7px 22px;font-weight:700;background:linear-gradient(135deg,#8A6248,#4A3528);border:none;">
+          <i class="bi bi-check2-circle me-1"></i> Confirm &amp; Hydrate
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Modal: Adjust API Credits & Budget -->
 <div class="modal fade" id="adjustCreditsModal" tabindex="-1" aria-labelledby="adjustCreditsModalLabel" aria-hidden="true">

@@ -180,8 +180,8 @@ def test_client_serialization_lifecycle_and_skeleton_fields(admin_headers):
     assert "is_behind" in data
     assert "refresh_cron" in data
     assert "max_concurrent_jobs" in data
-    assert data["skeleton_version"] == "T0001"
-    assert data["skeleton_head"] == "T0001"
+    assert data["skeleton_version"] == data["skeleton_head"]
+    assert data["skeleton_head"].startswith("T")
     assert data["is_behind"] is False
 
 

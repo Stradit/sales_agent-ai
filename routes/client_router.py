@@ -284,7 +284,7 @@ def get_clients_overview_kpis(current_user: User = Depends(auth.get_current_user
 
 
 @client_router.get("/platform-users", tags=["Clients & Multi-Tenancy"])
-def list_platform_users(current_user: User = Depends(auth.require_role("super_admin", "client_admin"))):
+def list_platform_users(current_user: User = Depends(auth.require_permission("client:manage"))):
     """Lists registered platform users for assignment to client workspaces."""
     session = SessionLocal()
     try:
@@ -463,7 +463,7 @@ def list_client_users(
 def add_client_user(
     slug: str,
     body: ClientUserAddRequest,
-    current_user: User = Depends(auth.require_role("super_admin", "client_admin")),
+    current_user: User = Depends(auth.require_permission("client:manage")),
 ):
     """Assigns user access to this client with specified role."""
     session = SessionLocal()
@@ -504,7 +504,7 @@ def add_client_user(
 def remove_client_user(
     slug: str,
     user_id: int,
-    current_user: User = Depends(auth.require_role("super_admin", "client_admin")),
+    current_user: User = Depends(auth.require_permission("client:manage")),
 ):
     """Revokes user access from this client organization."""
     session = SessionLocal()
@@ -572,7 +572,7 @@ def list_client_accounts(
 def add_client_account(
     slug: str,
     body: ClientAccountCreateRequest,
-    current_user: User = Depends(auth.require_role("super_admin", "client_admin")),
+    current_user: User = Depends(auth.require_permission("client:manage")),
 ):
     """Enrolls and creates a new enterprise account inside this client's schema.
     Enforces the client's max_accounts quota limit."""
@@ -663,7 +663,7 @@ def add_client_account(
 def remove_client_account(
     slug: str,
     account_id: int,
-    current_user: User = Depends(auth.require_role("super_admin", "client_admin")),
+    current_user: User = Depends(auth.require_permission("client:manage")),
 ):
     """Removes an enterprise account and child hierarchies from this client's schema."""
     session = SessionLocal()
@@ -691,7 +691,7 @@ def remove_client_account(
 def list_client_user_account_access(
     slug: str,
     user_id: int,
-    current_user: User = Depends(auth.require_role("super_admin", "client_admin")),
+    current_user: User = Depends(auth.require_permission("client:manage")),
 ):
     """Lists all accounts in this client and whether this specific user has access."""
     session = SessionLocal()
@@ -733,7 +733,7 @@ def grant_client_user_account_access(
     slug: str,
     user_id: int,
     account_id: int,
-    current_user: User = Depends(auth.require_role("super_admin", "client_admin")),
+    current_user: User = Depends(auth.require_permission("client:manage")),
 ):
     """Grants a user access to an account inside this client's schema."""
     session = SessionLocal()
@@ -770,7 +770,7 @@ def revoke_client_user_account_access(
     slug: str,
     user_id: int,
     account_id: int,
-    current_user: User = Depends(auth.require_role("super_admin", "client_admin")),
+    current_user: User = Depends(auth.require_permission("client:manage")),
 ):
     """Revokes a user's access to an account inside this client's schema."""
     session = SessionLocal()
@@ -1003,7 +1003,7 @@ def update_client_user_role(
     slug: str,
     user_id: int,
     body: ClientUserUpdateRequest,
-    current_user: User = Depends(auth.require_role("super_admin", "client_admin")),
+    current_user: User = Depends(auth.require_permission("client:manage")),
 ):
     """Updates assigned user role for this client organization."""
     session = SessionLocal()

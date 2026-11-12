@@ -54,7 +54,7 @@ from serializers.account_serializer import slugify
 
 from sqlalchemy import func as sa_func, or_, and_, func, text as sql_text
 from sqlalchemy.orm import load_only, selectinload
-from db.connection import get_session
+from db.connection import get_session, SessionLocal
 from db.models import (
     Account,
     Lob,
@@ -1486,7 +1486,9 @@ if FASTAPI_AVAILABLE:
     def auto_single_account_pipeline(
         account_id: int,
         client: Client = Depends(get_current_client),
-        current_user: User = Depends(auth.get_current_user),
+        current_user: User = Depends(auth.require_permission("auto_pipeline:run")),
+        editor: User = Depends(auth.require_editor),
+        account_guard: User = Depends(auth.require_account_access),
     ):
         """Account-level auto pipeline execution with explicit tenant client_slug (§10.5)."""
         engine = AccountAutomationEngine(
@@ -2314,6 +2316,7 @@ if FASTAPI_AVAILABLE:
             "is_manually_verified": bool(getattr(acct, "is_manually_verified", False)),
             "manually_verified_at": acct.manually_verified_at.isoformat() if getattr(acct, "manually_verified_at", None) else None,
             "osint_feed_manifest": getattr(acct, "osint_feed_manifest", None) or {},
+            "origin": getattr(acct, "_origin", None),
             "_is_full_loaded": True,
         }
 
@@ -2478,6 +2481,7 @@ if FASTAPI_AVAILABLE:
             "lobs": [],
             "personas": [],
             "_is_full_loaded": False,
+            "origin": getattr(acct, "_origin", None),
             "multi_source_intelligence": msi_summary,
             "organisational_hierarchy_tree": oht_summary,
             "extracted_at": acct.extracted_at.isoformat() if acct.extracted_at else None,
@@ -2577,7 +2581,22 @@ if FASTAPI_AVAILABLE:
             except Exception as _e:
                 print(f"[RunTimestamps] Non-fatal pre-fetch error: {_e}")
 
+            account_origins = {}
+            try:
+                origins_raw = session.execute(text("SELECT account_id, origin_type, snapshot_id, snapshot_version, hydrated_at FROM account_origin")).fetchall()
+                for o in origins_raw:
+                    account_origins[o[0]] = {
+                        "origin_type": o[1],
+                        "snapshot_id": o[2],
+                        "snapshot_version": o[3],
+                        "hydrated_at": o[4].isoformat() if o[4] else None,
+                    }
+            except Exception:
+                pass
+
             accounts = query.order_by(Account.id.desc()).all()
+            for acct in accounts:
+                setattr(acct, "_origin", account_origins.get(acct.id))
             serializer = _serialize_account_full if full else _serialize_account_summary
             return {"accounts": [serializer(acct) for acct in accounts]}
 
@@ -2651,6 +2670,22 @@ if FASTAPI_AVAILABLE:
                             latest_persona_runs[str(r[1]).strip().lower()] = iso
             except Exception as _e:
                 print(f"[RunTimestamps] Non-fatal pre-fetch error: {_e}")
+
+            try:
+                origin_row = session.execute(
+                    text("SELECT origin_type, snapshot_id, snapshot_version, hydrated_at FROM account_origin WHERE account_id = :aid"),
+                    {"aid": acct.id}
+                ).fetchone()
+                if origin_row:
+                    setattr(acct, "_origin", {
+                        "origin_type": origin_row[0],
+                        "snapshot_id": origin_row[1],
+                        "snapshot_version": origin_row[2],
+                        "hydrated_at": origin_row[3].isoformat() if origin_row[3] else None,
+                    })
+            except Exception:
+                pass
+
             return _serialize_account_full(acct, latest_lob_runs, latest_persona_runs)
         finally:
             session.close()
@@ -2834,12 +2869,26 @@ if FASTAPI_AVAILABLE:
         )
 
     @lobs_router.post("/auto-pipeline")
-    def auto_lob_pipeline(req: LobAutoPipelineRequest):
+    def auto_lob_pipeline(
+        req: LobAutoPipelineRequest,
+        client: Client = Depends(get_current_client),
+        current_user: User = Depends(auth.require_permission("auto_pipeline:run")),
+        editor: User = Depends(auth.require_editor),
+    ):
         """End-to-end background phased LOB automation pipeline.
         Pre-flight -> Stub Discovery -> Partitioning -> Phased Sequential Execution -> Deferred Self-Healing.
         Returns job_id immediately (200ms).
         """
-        active_slug = get_client_slug() or DEFAULT_CLIENT_SLUG
+        active_slug = client.slug
+        if auth.AUTH_ENFORCED and getattr(current_user, "role", None) not in ("super_admin", "client_admin"):
+            from db.connection import SessionLocal
+            check_sess = SessionLocal()
+            try:
+                if not auth._has_account(check_sess, current_user, req.account_id):
+                    raise HTTPException(status_code=403, detail="You do not have access to this account")
+            finally:
+                check_sess.close()
+
         preflight = LobAutomationEngine.preflight_lob_check(
             account_id=req.account_id,
             company_name=req.company_name,
@@ -2898,7 +2947,9 @@ if FASTAPI_AVAILABLE:
     def auto_single_lob_pipeline(
         lob_id: int,
         client: Client = Depends(get_current_client),
-        current_user: User = Depends(auth.get_current_user),
+        current_user: User = Depends(auth.require_permission("auto_pipeline:run")),
+        editor: User = Depends(auth.require_editor),
+        lob_guard: User = Depends(auth.require_lob_account_access),
     ):
         """Single-LOB auto pipeline execution with explicit tenant client_slug (§10.5)."""
         engine = LobAutomationEngine(
@@ -3850,12 +3901,26 @@ if FASTAPI_AVAILABLE:
         )
 
     @personas_router.post("/auto-pipeline")
-    def auto_persona_pipeline(req: PersonaAutoPipelineRequest):
+    def auto_persona_pipeline(
+        req: PersonaAutoPipelineRequest,
+        client: Client = Depends(get_current_client),
+        current_user: User = Depends(auth.require_permission("auto_pipeline:run")),
+        editor: User = Depends(auth.require_editor),
+    ):
         """End-to-end background phased Persona automation pipeline.
         Pre-flight -> Stub Discovery -> Partitioning -> Phased Execution (with dynamic priority re-queueing of failures) -> Deferred Self-Healing.
         Returns job_id immediately (200ms).
         """
-        active_slug = get_client_slug() or DEFAULT_CLIENT_SLUG
+        active_slug = client.slug
+        if auth.AUTH_ENFORCED and getattr(current_user, "role", None) not in ("super_admin", "client_admin"):
+            from db.connection import SessionLocal
+            check_sess = SessionLocal()
+            try:
+                if not auth._has_account(check_sess, current_user, req.account_id):
+                    raise HTTPException(status_code=403, detail="You do not have access to this account")
+            finally:
+                check_sess.close()
+
         preflight = PersonaAutomationEngine.preflight_persona_check(
             account_id=req.account_id,
             company_name=req.company_name,
@@ -3913,7 +3978,9 @@ if FASTAPI_AVAILABLE:
     def auto_single_persona_pipeline(
         persona_id: int,
         client: Client = Depends(get_current_client),
-        current_user: User = Depends(auth.get_current_user),
+        current_user: User = Depends(auth.require_permission("auto_pipeline:run")),
+        editor: User = Depends(auth.require_editor),
+        persona_guard: User = Depends(auth.require_persona_account_access),
     ):
         """Single-Persona auto pipeline execution with explicit tenant client_slug (§10.5)."""
         engine = PersonaAutomationEngine(
@@ -5004,16 +5071,28 @@ if FASTAPI_AVAILABLE:
 
     @pipeline_router.get("/runs")
     def list_pipeline_runs(
+        request: Request,
         limit: int = 50,
         company_name: Optional[str] = Query(None),
         exclude_dumps: bool = Query(True),
+        client_slug: Optional[str] = Query(None),
     ):
         """Lists recent execution runs from PostgreSQL pipeline_runs table.
+        Scoped to the active client workspace schema.
         By default, filters out individual entity micro-dumps so real stage runs are clearly visible.
         """
         from db.models import PipelineRun
-        session = get_session()
-        try:
+        from db.routing import scoped_client_session, get_client_slug, DEFAULT_CLIENT_SLUG
+        raw_slug = (
+            request.headers.get("X-Client-Slug")
+            or client_slug
+            or get_client_slug()
+            or DEFAULT_CLIENT_SLUG
+        )
+        if raw_slug.startswith("client_"):
+            raw_slug = raw_slug[7:]
+
+        with scoped_client_session(raw_slug) as session:
             query = session.query(PipelineRun)
             if company_name:
                 comp_clean = str(company_name).strip()
@@ -5063,8 +5142,6 @@ if FASTAPI_AVAILABLE:
                     "error_message": r.error_message,
                 })
             return {"status": "success", "runs": run_list}
-        finally:
-            session.close()
 
     # ── Background Job Status Polling ─────────────────────────────────────────
     @pipeline_router.get("/job/{job_id}", tags=["4. Pipeline Orchestration"])
@@ -5220,6 +5297,10 @@ if FASTAPI_AVAILABLE:
     # Clients & Multi-tenancy Router
     from routes.client_router import client_router
     app.include_router(client_router)
+
+    # Verified Intelligence Catalog Router
+    from routes.catalog_router import catalog_router
+    app.include_router(catalog_router)
 
     # Sales Copilot (RAG chat) — own module, own tables; see apps/sales_copilot/README.md
     from apps.sales_copilot.api import install as install_copilot
@@ -5913,6 +5994,7 @@ if FASTAPI_AVAILABLE:
         request: Request,
         client_id: Optional[str] = Query(None),
         client_slug: Optional[str] = Query(None),
+        current_user: User = Depends(auth.get_current_user),
     ):
         """
         Returns live enterprise pipeline overview telemetry, 24-hour health, 5-stage funnel,
@@ -5936,25 +6018,47 @@ if FASTAPI_AVAILABLE:
         )
         if raw_slug == "stradit":
             raw_slug = "stradit_india"
-        active_slug = raw_slug.replace("client_", "").strip().lower()
+        active_slug = auth.normalize_client_slug(raw_slug)
 
         # 2. Query public.clients for client intelligence & available workspace list
+        client_name = active_slug.replace("_", " ").title()
+        client_legal = client_name
+        plan_tier = "standard"
+        max_accts = 20
+        credits_tot = 100000
+        credits_usd = 0
+
         pub_session = SessionLocal()
-        client_record = None
         available_clients = []
         try:
+            if auth.AUTH_ENFORCED and getattr(current_user, "role", None) != "super_admin":
+                if not auth.user_has_client_access(pub_session, current_user, active_slug):
+                    raise HTTPException(status_code=403, detail="Access denied to this client organization.")
+
             client_record = pub_session.query(Client).filter_by(slug=active_slug).first()
             if not client_record and active_slug != DEFAULT_CLIENT_SLUG:
                 active_slug = DEFAULT_CLIENT_SLUG
                 client_record = pub_session.query(Client).filter_by(slug=active_slug).first()
 
+            if client_record:
+                client_name = client_record.name or client_name
+                client_legal = client_record.legal_name or client_name
+                plan_tier = client_record.plan_tier or "standard"
+                max_accts = client_record.max_accounts or 20
+                credits_tot = client_record.api_credits_total or 100000
+                credits_usd = client_record.api_credits_used or 0
+
             all_clients = pub_session.query(Client).filter_by(is_active=True).order_by(Client.id.asc()).all()
             for c in all_clients:
+                if auth.AUTH_ENFORCED and getattr(current_user, "role", None) != "super_admin":
+                    if not auth.user_has_client_access(pub_session, current_user, c.slug):
+                        continue
                 acct_cnt = 0
                 try:
                     acct_cnt = pub_session.execute(text(f'SELECT count(*) FROM "{c.schema_name}"."accounts"')).scalar() or 0
                 except Exception:
-                    pass
+                    pub_session.rollback()
+                    acct_cnt = 0
                 available_clients.append({
                     "id": c.id,
                     "name": c.name,
@@ -6182,13 +6286,6 @@ if FASTAPI_AVAILABLE:
 
                 needs_attention.sort(key=lambda x: (x["status"] == "degraded", x["details"]), reverse=True)
 
-                client_name = client_record.name if client_record else active_slug.replace("_", " ").title()
-                client_legal = client_record.legal_name if client_record else client_name
-                plan_tier = client_record.plan_tier if client_record else "standard"
-                max_accts = client_record.max_accounts if client_record else 20
-                credits_tot = client_record.api_credits_total if client_record else 100000
-                credits_usd = client_record.api_credits_used if client_record else 0
-
                 # Summary of target accounts registered for this client
                 accounts_query = session.query(Account).order_by(Account.id.asc()).all()
                 accounts_summary = []
@@ -6273,6 +6370,7 @@ if FASTAPI_AVAILABLE:
         limit: int = Query(50, ge=1, le=500),
         offset: int = Query(0, ge=0),
         client_slug: Optional[str] = Query(None),
+        current_user: User = Depends(auth.get_current_user),
     ):
         """Returns paginated executive personas with real verified channels badges from PostgreSQL scoped to client workspace."""
         from db.models import Persona, Account
@@ -6286,7 +6384,18 @@ if FASTAPI_AVAILABLE:
         )
         if raw_slug == "stradit":
             raw_slug = "stradit_india"
-        active_slug = raw_slug.replace("client_", "").strip().lower()
+        active_slug = auth.normalize_client_slug(raw_slug)
+
+        if auth.AUTH_ENFORCED and getattr(current_user, "role", None) != "super_admin":
+            from db.connection import SessionLocal
+            check_sess = SessionLocal()
+            try:
+                if not auth.user_has_client_access(check_sess, current_user, active_slug):
+                    raise HTTPException(status_code=403, detail="Access denied to this client organization.")
+                if account_id and not auth._has_account(check_sess, current_user, account_id):
+                    raise HTTPException(status_code=403, detail="You do not have access to this account")
+            finally:
+                check_sess.close()
 
         with scoped_client_session(active_slug) as session:
             try:
@@ -6300,6 +6409,14 @@ if FASTAPI_AVAILABLE:
 
                 if acct_id:
                     query = query.filter(Persona.account_id == acct_id)
+                elif auth.AUTH_ENFORCED and getattr(current_user, "role", None) not in ("super_admin", "client_admin"):
+                    from db.connection import SessionLocal
+                    acc_sess = SessionLocal()
+                    try:
+                        acc_ids = auth.get_accessible_account_ids(acc_sess, current_user.id)
+                        query = query.filter(Persona.account_id.in_(acc_ids))
+                    finally:
+                        acc_sess.close()
                 if search_str:
                     s = f"%{search_str.strip()}%"
                     query = query.filter(
@@ -6358,6 +6475,7 @@ if FASTAPI_AVAILABLE:
         status: Optional[str] = Query(None),
         search: Optional[str] = Query(None),
         client_slug: Optional[str] = Query(None),
+        current_user: User = Depends(auth.get_current_user),
     ):
         """Returns enterprise accounts and backlog targets with pipeline tracking and coverage metrics scoped to client workspace."""
         from db.models import Account, Lob, Persona, PipelineRun
@@ -6371,7 +6489,19 @@ if FASTAPI_AVAILABLE:
         )
         if raw_slug == "stradit":
             raw_slug = "stradit_india"
-        active_slug = raw_slug.replace("client_", "").strip().lower()
+        active_slug = auth.normalize_client_slug(raw_slug)
+
+        accessible_ids = None
+        if auth.AUTH_ENFORCED and getattr(current_user, "role", None) != "super_admin":
+            from db.connection import SessionLocal
+            check_sess = SessionLocal()
+            try:
+                if not auth.user_has_client_access(check_sess, current_user, active_slug):
+                    raise HTTPException(status_code=403, detail="Access denied to this client organization.")
+                if getattr(current_user, "role", None) != "client_admin":
+                    accessible_ids = set(auth.get_accessible_account_ids(check_sess, current_user.id))
+            finally:
+                check_sess.close()
 
         with scoped_client_session(active_slug) as session:
             try:
@@ -6379,6 +6509,8 @@ if FASTAPI_AVAILABLE:
                 items = []
                 search_str = search if isinstance(search, str) and search.strip() else None
                 for a in accounts:
+                    if accessible_ids is not None and a.id not in accessible_ids:
+                        continue
                     if search_str and search_str.lower() not in (a.display_name or "").lower():
                         continue
 

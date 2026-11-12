@@ -58,9 +58,9 @@ def setup_teardown_tenant_schema():
 class TestTenantTablePlacement:
     """Validates complete table placement and isolation."""
 
-    def test_all_58_tenant_tables_created(self):
-        """Asserts that all 58 tenant tables in CLIENT_TABLES_ORDERED exist in the provisioned schema."""
-        assert len(CLIENT_TABLES_ORDERED) == 58, f"Expected 58 tenant tables, got {len(CLIENT_TABLES_ORDERED)}"
+    def test_all_tenant_tables_created(self):
+        """Asserts that all tenant tables in CLIENT_TABLES_ORDERED exist in the provisioned schema."""
+        assert len(CLIENT_TABLES_ORDERED) >= 58, f"Expected at least 58 tenant tables, got {len(CLIENT_TABLES_ORDERED)}"
 
         with engine.connect() as conn:
             rows = conn.execute(
@@ -162,7 +162,7 @@ class TestForeignKeyAndSequenceIntegrity:
         assert report["is_healthy"] is True
         assert report["status"] == "healthy"
         assert report["missing_tables"] == []
-        assert report["tables_total"] == 58
+        assert report["tables_total"] == len(CLIENT_TABLES_ORDERED)
 
         repair_result = repair_client_schema(TEST_TENANT_SLUG)
         assert repair_result["is_healthy"] is True

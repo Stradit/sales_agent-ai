@@ -69,9 +69,9 @@ class TestTenantManifest:
     def test_manifest_loads_canonical_contract(self):
         manifest = TenantManifest.load()
         assert manifest is not None
-        assert manifest.skeleton_version == "T0001"
+        assert manifest.skeleton_version == TenantManifest.get_skeleton_version()
         assert len(manifest.tables) == len(CLIENT_TABLES_ORDERED)
-        assert len(manifest.tables) == 58
+        assert len(manifest.tables) == manifest.total_tables
 
         # Verify key domain tables are present in the manifest
         for critical_tbl in ["accounts", "personas", "pipeline_runs", "targets", "business_lines"]:
@@ -87,8 +87,8 @@ class TestTenantManifest:
         report = TenantManifest.verify_schema_against_manifest(engine, TEST_SCHEMA_CLEAN)
         assert report["is_compliant"] is True
         assert report["drift_detected"] is False
-        assert report["tables_found"] == 58
-        assert report["tables_expected"] == 58
+        assert report["tables_found"] == len(CLIENT_TABLES_ORDERED)
+        assert report["tables_expected"] == len(CLIENT_TABLES_ORDERED)
         assert len(report["missing_tables"]) == 0
         assert len(report["pk_mismatches"]) == 0
         assert len(report["fk_mismatches"]) == 0
@@ -105,7 +105,7 @@ class TestTenantManifest:
         assert report["is_compliant"] is False
         assert report["drift_detected"] is True
         assert "business_lines" in report["missing_tables"]
-        assert report["tables_found"] == 57
+        assert report["tables_found"] == len(CLIENT_TABLES_ORDERED) - 1
 
 
 class TestClientLifecycleModel:
@@ -117,7 +117,7 @@ class TestClientLifecycleModel:
             client = session.query(Client).filter_by(slug=TEST_SLUG_CLEAN).first()
             assert client is not None
             assert client.status == "active"
-            assert client.skeleton_version == "T0001"
+            assert client.skeleton_version == TenantManifest.get_skeleton_version()
             assert client.provisioned_at is not None
             assert client.refresh_cron == "0 0 * * *"
             assert client.max_concurrent_jobs == 3
@@ -148,9 +148,9 @@ class TestSchemaProvisioningLifecycle:
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO public.clients (slug, name, schema_name, status, skeleton_version, is_active)
-                VALUES (:s, :n, :sc, 'pending', 'T0001', true)
+                VALUES (:s, :n, :sc, 'pending', :ver, true)
                 ON CONFLICT (slug) DO UPDATE SET status = 'pending', last_error = NULL
-            """), {"s": TEST_SLUG_FAIL, "n": "Test Fail Client", "sc": TEST_SCHEMA_FAIL})
+            """), {"s": TEST_SLUG_FAIL, "n": "Test Fail Client", "sc": TEST_SCHEMA_FAIL, "ver": TenantManifest.get_skeleton_version()})
 
         # Simulate failure during table provisioning
         with patch.object(SchemaProvisioningService, "_ensure_tenant_foreign_keys", side_effect=RuntimeError("Simulated FK failure")):

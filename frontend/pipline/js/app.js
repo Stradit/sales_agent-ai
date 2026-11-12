@@ -169,13 +169,19 @@ $(function () {
   // ─── Mobile Sidebar ─────────────────────────────────────────────────────
   function closeSidebar() {
     $("#sidebar").removeClass("open");
-    $("#sidebarOverlay").removeClass("open");
+    $("#sidebarOverlay").removeClass("open active");
   }
-  $("#sidebarToggle").on("click", function () {
+  $(document).on("click", "#sidebarToggle, #mobileSidebarToggle", function (e) {
+    e.stopPropagation();
     $("#sidebar").toggleClass("open");
-    $("#sidebarOverlay").toggleClass("open");
+    $("#sidebarOverlay").toggleClass("open active");
   });
-  $("#sidebarOverlay").on("click", closeSidebar);
+  $(document).on("click", "#sidebarOverlay, .sidebar-close-btn", closeSidebar);
+  $(document).on("click", "#accountList .account-item", function () {
+    if (window.innerWidth <= 768) {
+      closeSidebar();
+    }
+  });
 
   // ─── Fetch Live Data ──────────────────────────────────────────────────
   // Same-origin by default — this page is served by the API server itself
@@ -229,16 +235,6 @@ $(function () {
     }
   }
 
-  // Exposes live selection state to the chatbot widget (chatbot.js), which
-  // runs outside this closure and has no other way to read these variables.
-  window.getSalesAssistantContext = function () {
-    return {
-      accounts: MOCK_DATA.accounts || [],
-      account: activeAccount,
-      lob: activeLob,
-      persona: activePersona,
-    };
-  };
   // ══════════════════════════════════════════════════════════════════
   // ENTERPRISE VIEW ROUTING & HARD-REFRESH STATE PERSISTENCE ENGINE
   // ══════════════════════════════════════════════════════════════════
@@ -468,6 +464,7 @@ $(function () {
         const meRes = await fetch(`${API_BASE}/api/auth/me`, { headers, credentials: 'include' });
         if (meRes.ok) {
           const me = await meRes.json();
+          window.currentUser = me;
           if (me && me.role !== 'super_admin' && me.has_pipeline_access === false) {
             $("#accountList").html(
               `<div style="padding:16px 12px;font-size:.84rem;color:#e11d48;line-height:1.5">` +
@@ -3106,8 +3103,747 @@ $(function () {
 
   window.ClientWorkspaceManager = ClientWorkspaceManager;
 
+  // ══════════════════════════════════════════════════════════════════
+  // PLATFORM CATALOG & CROSS-TENANT INTELLIGENCE SHARING MANAGERS
+  // ══════════════════════════════════════════════════════════════════
+
+  const PlatformCatalogManager = {
+    currentTab: "companies",
+    companies: [],
+    requests: [],
+    selectedSnapshotForAssign: null,
+
+    init() {
+      const self = this;
+      $(document).on("click", "#topbarAccountLibraryBtn", function (e) {
+        e.preventDefault();
+        self.openModal();
+      });
+
+      $(document).on("click", "#tabCatalogCompaniesBtn", function () {
+        self.currentTab = "companies";
+        $("#tabCatalogCompaniesBtn").addClass("active");
+        $("#tabCatalogRequestsBtn").removeClass("active");
+        $("#catalogCompaniesPanel").show();
+        $("#catalogRequestsPanel").hide();
+      });
+
+      $(document).on("click", "#tabCatalogRequestsBtn", function () {
+        self.currentTab = "requests";
+        $("#tabCatalogRequestsBtn").addClass("active");
+        $("#tabCatalogCompaniesBtn").removeClass("active");
+        $("#catalogRequestsPanel").show();
+        $("#catalogCompaniesPanel").hide();
+        self.loadRequests();
+      });
+
+      $(document).on("input", "#catalogCompanySearchInput", function () {
+        self.renderCompaniesTable();
+      });
+
+      $(document).on("change", "#catalogRequestStatusFilter", function () {
+        self.loadRequests();
+      });
+
+      $(document).on("click", "#btnRefreshCatalogCompanies", function () {
+        self.loadCompanies();
+      });
+
+      $(document).on("click", "#btnRefreshCatalogRequests", function () {
+        self.loadRequests();
+      });
+
+      // Assign drawer triggers
+      $(document).on("click", ".btn-catalog-assign", function () {
+        const snapId = $(this).data("snapshot-id");
+        const compName = $(this).data("company-name");
+        const key = $(this).data("canonical-key");
+        const lobs = $(this).data("lobs");
+        const personas = $(this).data("personas");
+        self.openAssignModal({ snapId, compName, key, lobs, personas });
+      });
+
+      $(document).on("click", "#btnConfirmCatalogAssign", function () {
+        self.confirmAssign();
+      });
+
+      // Approve / Reject reuse request triggers
+      $(document).on("click", ".btn-catalog-approve", function () {
+        const reqId = $(this).data("request-id");
+        self.approveRequest(reqId, $(this));
+      });
+
+      $(document).on("click", ".btn-catalog-reject", function () {
+        const reqId = $(this).data("request-id");
+        self.rejectRequest(reqId, $(this));
+      });
+    },
+
+    async openModal() {
+      const modalEl = document.getElementById("catalogLibraryModal");
+      if (!modalEl) return;
+      const modal = new bootstrap.Modal(modalEl);
+      modal.show();
+
+      this.loadCompanies();
+      this.loadRequests();
+    },
+
+    async loadCompanies() {
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/catalog/companies?limit=100`, { headers, credentials: "include" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        this.companies = data.companies || [];
+        $("#catalogCompaniesCount").text(this.companies.length);
+        this.renderCompaniesTable();
+      } catch (err) {
+        console.warn("Failed to load catalog companies:", err);
+        $("#catalogCompaniesTableBody").html(`
+          <tr><td colspan="5" class="text-center py-4 text-danger"><i class="bi bi-exclamation-circle me-1"></i> Failed to load catalog companies: ${esc(err.message)}</td></tr>
+        `);
+      }
+    },
+
+    renderCompaniesTable() {
+      const search = ($("#catalogCompanySearchInput").val() || "").trim().toLowerCase();
+      const filtered = this.companies.filter(c => {
+        if (!search) return true;
+        return (c.display_name && c.display_name.toLowerCase().includes(search)) ||
+               (c.legal_name && c.legal_name.toLowerCase().includes(search)) ||
+               (c.canonical_key && c.canonical_key.toLowerCase().includes(search));
+      });
+
+      if (filtered.length === 0) {
+        $("#catalogCompaniesTableBody").html(`
+          <tr><td colspan="5" class="text-center py-4 text-muted"><i class="bi bi-inbox me-1"></i> No matching canonical companies in catalog</td></tr>
+        `);
+        return;
+      }
+
+      const rows = filtered.map(c => {
+        const counts = c.counts || {};
+        const score = Math.round(c.quality_score || 0);
+        const grade = c.quality_grade || "—";
+        const ageDays = c.age_days !== null && c.age_days !== undefined ? c.age_days : "—";
+        const ageText = ageDays === "—" ? "—" : (ageDays === 0 ? "today" : `${ageDays}d ago`);
+
+        let freshBadge = `<span class="badge bg-secondary">Unknown</span>`;
+        if (c.freshness === "fresh") freshBadge = `<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Fresh (${ageText})</span>`;
+        else if (c.freshness === "stale") freshBadge = `<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Stale (${ageText})</span>`;
+        else if (c.freshness === "old") freshBadge = `<span class="badge bg-secondary"><i class="bi bi-archive me-1"></i>Old (${ageText})</span>`;
+
+        const holders = (c.holder_clients || []).map(h =>
+          `<span class="badge bg-light text-dark border me-1 mb-1" style="font-size:0.7rem;"><i class="bi bi-building me-1 text-primary"></i>${esc(h.name || h.slug)}</span>`
+        ).join("") || `<span class="text-muted" style="font-size:0.72rem;">None</span>`;
+
+        return `
+          <tr>
+            <td style="padding-left:18px;">
+              <div style="font-weight:700;color:#1e293b;font-size:0.86rem;">${esc(c.display_name || c.legal_name || 'Company')}</div>
+              <div style="font-size:0.7rem;color:#64748b;font-family:monospace;">${esc(c.canonical_key || '')}</div>
+            </td>
+            <td>
+              <div style="font-weight:700;color:#059669;font-size:0.84rem;">${score}% (Grade ${grade})</div>
+              <div style="font-size:0.7rem;color:#64748b;">${counts.lobs || 0} LOBs &bull; ${counts.personas || 0} Personas</div>
+            </td>
+            <td>${freshBadge}</td>
+            <td><div style="display:flex;flex-wrap:wrap;max-width:240px;">${holders}</div></td>
+            <td style="text-align:right;padding-right:18px;">
+              ${c.snapshot_id ? `
+                <button type="button" class="btn btn-xs btn-primary btn-catalog-assign"
+                        data-snapshot-id="${c.snapshot_id}"
+                        data-company-name="${esc(c.display_name || c.legal_name || '')}"
+                        data-canonical-key="${esc(c.canonical_key || '')}"
+                        data-lobs="${counts.lobs || 0}"
+                        data-personas="${counts.personas || 0}"
+                        style="font-size:0.74rem;font-weight:600;background:linear-gradient(135deg,#8A6248,#4A3528);border:none;border-radius:6px;padding:4px 10px;">
+                  <i class="bi bi-box-arrow-in-right me-1"></i> Assign...
+                </button>
+              ` : `<span class="text-muted" style="font-size:0.72rem;">No Snapshot</span>`}
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      $("#catalogCompaniesTableBody").html(rows);
+    },
+
+    async loadRequests() {
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const status = $("#catalogRequestStatusFilter").val() || "";
+      const url = status ? `${API_BASE}/api/catalog/requests?status=${encodeURIComponent(status)}` : `${API_BASE}/api/catalog/requests`;
+
+      try {
+        const res = await fetch(url, { headers, credentials: "include" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        this.requests = data.requests || [];
+
+        const pendingCount = this.requests.filter(r => r.status === "pending_approval").length;
+        if (pendingCount > 0) {
+          $("#catalogPendingRequestsBadge").text(pendingCount).show();
+        } else {
+          $("#catalogPendingRequestsBadge").hide();
+        }
+
+        this.renderRequestsTable();
+      } catch (err) {
+        console.warn("Failed to load catalog requests:", err);
+        $("#catalogRequestsTableBody").html(`
+          <tr><td colspan="6" class="text-center py-4 text-danger"><i class="bi bi-exclamation-circle me-1"></i> Failed to load requests: ${esc(err.message)}</td></tr>
+        `);
+      }
+    },
+
+    renderRequestsTable() {
+      if (this.requests.length === 0) {
+        $("#catalogRequestsTableBody").html(`
+          <tr><td colspan="6" class="text-center py-4 text-muted"><i class="bi bi-inbox me-1"></i> No reuse requests match the filter</td></tr>
+        `);
+        return;
+      }
+
+      const rows = this.requests.map(r => {
+        let statusBadge = `<span class="badge bg-secondary">${esc(r.status)}</span>`;
+        if (r.status === "pending_approval") statusBadge = `<span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Pending Review</span>`;
+        else if (r.status === "done") statusBadge = `<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Approved & Hydrated</span>`;
+        else if (r.status === "rejected") statusBadge = `<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Rejected</span>`;
+        else if (r.status === "failed") statusBadge = `<span class="badge bg-dark"><i class="bi bi-exclamation-triangle me-1"></i>Failed</span>`;
+
+        return `
+          <tr>
+            <td style="padding-left:18px;font-family:monospace;font-weight:700;">#${r.request_id}</td>
+            <td>
+              <div style="font-weight:700;color:#1e293b;">${esc(r.client_name || r.client_slug)}</div>
+              <div style="font-size:0.7rem;color:#64748b;font-family:monospace;">${esc(r.client_slug)}</div>
+            </td>
+            <td>
+              <div style="font-weight:700;color:#4A3528;">${esc(r.company_name || 'Enterprise Account')}</div>
+              <div style="font-size:0.7rem;color:#64748b;">Snapshot v${r.snapshot_version || 1} &bull; ${esc(r.canonical_key || '')}</div>
+            </td>
+            <td>
+              <span class="badge bg-light text-dark border" style="font-size:0.72rem;">${esc(r.mode)}</span>
+              <span class="badge bg-light text-primary border ms-1" style="font-size:0.72rem;">${r.fee_credits || 1} cr</span>
+              ${r.reason ? `<div style="font-size:0.68rem;color:#64748b;margin-top:2px;">"${esc(r.reason)}"</div>` : ''}
+            </td>
+            <td>${statusBadge}</td>
+            <td style="text-align:right;padding-right:18px;">
+              ${r.status === "pending_approval" ? `
+                <div class="d-flex gap-1 justify-content-end">
+                  <button type="button" class="btn btn-xs btn-success btn-catalog-approve" data-request-id="${r.request_id}" style="font-size:0.72rem;padding:3px 8px;border-radius:6px;font-weight:700;">
+                    <i class="bi bi-check-lg"></i> Approve
+                  </button>
+                  <button type="button" class="btn btn-xs btn-outline-danger btn-catalog-reject" data-request-id="${r.request_id}" style="font-size:0.72rem;padding:3px 8px;border-radius:6px;font-weight:700;">
+                    <i class="bi bi-x-lg"></i> Reject
+                  </button>
+                </div>
+              ` : `<span class="text-muted" style="font-size:0.72rem;">Decided</span>`}
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      $("#catalogRequestsTableBody").html(rows);
+    },
+
+    openAssignModal(data) {
+      this.selectedSnapshotForAssign = data;
+      $("#catalogAssignPreviewBox").html(`
+        <div style="font-weight:700;color:#1e293b;font-size:0.9rem;">${esc(data.compName)}</div>
+        <div style="font-size:0.72rem;color:#64748b;font-family:monospace;margin-bottom:6px;">${esc(data.key)} &bull; Snapshot #${data.snapId}</div>
+        <div style="font-size:0.75rem;color:#059669;font-weight:600;">
+          Includes ${data.lobs} Lines of Business and ${data.personas} Personas
+        </div>
+      `);
+
+      const $sel = $("#catalogAssignTargetSlug").empty();
+      const clients = (typeof ClientWorkspaceManager !== "undefined" && ClientWorkspaceManager.clients) ? ClientWorkspaceManager.clients : [];
+      clients.filter(c => c.status === "active").forEach(c => {
+        $sel.append(`<option value="${esc(c.slug)}">${esc(c.name)} (${esc(c.slug)})</option>`);
+      });
+
+      $("#catalogAssignReason").val("");
+      const modalEl = document.getElementById("catalogAssignModal");
+      if (modalEl) new bootstrap.Modal(modalEl).show();
+    },
+
+    async confirmAssign() {
+      if (!this.selectedSnapshotForAssign) return;
+      const targetSlug = $("#catalogAssignTargetSlug").val();
+      if (!targetSlug) {
+        alert("Please select a target client workspace.");
+        return;
+      }
+
+      const mode = $("input[name='catalogAssignMode']:checked").val() || "instant";
+      const reason = ($("#catalogAssignReason").val() || "").trim();
+      const $btn = $("#btnConfirmCatalogAssign");
+      const origText = $btn.html();
+      $btn.html('<i class="bi bi-hourglass-split me-1"></i> Hydrating...').prop("disabled", true);
+
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/catalog/assign`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            snapshot_id: this.selectedSnapshotForAssign.snapId,
+            target_client_slug: targetSlug,
+            mode: mode,
+            reason: reason || `Super admin direct assignment to ${targetSlug}`,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+
+        const modalEl = document.getElementById("catalogAssignModal");
+        if (modalEl) bootstrap.Modal.getInstance(modalEl).hide();
+
+        showNotification(`✅ Successfully assigned <strong>${esc(this.selectedSnapshotForAssign.compName)}</strong> to workspace <strong>${esc(targetSlug)}</strong>!`, "success", 6000);
+        this.loadCompanies();
+      } catch (err) {
+        console.error("Assign failed:", err);
+        showNotification(`❌ Direct assignment failed: ${esc(err.message)}`, "error");
+      } finally {
+        $btn.html(origText).prop("disabled", false);
+      }
+    },
+
+    async approveRequest(requestId, $btn) {
+      const origText = $btn.html();
+      $btn.html('<i class="bi bi-hourglass-split"></i>').prop("disabled", true);
+
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/catalog/requests/${requestId}/approve`, {
+          method: "POST",
+          headers,
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+
+        showNotification(`✅ Request #${requestId} approved and successfully hydrated into target workspace!`, "success", 5000);
+        this.loadRequests();
+        this.loadCompanies();
+      } catch (err) {
+        console.error("Approve failed:", err);
+        showNotification(`❌ Approval failed: ${esc(err.message)}`, "error");
+        $btn.html(origText).prop("disabled", false);
+      }
+    },
+
+    async rejectRequest(requestId, $btn) {
+      const reason = prompt("Enter optional rejection reason:") || "Rejected by administrator";
+      const origText = $btn.html();
+      $btn.html('<i class="bi bi-hourglass-split"></i>').prop("disabled", true);
+
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/catalog/requests/${requestId}/reject`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ reason }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+
+        showNotification(`ℹ️ Request #${requestId} rejected.`, "info", 5000);
+        this.loadRequests();
+      } catch (err) {
+        console.error("Reject failed:", err);
+        showNotification(`❌ Rejection failed: ${esc(err.message)}`, "error");
+        $btn.html(origText).prop("disabled", false);
+      }
+    }
+  };
+
+  const CatalogReuseManager = {
+    currentResult: null,
+    debounceTimer: null,
+    selectedMode: "instant",
+
+    reset() {
+      this.currentResult = null;
+      this.selectedMode = "instant";
+      if (this.debounceTimer) clearTimeout(this.debounceTimer);
+      $("#catalogReuseCallout").empty().hide();
+      this.updateModalButtons();
+    },
+
+    handleDomainInput(domainValue) {
+      if (this.debounceTimer) clearTimeout(this.debounceTimer);
+      const raw = (domainValue || "").trim();
+      const cleanDomain = raw.replace(/^https?:\/\//i, "").split("/")[0].split("?")[0].replace(/^www\./i, "").trim().toLowerCase();
+      const isDomain = cleanDomain.includes(".") && cleanDomain.length >= 4 && !cleanDomain.endsWith(".");
+      const isCik = /^\d{1,10}$/.test(raw) && raw.length >= 4;
+
+      if (!isDomain && !isCik) {
+        this.reset();
+        return;
+      }
+
+      this.debounceTimer = setTimeout(() => {
+        this.checkCatalog(isDomain ? cleanDomain : raw);
+      }, 300);
+    },
+
+    async checkCatalog(identifier) {
+      const chosenSlug = $("#newAccountClientSlug").val() || (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : "stradit_india");
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (chosenSlug) headers['X-Client-Slug'] = chosenSlug;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/catalog/reuse-check?identifier=${encodeURIComponent(identifier)}`, {
+          headers,
+          credentials: "include"
+        });
+        if (!res.ok) {
+          this.reset();
+          return;
+        }
+        const data = await res.json();
+        if (!data.available) {
+          this.reset();
+          return;
+        }
+
+        this.currentResult = data;
+        if (data.default_action === "use_verified") {
+          this.selectedMode = "instant";
+        } else if (data.default_action === "use_verified_refresh") {
+          this.selectedMode = "refresh";
+        } else {
+          this.selectedMode = "fresh";
+        }
+
+        this.renderCallout(data);
+        this.updateModalButtons();
+      } catch (err) {
+        console.warn("[CatalogReuse] Check failed:", err);
+        this.reset();
+      }
+    },
+
+    renderCallout(data) {
+      const $callout = $("#catalogReuseCallout");
+      if (!data || !data.available) {
+        $callout.empty().hide();
+        return;
+      }
+
+      const counts = data.counts || {};
+      const lobs = counts.lobs || 0;
+      const personas = counts.personas || 0;
+      const score = Math.round(data.quality_score || 85);
+      const grade = data.quality_grade || "A";
+      const ageDays = data.age_days !== undefined ? data.age_days : 0;
+      const ageText = ageDays === 0 ? "today" : `${ageDays}d ago`;
+
+      let freshnessBadge = `<span class="badge bg-success" style="font-size:0.7rem;"><i class="bi bi-clock-history me-1"></i>Fresh (${ageText})</span>`;
+      if (data.freshness === "stale") {
+        freshnessBadge = `<span class="badge bg-warning text-dark" style="font-size:0.7rem;"><i class="bi bi-hourglass-split me-1"></i>Stale (${ageText})</span>`;
+      } else if (data.freshness === "old") {
+        freshnessBadge = `<span class="badge bg-secondary" style="font-size:0.7rem;"><i class="bi bi-archive me-1"></i>Old (${ageText})</span>`;
+      }
+
+      const isApprovalRequired = !!data.requires_approval;
+      const isSuper = (window.currentUser && window.currentUser.role === 'super_admin');
+      const needsApprovalNotice = isApprovalRequired && !isSuper;
+
+      let alreadyExistsAlert = "";
+      if (data.already_exists) {
+        alreadyExistsAlert = `
+          <div style="background:#fef2f2;border:1px solid #fee2e2;border-radius:8px;padding:8px 12px;margin-bottom:10px;">
+            <div style="font-weight:700;font-size:0.75rem;color:#991b1b;display:flex;align-items:center;gap:6px;">
+              <i class="bi bi-exclamation-triangle-fill"></i> Account Already In Workspace
+            </div>
+            <div style="font-size:0.7rem;color:#b91c1c;margin-top:2px;">
+              This company already exists in the selected client workspace. Direct re-import is disabled.
+            </div>
+          </div>
+        `;
+      }
+
+      let approvalBox = "";
+      if (needsApprovalNotice && !data.already_exists) {
+        approvalBox = `
+          <div style="background:#fffbeb;border:1px solid #fef3c7;border-radius:8px;padding:8px 12px;margin-top:10px;">
+            <div style="font-weight:700;font-size:0.75rem;color:#92400e;display:flex;align-items:center;gap:6px;">
+              <i class="bi bi-shield-lock-fill"></i> Platform Administrator Approval Required
+            </div>
+            <div style="font-size:0.7rem;color:#b45309;margin-top:2px;">
+              Your workspace policy requires admin sign-off for catalog account reuse.
+            </div>
+            <div style="margin-top:6px;">
+              <input type="text" id="catalogRequestReasonInput" class="form-control form-control-sm"
+                     placeholder="Enter business reason (e.g. Enterprise Q4 Account Expansion)..."
+                     style="font-size:0.75rem;border-radius:6px;border:1px solid #fde68a;">
+            </div>
+          </div>
+        `;
+      }
+
+      $callout.html(`
+        <div style="background:linear-gradient(135deg, #fdf8f4 0%, #f7eee7 100%);border:1.5px solid #d4b59e;border-radius:12px;padding:14px 16px;box-shadow:0 3px 10px rgba(74,53,40,0.06);">
+          ${alreadyExistsAlert}
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="badge" style="background:#8A6248;color:#fff;font-size:0.76rem;font-weight:700;padding:4px 8px;border-radius:6px;">
+                <i class="bi bi-patch-check-fill me-1"></i>Verified Intelligence Available
+              </span>
+              ${freshnessBadge}
+            </div>
+            <span class="badge" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:0.72rem;font-weight:700;padding:4px 8px;border-radius:6px;">
+              <i class="bi bi-piggy-bank-fill me-1"></i>~${data.estimated_credits_saved || 4300} Credits Saved
+            </span>
+          </div>
+
+          <div style="font-size:0.78rem;color:#4a3528;margin-bottom:10px;line-height:1.4;">
+            Sanitized golden record available in catalog for <strong>${esc(data.display_name || 'Enterprise Account')}</strong>.
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-bottom:12px;">
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;text-align:center;">
+              <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;">Lines of Business</div>
+              <div style="font-size:1.15rem;font-weight:800;color:#4a3528;">${lobs}</div>
+            </div>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;text-align:center;">
+              <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;">Key Contacts</div>
+              <div style="font-size:1.15rem;font-weight:800;color:#4a3528;">${personas}</div>
+            </div>
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;text-align:center;">
+              <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;">Quality Score</div>
+              <div style="font-size:1.15rem;font-weight:800;color:#059669;">${score}% (${grade})</div>
+            </div>
+          </div>
+
+          <!-- Strategy Selection -->
+          <div style="font-size:0.72rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">
+            Select Ingestion Strategy
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <label class="catalog-mode-card ${this.selectedMode === 'instant' ? 'selected' : ''}" style="display:flex;align-items:center;justify-content:space-between;background:#fff;border:1.5px solid ${this.selectedMode === 'instant' ? '#8A6248' : '#e2e8f0'};border-radius:8px;padding:8px 12px;cursor:${data.already_exists ? 'not-allowed' : 'pointer'};">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="radio" name="catalogModeChoice" value="instant" ${this.selectedMode === 'instant' ? 'checked' : ''} ${data.already_exists ? 'disabled' : ''}>
+                <div>
+                  <div style="font-size:0.8rem;font-weight:700;color:#1e293b;">Use Verified Intelligence (Instant)</div>
+                  <div style="font-size:0.68rem;color:#64748b;">Instant single-transaction import from sanitized catalog snapshot</div>
+                </div>
+              </div>
+              <span class="badge" style="background:#f1f5f9;color:#334155;font-size:0.72rem;font-weight:700;border:1px solid #cbd5e1;">${data.fee_credits || 1} credit</span>
+            </label>
+
+            <label class="catalog-mode-card ${this.selectedMode === 'refresh' ? 'selected' : ''}" style="display:flex;align-items:center;justify-content:space-between;background:#fff;border:1.5px solid ${this.selectedMode === 'refresh' ? '#8A6248' : '#e2e8f0'};border-radius:8px;padding:8px 12px;cursor:${data.already_exists ? 'not-allowed' : 'pointer'};">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="radio" name="catalogModeChoice" value="refresh" ${this.selectedMode === 'refresh' ? 'checked' : ''} ${data.already_exists ? 'disabled' : ''}>
+                <div>
+                  <div style="font-size:0.8rem;font-weight:700;color:#1e293b;">Use Verified, Then Refresh</div>
+                  <div style="font-size:0.68rem;color:#64748b;">Instant golden record hydration + queues background incremental freshness scan</div>
+                </div>
+              </div>
+              <span class="badge" style="background:#f1f5f9;color:#334155;font-size:0.72rem;font-weight:700;border:1px solid #cbd5e1;">${data.fee_credits || 1} cr + refresh</span>
+            </label>
+
+            <label class="catalog-mode-card ${this.selectedMode === 'fresh' ? 'selected' : ''}" style="display:flex;align-items:center;justify-content:space-between;background:#fff;border:1.5px solid ${this.selectedMode === 'fresh' ? '#8A6248' : '#e2e8f0'};border-radius:8px;padding:8px 12px;cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="radio" name="catalogModeChoice" value="fresh" ${this.selectedMode === 'fresh' ? 'checked' : ''}>
+                <div>
+                  <div style="font-size:0.8rem;font-weight:700;color:#1e293b;">Fetch Fresh (Bypass Catalog)</div>
+                  <div style="font-size:0.68rem;color:#64748b;">Standard 11-source harvest from live external providers</div>
+                </div>
+              </div>
+              <span class="badge" style="background:#f1f5f9;color:#334155;font-size:0.72rem;font-weight:700;border:1px solid #cbd5e1;">Rate Card (5+ cr)</span>
+            </label>
+          </div>
+          ${approvalBox}
+        </div>
+      `).show();
+    },
+
+    updateModalButtons() {
+      const $startBtn = $("#startNewAccountBtn");
+      const $btnText = $("#startAccountBtnText");
+      const $btnBadge = $("#modalBtnCreditBadge");
+      const $controls = $("#accountExtractionControls");
+      const $autoToggle = $("#autoEnrichAccountToggle");
+
+      if (!this.currentResult || !this.currentResult.available || this.selectedMode === "fresh") {
+        $startBtn.prop("disabled", false);
+        $btnText.text("Start Autonomous Pipeline");
+        $btnBadge.text("5 cr").show();
+        $controls.show();
+        $autoToggle.closest(".form-check").show();
+        return;
+      }
+
+      if (this.currentResult.already_exists) {
+        $startBtn.prop("disabled", true);
+        $btnText.text("Already in Workspace");
+        $btnBadge.hide();
+        return;
+      }
+
+      $controls.hide();
+      $autoToggle.closest(".form-check").hide();
+
+      const isApprovalRequired = !!this.currentResult.requires_approval;
+      const isSuper = (window.currentUser && window.currentUser.role === 'super_admin');
+
+      if (isApprovalRequired && !isSuper) {
+        $startBtn.prop("disabled", false);
+        $btnText.text("Submit Reuse Request");
+        $btnBadge.text("Approval Required").show();
+      } else {
+        $startBtn.prop("disabled", false);
+        $btnText.text(this.selectedMode === "refresh" ? "Use Verified + Refresh" : "Use Verified Intelligence");
+        $btnBadge.text(`${this.currentResult.fee_credits || 1} cr`).show();
+      }
+    },
+
+    async executeReuse(companyName, domain, chosenSlug, $btn) {
+      const data = this.currentResult;
+      if (!data || !data.available) return;
+
+      if (data.already_exists) {
+        showNotification(`⚠️ Account <strong>${esc(companyName)}</strong> already exists in this workspace.`, "warning");
+        return;
+      }
+
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (chosenSlug) headers['X-Client-Slug'] = chosenSlug;
+
+      const isApprovalRequired = !!data.requires_approval;
+      const isSuper = (window.currentUser && window.currentUser.role === 'super_admin');
+      const originalBtnText = $btn.html();
+
+      if (isApprovalRequired && !isSuper) {
+        $btn.html('<i class="bi bi-hourglass-split me-1"></i> Submitting Reuse Request...').prop("disabled", true);
+        const reason = ($("#catalogRequestReasonInput").val() || "").trim();
+        try {
+          const res = await fetch(`${API_BASE}/api/catalog/requests`, {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify({
+              snapshot_id: data.snapshot_id,
+              preview_token: data.preview_token,
+              mode: this.selectedMode,
+              reason: reason || `Requested verified catalog intelligence for ${companyName}`,
+            }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${res.status}: Request failed`);
+          }
+
+          const modalEl = document.getElementById("addAccountModal");
+          if (modalEl) {
+            const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+            bsModal.hide();
+          }
+
+          showNotification(
+            `✅ Account reuse request submitted for <strong>${esc(companyName)}</strong>. Awaiting platform administrator approval.`,
+            "info",
+            7000
+          );
+        } catch (err) {
+          console.error("Reuse request error:", err);
+          $btn.html(originalBtnText).prop("disabled", false);
+          showNotification(`❌ Error submitting reuse request: ${esc(err.message)}`, "error");
+        }
+      } else {
+        $btn.html('<i class="bi bi-hourglass-split me-1"></i> Hydrating Verified Intelligence...').prop("disabled", true);
+        try {
+          const res = await fetch(`${API_BASE}/api/catalog/hydrate`, {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify({
+              snapshot_id: data.snapshot_id,
+              preview_token: data.preview_token,
+              mode: this.selectedMode,
+            }),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${res.status}: Hydration failed`);
+          }
+
+          const hydRes = await res.json();
+          const modalEl = document.getElementById("addAccountModal");
+          if (modalEl) {
+            const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+            bsModal.hide();
+          }
+
+          showNotification(
+            `⚡ <strong>${esc(companyName)}</strong> verified intelligence imported successfully!<br/>
+             <span style="font-size:0.74rem;color:#059669;font-weight:600;">
+               ${hydRes.counts?.lobs || data.counts?.lobs || 0} LOBs &bull; ${hydRes.counts?.personas || data.counts?.personas || 0} Contacts &bull; Flat Fee ${hydRes.fee_credits || 1} Credit Deducted
+             </span>`,
+            "success",
+            7000
+          );
+
+          if (chosenSlug && typeof getActiveClientSlug === "function" && chosenSlug !== getActiveClientSlug()) {
+            ClientWorkspaceManager.switchToClient(chosenSlug);
+            return;
+          }
+
+          try { sessionStorage.removeItem("pipeline_accounts_cache"); } catch (e) {}
+          if (typeof refreshAccountsCache === "function") refreshAccountsCache();
+          if (typeof loadData === "function") {
+            await loadData();
+          }
+          if (hydRes.account_id) {
+            $(`#accountList .account-item[data-id="${hydRes.account_id}"]`).trigger("click");
+          }
+        } catch (err) {
+          console.error("Hydration error:", err);
+          $btn.html(originalBtnText).prop("disabled", false);
+          showNotification(`❌ Error importing verified intelligence: ${esc(err.message)}`, "error");
+        }
+      }
+    }
+  };
+
+  window.PlatformCatalogManager = PlatformCatalogManager;
+  window.CatalogReuseManager = CatalogReuseManager;
+
   // Initial load
   ClientWorkspaceManager.init();
+  PlatformCatalogManager.init();
   loadData();
   initSpotlight();
 
@@ -5178,12 +5914,21 @@ $(function () {
         <div class="header-main-info">
           <div class="header-avatar-box avatar-blue">${esc(initials)}</div>
           <div>
-            <h1 class="header-entity-name">${esc(account.name)}</h1>
-            <div class="header-badges-row">
-              ${compType !== "—" ? `<span class="badge-solid-blue">${esc(compType)}</span>` : ""}
-              ${revenue !== "—" ? `<span class="badge-solid-gray">${esc(revenue)}</span>` : ""}
-              ${opStatus !== "—" ? `<span class="badge-solid-green">${esc(opStatus)}</span>` : ""}
-              ${industry !== "—" ? `<span class="badge-solid-purple">${esc(industry)}</span>` : ""}
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <h1 class="header-entity-name" style="margin-bottom:0;">${esc(account.name)}</h1>
+              ${(account.origin && account.origin.origin_type === 'catalog') ? `
+                <span class="badge" style="background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe;font-size:0.72rem;font-weight:700;padding:3px 9px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;" title="Hydrated from Platform Catalog (Snapshot v${account.origin.snapshot_version || 1})">
+                  <i class="bi bi-patch-check-fill text-purple"></i> From Catalog &bull; ${formatTimeAgo(account.origin.hydrated_at)}
+                </span>
+              ` : ""}
+            </div>
+            <div class="header-badges-row" style="margin-top:6px;">
+              <div class="header-firmographics-group" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                ${compType !== "—" ? `<span class="badge-solid-blue"><i class="bi bi-buildings"></i> ${esc(compType)}</span>` : ""}
+                ${revenue !== "—" ? `<span class="badge-solid-gray"><i class="bi bi-currency-dollar"></i> ${esc(revenue)}</span>` : ""}
+                ${opStatus !== "—" ? `<span class="badge-solid-green"><i class="bi bi-activity"></i> ${esc(opStatus)}</span>` : ""}
+                ${industry !== "—" ? `<span class="badge-solid-purple"><i class="bi bi-briefcase"></i> ${esc(industry)}</span>` : ""}
+              </div>
               <span class="badge-health-pill ${aHealth.confidenceScore >= 80 ? 'health-green' : (aHealth.confidenceScore >= 60 ? 'health-blue' : 'health-amber')}" title="Data Completeness: ${aHealth.completenessPct}% (${aHealth.populatedCount}/${aHealth.totalFields} fields) | Source Coverage: ${aHealth.coveragePct}% (${aHealth.sourcesHit}/${aHealth.totalSources} sources)">
                 <i class="bi bi-shield-check"></i> <strong>${aHealth.confidenceScore}% Confidence</strong> &bull; ${aHealth.completenessPct}% Filled (${aHealth.populatedCount}/${aHealth.totalFields}) &bull; ${aHealth.sourcesHit}/${aHealth.totalSources} Sources
               </span>
@@ -5592,9 +6337,6 @@ $(function () {
               </div>
               <div class="activity-card-right">
                 <span class="activity-timestamp"><i class="bi bi-clock"></i> ${esc(ev.time)}</span>
-                <button type="button" class="btn btn-xs btn-outline-primary btn-run-credits" data-action="view-credits" title="View credits & API telemetry for this run" style="font-size:0.68rem;padding:2px 8px;border-radius:4px;color:#4A3528;border:1px solid #D3C2B1;background:#F3E7DA;display:inline-flex;align-items:center;gap:3px;cursor:pointer;">
-                  <i class="bi bi-lightning-charge-fill" style="color:#8A6248;"></i> <span>Credits</span>
-                </button>
               </div>
             </div>
           `;
@@ -5720,6 +6462,39 @@ $(function () {
           </div>
         </div>
 
+        <!-- Fast Sub-Navigation Launcher Strip into LOBs & Personas -->
+        <div class="enterprise-nav-summary-strip">
+          <div class="nav-summary-card" data-target-tab="lobs" title="Explore Lines of Business">
+            <div class="nav-summary-card-left">
+              <div class="nav-summary-icon">
+                <i class="bi bi-diagram-3-fill"></i>
+              </div>
+              <div>
+                <div class="nav-summary-title">Lines of Business</div>
+                <div class="nav-summary-sub">${lobsCount} Operating Divisions &amp; Subsidiaries</div>
+              </div>
+            </div>
+            <span class="nav-summary-action">
+              Explore LOBs (${lobsCount}) <i class="bi bi-arrow-right"></i>
+            </span>
+          </div>
+
+          <div class="nav-summary-card" data-target-tab="personas" title="Explore Executive Directory">
+            <div class="nav-summary-card-left">
+              <div class="nav-summary-icon">
+                <i class="bi bi-people-fill"></i>
+              </div>
+              <div>
+                <div class="nav-summary-title">Executive Directory</div>
+                <div class="nav-summary-sub">${personasCount} Leadership Personas &amp; Contacts</div>
+              </div>
+            </div>
+            <span class="nav-summary-action">
+              Explore Personas (${personasCount}) <i class="bi bi-arrow-right"></i>
+            </span>
+          </div>
+        </div>
+
         <!-- Card 2: Source Coverage & Verified Connectors -->
         <div class="pipeline-section-card fade-in">
           <div class="section-title-row">
@@ -5728,11 +6503,8 @@ $(function () {
               <span>Source Coverage &amp; Verified Connectors</span>
             </div>
             <div class="coverage-header-metrics">
-              <div class="coverage-bar-track" title="${coverage.coveragePct}% verified data coverage">
-                <div class="coverage-bar-fill" style="width: ${coverage.coveragePct}%;"></div>
-              </div>
               <span class="coverage-score-badge ${coverage.coveragePct >= 60 ? 'high' : 'medium'}">
-                <i class="bi bi-shield-check"></i> ${coverage.coveragePct}% Coverage &bull; ${coverage.sourcesHit ?? 0}/${coverage.totalSources || 11} Active
+                <i class="bi bi-shield-check"></i> ${coverage.sourcesHit ?? 0}/${coverage.totalSources || 11} Live Gateways Connected &bull; ${coverage.coveragePct}% Yield
               </span>
             </div>
           </div>
@@ -6567,6 +7339,7 @@ $(function () {
     }
 
     if (targetSubTab === "lobs") {
+      $("#overviewTabPane").addClass("d-none");
       $("#accountOverviewContainer").addClass("d-none");
       $("#lobSection").removeClass("d-none");
       $("#allPersonasSection").addClass("d-none");
@@ -6579,6 +7352,7 @@ $(function () {
         }
       }, 60);
     } else if (targetSubTab === "personas") {
+      $("#overviewTabPane").addClass("d-none");
       $("#accountOverviewContainer").addClass("d-none");
       $("#lobSection").addClass("d-none");
       $("#allPersonasSection").removeClass("d-none");
@@ -6588,13 +7362,10 @@ $(function () {
         }
       }, 60);
     } else {
+      $("#overviewTabPane").removeClass("d-none");
       $("#accountOverviewContainer").html(renderModernAccountOverview(activeAccount)).removeClass("d-none");
-      if (activeAccount._isNew) {
-        $("#lobSection").addClass("d-none");
-      } else {
-        $("#lobSection").removeClass("d-none");
-      }
-      $("#allPersonasSection").removeClass("d-none");
+      $("#lobSection").addClass("d-none");
+      $("#allPersonasSection").addClass("d-none");
     }
 
     if (activeAccount && activeAccount.name) {
@@ -7295,6 +8066,7 @@ $(function () {
         $("#completenessContainer").html(renderModernCompleteness(acct));
         $("#tabsContainer").html(renderModernTabs(acct, targetTab));
         if (targetTab === "lobs") {
+          $("#overviewTabPane").addClass("d-none");
           $("#accountOverviewContainer").addClass("d-none");
           $("#lobSection").removeClass("d-none");
           $("#allPersonasSection").addClass("d-none");
@@ -7305,6 +8077,7 @@ $(function () {
             }
           }, 60);
         } else if (targetTab === "personas") {
+          $("#overviewTabPane").addClass("d-none");
           $("#accountOverviewContainer").addClass("d-none");
           $("#lobSection").addClass("d-none");
           $("#allPersonasSection").removeClass("d-none");
@@ -7314,9 +8087,10 @@ $(function () {
             }
           }, 60);
         } else {
+          $("#overviewTabPane").removeClass("d-none");
           $("#accountOverviewContainer").html(renderModernAccountOverview(acct)).removeClass("d-none");
-          $("#lobSection").removeClass("d-none");
-          $("#allPersonasSection").removeClass("d-none");
+          $("#lobSection").addClass("d-none");
+          $("#allPersonasSection").addClass("d-none");
         }
         renderModernBreadcrumbs();
       }
@@ -8767,9 +9541,7 @@ $(function () {
     $(".lob-card, .persona-card").removeClass("active");
     $("#lobDetailViewContainer").addClass("d-none").empty();
     $("#personaDetailViewContainer").addClass("d-none").empty();
-    $("#accountViewWrapper").removeClass("d-none");
-    $("#lobSection").removeClass("d-none");
-    $("#allPersonasSection").removeClass("d-none");
+    $(".tab-pill-btn[data-nav-tab='overview']").trigger("click");
     renderModernBreadcrumbs();
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
@@ -8781,14 +9553,8 @@ $(function () {
     $(".lob-card, .persona-card").removeClass("active");
     $("#lobDetailViewContainer").addClass("d-none").empty();
     $("#personaDetailViewContainer").addClass("d-none").empty();
-    $("#accountViewWrapper").removeClass("d-none");
-    $("#lobSection").removeClass("d-none");
-    $("#allPersonasSection").addClass("d-none");
+    $(".tab-pill-btn[data-nav-tab='lobs']").trigger("click");
     renderModernBreadcrumbs();
-    const $lobS = $("#lobSection");
-    if ($lobS.length && $lobS.offset()) {
-      window.scrollTo({ top: Math.max(0, $lobS.offset().top - 80), behavior: "smooth" });
-    }
   });
 
   $(document).on("click", ".crumb-personas", function () {
@@ -8799,8 +9565,7 @@ $(function () {
     if (activeLob) {
       $("#lobDetailViewContainer").removeClass("d-none");
     } else {
-      $("#accountViewWrapper").removeClass("d-none");
-      $("#allPersonasSection").removeClass("d-none");
+      $(".tab-pill-btn[data-nav-tab='personas']").trigger("click");
     }
     renderModernBreadcrumbs();
   });
@@ -8831,10 +9596,12 @@ $(function () {
     }
 
     if (tab === "overview") {
+      $("#overviewTabPane").removeClass("d-none");
       $("#accountOverviewContainer").removeClass("d-none");
-      $("#lobSection").removeClass("d-none");
-      $("#allPersonasSection").removeClass("d-none");
+      $("#lobSection").addClass("d-none");
+      $("#allPersonasSection").addClass("d-none");
     } else if (tab === "lobs") {
+      $("#overviewTabPane").addClass("d-none");
       $("#accountOverviewContainer").addClass("d-none");
       $("#lobSection").removeClass("d-none");
       $("#allPersonasSection").addClass("d-none");
@@ -8846,12 +9613,16 @@ $(function () {
       }
       $('html, body').animate({ scrollTop: $("#lobSection").offset().top - 80 }, 300);
     } else if (tab === "personas") {
+      $("#overviewTabPane").addClass("d-none");
       $("#accountOverviewContainer").addClass("d-none");
       $("#lobSection").addClass("d-none");
       $("#allPersonasSection").removeClass("d-none");
       $('html, body').animate({ scrollTop: $("#allPersonasSection").offset().top - 80 }, 300);
     } else if (tab === "feeds" || tab === "activity") {
+      $("#overviewTabPane").removeClass("d-none");
       $("#accountOverviewContainer").removeClass("d-none");
+      $("#lobSection").addClass("d-none");
+      $("#allPersonasSection").addClass("d-none");
       if (tab === "activity") {
         const $card = $("#recentPipelineActivityList").closest(".pipeline-section-card");
         if ($card.length) {
@@ -8861,8 +9632,21 @@ $(function () {
           refreshPipelineRuns(activeAccount.name);
         }
       } else {
-        $('html, body').animate({ scrollTop: $("#accountOverviewContainer").offset().top - 80 }, 300);
+        const $feedsCard = $(".osint-channel-tile-grid").closest(".pipeline-section-card");
+        if ($feedsCard.length) {
+          $('html, body').animate({ scrollTop: $feedsCard.offset().top - 80 }, 300);
+        } else {
+          $('html, body').animate({ scrollTop: $("#accountOverviewContainer").offset().top - 80 }, 300);
+        }
       }
+    }
+  });
+
+  // Fast Navigation from Overview Launcher Strip to LOBs or Personas
+  $(document).on("click", ".nav-summary-card", function () {
+    const target = $(this).data("target-tab");
+    if (target) {
+      $(`.tab-pill-btn[data-nav-tab='${target}']`).trigger("click");
     }
   });
 
@@ -12170,6 +12954,7 @@ $(function () {
 
   // Open modal
   $("#addNewAccountBtn").on("click", function () {
+    CatalogReuseManager.reset();
     $("#newAccountName").val("").removeClass("is-invalid");
     $("#newAccountDomain").val("");
     $("#newAccountTicker").val("");
@@ -12188,6 +12973,25 @@ $(function () {
     setTimeout(() => {
       $("#newAccountName").trigger("focus");
     }, 400);
+  });
+
+  // Catalog Intelligence Input Listeners (v2 Debounced Lookup)
+  $(document).on("input change paste", "#newAccountDomain", function () {
+    if (typeof CatalogReuseManager !== "undefined") {
+      CatalogReuseManager.handleDomainInput($(this).val());
+    }
+  });
+
+  $(document).on("change", "#newAccountClientSlug", function () {
+    if (typeof CatalogReuseManager !== "undefined") {
+      CatalogReuseManager.handleDomainInput($("#newAccountDomain").val());
+    }
+  });
+
+  $(document).on("change", "input[name='catalogModeChoice']", function () {
+    CatalogReuseManager.selectedMode = $(this).val();
+    CatalogReuseManager.renderCallout(CatalogReuseManager.currentResult);
+    CatalogReuseManager.updateModalButtons();
   });
 
   // Enter key in form fields triggers Start
@@ -12459,6 +13263,12 @@ $(function () {
     // Option A: Manual Stub Creation (when user unchecks auto-enrich)
     if (!isAutoEnrich) {
       await createAccountStubOnly(companyName, domain, $btn);
+      return;
+    }
+
+    // Option Catalog: Verified Intelligence Reuse / Request Gatekeeper (v2)
+    if (CatalogReuseManager.currentResult && CatalogReuseManager.currentResult.available && CatalogReuseManager.selectedMode !== "fresh") {
+      await CatalogReuseManager.executeReuse(companyName, domain, chosenSlug, $btn);
       return;
     }
 
@@ -13846,6 +14656,24 @@ $(function () {
     batchConsoleState.isRunning = false;
     batchConsoleState.abortRequested = false;
 
+    // Update Workspace Scoping Badge
+    const activeSlug = (typeof getActiveClientSlug === "function") ? getActiveClientSlug() : "stradit_india";
+    const activeClient = (window.ClientWorkspaceManager && Array.isArray(ClientWorkspaceManager.clients))
+      ? ClientWorkspaceManager.clients.find(c => c.slug === activeSlug)
+      : null;
+    const clientName = activeClient ? activeClient.name : (activeSlug.includes("acme") ? "Acme Corporation" : "StradIT India");
+    $("#batchWorkspaceNameText").html(`<strong>Workspace:</strong> ${esc(clientName)} <span style="opacity:0.75;font-size:0.65rem;">(${esc(activeSlug)})</span>`);
+
+    if (window.PlatformCatalogManager && typeof PlatformCatalogManager.loadCompanies === "function") {
+      if (!PlatformCatalogManager.companies || PlatformCatalogManager.companies.length === 0) {
+        PlatformCatalogManager.loadCompanies().then(() => {
+          if (batchConsoleState.entityType === "account") {
+            renderBatchTable(batchConsoleState.filteredItems);
+          }
+        });
+      }
+    }
+
     // Populate Company Selector Dropdown
     const $select = $("#batchCompanySelector");
     $select.empty();
@@ -14129,7 +14957,7 @@ $(function () {
         // State: All LOBs already onboarded & enriched -> Hide auto run, show All Enriched badge
         $autoLobBtn.addClass("d-none");
         $autoLobBtn.after(
-          `<span id="batchAllEnrichedBadge" class="badge" style="background:#dcfce7;color:#16a34a;border:1.5px solid #86efac;padding:8px 14px;border-radius:8px;font-weight:700;font-size:0.78rem;display:inline-flex;align-items:center;gap:6px;">` +
+          `<span id="batchAllEnrichedBadge" class="badge" style="background:#dcfce7;color:#16a34a;border:1px solid #86efac;padding:4px 10px;border-radius:6px;font-weight:700;font-size:0.72rem;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;flex-shrink:0;">` +
             `<i class="bi bi-check-circle-fill"></i> All ${total} Divisions Enriched` +
           `</span>`
         );
@@ -14509,11 +15337,54 @@ $(function () {
           </div>
         `;
 
+        // Check Platform Catalog match
+        let catalogMatch = null;
+        if (window.PlatformCatalogManager && Array.isArray(PlatformCatalogManager.companies)) {
+          const domClean = (domain || "").toLowerCase().replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, "").trim();
+          const cikClean = (item.sec_cik || "").toString().replace(/^0+/, "");
+          catalogMatch = PlatformCatalogManager.companies.find(c => {
+            const cDom = (c.domain || "").toLowerCase().trim();
+            const cKey = (c.canonical_key || "").toLowerCase();
+            const cCik = (c.canonical_key || "").replace(/^cik:/i, "").replace(/^0+/, "");
+            if (domClean && (cDom === domClean || cKey.includes(domClean))) return true;
+            if (cikClean && cCik === cikClean) return true;
+            if (c.legal_name && acctName && c.legal_name.toLowerCase() === acctName.toLowerCase()) return true;
+            if (c.display_name && acctName && c.display_name.toLowerCase() === acctName.toLowerCase()) return true;
+            return false;
+          });
+        }
+
         let statusBadge = "";
         if (enriched) {
           statusBadge = `<span class="batch-status-badge batch-status-enriched"><i class="bi bi-check-circle-fill"></i> Enriched (${displayPct}%)</span>`;
+        } else if (catalogMatch && catalogMatch.snapshot_id) {
+          statusBadge = `<span class="batch-status-badge" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;" title="Verified golden record available in Platform Catalog"><i class="bi bi-patch-check-fill me-1"></i>Verified in Catalog</span>`;
         } else {
           statusBadge = `<span class="batch-status-badge batch-status-stub"><i class="bi bi-hourglass-split"></i> Pending Stub</span>`;
+        }
+
+        let actionCellHtml = "";
+        if (enriched) {
+          actionCellHtml = getBatchRowActionBtnHtml(key, true, true, item);
+        } else if (catalogMatch && catalogMatch.snapshot_id) {
+          actionCellHtml = `
+            <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;">
+              <button type="button" class="batch-row-btn btn-catalog-batch-hydrate"
+                data-key="${esc(key)}"
+                data-account-id="${item.id}"
+                data-snapshot-id="${catalogMatch.snapshot_id}"
+                data-company-name="${esc(catalogMatch.display_name || acctName)}"
+                style="background:linear-gradient(135deg,#8A6248,#4A3528);color:#F3E7DA;border:none;border-radius:6px;padding:4px 9px;font-size:0.72rem;font-weight:700;white-space:nowrap;"
+                title="Instant single-transaction golden record hydration from platform catalog (1 credit)">
+                <i class="bi bi-box-arrow-in-right me-1"></i> Use Verified (1 cr)
+              </button>
+              <button type="button" class="batch-row-btn batch-single-run-btn batch-btn-enrich" data-key="${esc(key)}" title="Fetch fresh from live external providers (5 cr)">
+                <i class="bi bi-lightning-charge"></i> Fresh (5 cr)
+              </button>
+            </div>
+          `;
+        } else {
+          actionCellHtml = getBatchRowActionBtnHtml(key, false, true, item);
         }
 
         const rowHtml = `
@@ -14554,7 +15425,7 @@ $(function () {
               ${statusBadge}
             </td>
             <td style="text-align: right;">
-              ${getBatchRowActionBtnHtml(key, enriched, true, item)}
+              ${actionCellHtml}
             </td>
           </tr>
         `;
@@ -14677,7 +15548,10 @@ $(function () {
     let pendingSelected = 0;
 
     batchConsoleState.selectedKeys.forEach((key) => {
-      const item = allItems.find((i) => (i.key || i.id) === key);
+      const item = allItems.find((i) => {
+        const itemKey = i.key || i.id || i.lob_id || i.persona_id || (i.name ? 'item_' + encodeURIComponent(i.name) : null);
+        return itemKey === key || String(i.id) === String(key) || String(i.lob_id) === String(key) || String(i.persona_id) === String(key);
+      });
       if (item) {
         let enriched = false;
         if (entityType === "account") enriched = isAccountItemEnriched(item);
@@ -14686,8 +15560,19 @@ $(function () {
 
         if (enriched) enrichedSelected++;
         else pendingSelected++;
+      } else {
+        const $row = $(`#batchTableBody tr[data-key="${key}"]`);
+        if ($row.find(".batch-status-enriched").length > 0) enrichedSelected++;
+        else pendingSelected++;
       }
     });
+
+    // Cleanly toggle All Enriched badge visibility so action bar does not crowd out buttons when selecting items
+    if (count > 0) {
+      $("#batchAllEnrichedBadge").addClass("d-none");
+    } else {
+      $("#batchAllEnrichedBadge").removeClass("d-none");
+    }
 
     const $runBtn = $("#batchRunEnrichmentBtn");
     if (count === 0) {
@@ -14700,7 +15585,7 @@ $(function () {
       $runBtn.html(`<i class="bi bi-lightning-charge-fill"></i> Enrich Selected (<span id="batchRunCountText">${count}</span>)`);
       $runBtn.removeClass("btn-batch-run-reenrich");
     } else {
-      $runBtn.html(`<i class="bi bi-play-fill"></i> Process Selected (<span id="batchRunCountText">${count}</span>) <small style="opacity:0.85;">[${pendingSelected} New, ${enrichedSelected} Re-enrich]</small>`);
+      $runBtn.html(`<i class="bi bi-play-fill"></i> Process Selected (<span id="batchRunCountText">${count}</span>) <span class="badge bg-light text-dark ms-1" style="font-size:0.68rem;padding:2px 5px;">${pendingSelected} New, ${enrichedSelected} Re-enrich</span>`);
       $runBtn.removeClass("btn-batch-run-reenrich");
     }
 
@@ -14762,6 +15647,17 @@ $(function () {
     });
 
     if (queue.length === 0) return;
+
+    // Multi-tenant pre-flight credit check
+    const activeBalance = window._cachedWorkspaceBalance != null ? window._cachedWorkspaceBalance : 5000;
+    const estCreditsPerUnit = isAccount ? 5 : (isPersona ? 2 : 4);
+    const totalEstCredits = queue.length * estCreditsPerUnit;
+    if (activeBalance < totalEstCredits) {
+      const proceed = confirm(
+        `⚠️ Workspace Credit Alert:\n\nActive workspace has ${activeBalance} credits available, but this batch run estimates ${totalEstCredits} credits (${queue.length} items × ${estCreditsPerUnit} cr).\n\nDo you want to proceed anyway?`
+      );
+      if (!proceed) return;
+    }
 
     // Set Running State & Initialize Queued Tracking
     batchConsoleState.isRunning = true;
@@ -14836,7 +15732,7 @@ $(function () {
           // ── Account Step 1: Multi-source Fetch (SEC, Patents, Wiki, GLEIF, FEC)
           const acctRes = await fetch(`${API_BASE}/api/account/fetch`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: authHeaders(),
             body: JSON.stringify({
               company_name: item.legal_name || item.name || item.display_name,
               target_url: item.primary_domain || item.domain || "bny.com",
@@ -14854,7 +15750,7 @@ $(function () {
           try {
             const valRes = await fetch(`${API_BASE}/api/account/validate`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: authHeaders(),
               body: JSON.stringify(enrichedAccount),
             });
             if (valRes.ok) {
@@ -14866,7 +15762,7 @@ $(function () {
           // ── Account Step 3: Dump to DB
           await fetch(`${API_BASE}/api/account/dump-db`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: authHeaders(),
             body: JSON.stringify({
               account_id: item.id,
               account_data: enrichedAccount,
@@ -14908,7 +15804,7 @@ $(function () {
           // ── Persona Step 1: Multi-source Fetch (Exa, LinkedIn, Serper, Apollo, Dossier)
           const pullRes = await fetch(`${API_BASE}/api/personas/fetch`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: authHeaders(),
             body: JSON.stringify({
               id: item.id || null,
               key: item.key || (itemName || key).toLowerCase().replace(/\s+/g, "_"),
@@ -14936,7 +15832,7 @@ $(function () {
           try {
             const valRes = await fetch(`${API_BASE}/api/personas/validate-single`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: authHeaders(),
               body: JSON.stringify(enrichedPerson),
             });
             if (valRes.ok) {
@@ -14950,7 +15846,7 @@ $(function () {
           // ── Persona Step 3: Dump Single to Universal DB (upsert into existing row)
           const dumpRes = await fetch(`${API_BASE}/api/personas/dump-single-db`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: authHeaders(),
             body: JSON.stringify({
               account_id: acct.id,
               person_data: enrichedPerson,
@@ -14994,7 +15890,7 @@ $(function () {
           // ── LOB Step 1: Multi-source Fetch
           const lobRes = await fetch(`${API_BASE}/api/lobs/fetch`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: authHeaders(),
             body: JSON.stringify({
               id: item.id || null,
               account_id: acct.id,
@@ -15014,7 +15910,7 @@ $(function () {
           try {
             await fetch(`${API_BASE}/api/lobs/validate-single`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: authHeaders(),
               body: JSON.stringify(enrichedLob),
             });
           } catch (_) {}
@@ -15022,7 +15918,7 @@ $(function () {
           // ── LOB Step 3: Dump to DB
           await fetch(`${API_BASE}/api/lobs/dump-single-db`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: authHeaders(),
             body: JSON.stringify({
               account_id: acct.id,
               lob_data: enrichedLob,
@@ -15374,6 +16270,56 @@ $(function () {
     runBatchEnrichment();
   });
 
+  // Batch Console row: Hydrate directly from Platform Catalog (Verified Reuse)
+  $(document).on("click", ".btn-catalog-batch-hydrate", async function (e) {
+    e.preventDefault();
+    if (batchConsoleState.isRunning) {
+      showToast("Enrichment is currently in progress. Please wait for the queue to complete or click Stop.", "warning");
+      return;
+    }
+    const $btn = $(this);
+    const snapId = $btn.data("snapshot-id");
+    const compName = $btn.data("company-name");
+    const origHtml = $btn.html();
+
+    $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm" role="status"></span> Hydrating...');
+
+    try {
+      const activeSlug = (typeof getActiveClientSlug === "function") ? getActiveClientSlug() : "stradit_india";
+      const token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (activeSlug) headers["X-Client-Slug"] = activeSlug;
+
+      const res = await fetch(`${API_BASE}/api/catalog/assign`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          snapshot_id: snapId,
+          target_client_slug: activeSlug,
+          mode: "instant",
+          assignment_reason: `Batch Console verified hydration for ${compName}`
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `HTTP ${res.status}`);
+      }
+
+      showToast(`✅ Successfully hydrated ${compName} from verified catalog!`, "success");
+
+      if (typeof loadData === "function") {
+        await loadData();
+      }
+      refreshBatchConsole();
+    } catch (err) {
+      console.error("Batch catalog hydration failed:", err);
+      showToast(`❌ Catalog hydration failed: ${err.message}`, "error");
+      $btn.prop("disabled", false).html(origHtml);
+    }
+  });
+
   // ── Discover LOBs button (Batch Console account row, post-enrichment) ──
   $(document).on("click", ".batch-discover-lobs-btn", async function (e) {
     e.preventDefault();
@@ -15520,7 +16466,7 @@ $(function () {
       if (compName) {
         url += `&company_name=${encodeURIComponent(compName)}`;
       }
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: authHeaders() });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
       batchHistoryState.runs = data.runs || [];
@@ -15701,7 +16647,7 @@ $(function () {
 
     // Fetch full, exact record from backend API if available
     try {
-      const res = await fetch(`${API_BASE}/api/pipeline/runs/${encodeURIComponent(runId)}`);
+      const res = await fetch(`${API_BASE}/api/pipeline/runs/${encodeURIComponent(runId)}`, { headers: authHeaders() });
       if (res.ok) {
         const full = await res.json();
         if (full && full.run_id) run = full;
@@ -16047,10 +16993,13 @@ $(function () {
   function authHeaders() {
     const token = (typeof sessionStorage !== "undefined" && sessionStorage.getItem("access_token")) ||
                   (typeof localStorage !== "undefined" && localStorage.getItem("access_token")) || "";
+    const slug = (typeof getActiveClientSlug === "function") ? getActiveClientSlug() : "stradit_india";
     const h = { "Content-Type": "application/json" };
     if (token) h["Authorization"] = `Bearer ${token}`;
+    if (slug) h["X-Client-Slug"] = slug;
     return h;
   }
+  const getBatchApiHeaders = authHeaders;
 
   window._cachedWorkspaceBalance = null;
 
@@ -17110,7 +18059,22 @@ $(function () {
 
   $(document).on("click", "#btnSelectRecommendedSources", function(e) {
     e.preventDefault();
-    $("#btnSelectAllSources").trigger("click");
+    // Recommended Enterprise Presets: 6 Regulatory & Public registries (0 credits) + 2 high-precision search engines (serper, tavily = 2 credits)
+    // Excludes expensive/redundant web scrapers and feed duplications (firecrawl, diffbot, finnhub)
+    const recommendedSources = ["sec_edgar", "sec_ex21", "gleif", "wikipedia", "patents", "courtlistener", "serper", "tavily"];
+    $(".source-pill").each(function() {
+      const src = $(this).data("source");
+      const isBillable = $(this).data("billable") === true || $(this).data("billable") === "true";
+      const $icon = $(this).find("i");
+      if (recommendedSources.includes(src)) {
+        $(this).addClass("active");
+        $icon.removeClass("bi-circle text-muted").addClass(isBillable ? "bi-check-circle-fill text-primary" : "bi-check-circle-fill text-success");
+      } else {
+        $(this).removeClass("active");
+        $icon.removeClass("bi-check-circle-fill text-primary text-success").addClass("bi-circle text-muted");
+      }
+    });
+    updateAddAccountModalCredits();
   });
 
   // Save Stub Only button in Add Account Modal
@@ -17170,6 +18134,10 @@ $(function () {
       }
       if (!$("#newAccountTicker").val().trim()) {
         $("#newAccountTicker").val(match.ticker);
+      }
+      // Programmatic .val() does not dispatch an input event; trigger catalog reuse check immediately
+      if (typeof CatalogReuseManager !== "undefined") {
+        CatalogReuseManager.handleDomainInput($("#newAccountDomain").val().trim() || match.domain);
       }
     } else {
       $("#accountCikBadge").hide();

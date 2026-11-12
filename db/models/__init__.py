@@ -28,6 +28,14 @@ from db.models.api_config import SystemApiConfig
 from db.models.command_center_snapshot import CommandCenterSnapshot
 from db.models.credit_ledger import CreditLedger
 from db.models.pipeline_job import PipelineJob
+from db.models.platform_catalog import (
+    Company,
+    CompanyIdentifier,
+    Snapshot,
+    SnapshotBlob,
+    ShareEvent,
+    AccountOrigin,
+)
 
 __all__ = [
     "Base",
@@ -55,4 +63,10 @@ __all__ = [
     "CommandCenterSnapshot",
     "CreditLedger",
     "PipelineJob",
+    "Company",
+    "CompanyIdentifier",
+    "Snapshot",
+    "SnapshotBlob",
+    "ShareEvent",
+    "AccountOrigin",
 ]
