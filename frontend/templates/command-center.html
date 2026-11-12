@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="css/action-items.css?v=1.0">
   <link rel="stylesheet" href="css/profile-page.css?v=3.1">
   <link rel="stylesheet" href="css/responsive.css?v=3.0">
-  <link rel="stylesheet" href="css/command-center.css?v=3.6">
+  <link rel="stylesheet" href="css/command-center.css?v=3.8">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body class="cc-wide">
@@ -82,6 +82,34 @@
           <a class="cc-md-act dark" href="/copilot"><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Copilot</a>
         </div>
       </header>
+
+      <!-- Direction Switcher (three directions from the reference design) -->
+      <nav class="cc-direction-nav" id="ccDirectionNav" role="tablist" aria-label="Command Center View Directions">
+        <button type="button" class="cc-dir-btn active" role="tab" id="ccTabDay" aria-selected="true" aria-controls="ccViewDay" data-view="day">
+          <i class="fa-solid fa-bolt"></i>
+          <span class="cc-dir-text">
+            <span class="cc-dir-name">Direction A: My Day</span>
+            <span class="cc-dir-badge">Action-First</span>
+          </span>
+        </button>
+        <button type="button" class="cc-dir-btn" role="tab" id="ccTabAccounts" aria-selected="false" aria-controls="ccViewAccounts" data-view="accounts">
+          <i class="fa-solid fa-building"></i>
+          <span class="cc-dir-text">
+            <span class="cc-dir-name">Direction B: My Accounts</span>
+            <span class="cc-dir-badge">Account-First</span>
+          </span>
+        </button>
+        <button type="button" class="cc-dir-btn" role="tab" id="ccTabPipeline" aria-selected="false" aria-controls="ccViewPipeline" data-view="pipeline">
+          <i class="fa-solid fa-chart-column"></i>
+          <span class="cc-dir-text">
+            <span class="cc-dir-name">Direction C: Pipeline + Signals</span>
+            <span class="cc-dir-badge">Deal-First</span>
+          </span>
+        </button>
+      </nav>
+
+      <!-- Direction A: My Day View Container (Active) -->
+      <div class="cc-view-container cc-view-active" id="ccViewDay" role="tabpanel" aria-labelledby="ccTabDay">
 
       <section class="cc-myday" id="ccMyDay" data-widget-id="my_day" aria-label="My Day" aria-busy="true"></section>
       <section class="cc-kpi-strip" id="ccKpiStrip" data-widget-id="kpi"></section>
@@ -329,6 +357,58 @@
       <div id="ccObjectionsBody"></div>
     </div>
       </section>
+      </div><!-- /#ccViewDay -->
+
+      <!-- Direction B: My Accounts Container (Phase 3 Shell) -->
+      <div class="cc-view-container" id="ccViewAccounts" role="tabpanel" aria-labelledby="ccTabAccounts" style="display:none;">
+        <div class="cc-dir-banner">
+          <div class="cc-dir-banner-head">
+            <div class="cc-dir-banner-info">
+              <h2>My accounts</h2>
+              <p>5 accounts · $2.29M open pipeline · sorted by what needs you most</p>
+            </div>
+            <div class="cc-dir-sort-group" role="group" aria-label="Sort accounts">
+              <button type="button" class="cc-dir-sort-btn active" data-sort="attention"><i class="fa-solid fa-triangle-exclamation"></i> Needs attention</button>
+              <button type="button" class="cc-dir-sort-btn" data-sort="value"><i class="fa-solid fa-arrow-down-wide-short"></i> Pipeline value</button>
+              <button type="button" class="cc-dir-sort-btn" data-sort="signals"><i class="fa-solid fa-bolt"></i> Newest signals</button>
+            </div>
+          </div>
+        </div>
+        <div class="cc-dir-b-grid" id="ccAccountsViewGrid">
+          <div class="cc-dir-loading-placeholder">
+            <i class="fa-solid fa-building cc-placeholder-icon"></i>
+            <h3>Direction B: My Accounts View</h3>
+            <p>Portfolio-first intelligence ranking accounts by urgency, blindspots, and touch freshness.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Direction C: Pipeline + Signals Container (Phase 4 Shell) -->
+      <div class="cc-view-container" id="ccViewPipeline" role="tabpanel" aria-labelledby="ccTabPipeline" style="display:none;">
+        <div class="cc-dir-banner">
+          <div class="cc-dir-banner-head">
+            <div class="cc-dir-banner-info">
+              <h2>My pipeline</h2>
+              <p>9 open deals · $2.29M · each deal shows what changed at its account since you last spoke</p>
+            </div>
+          </div>
+          <!-- Proportional stage funnel bar -->
+          <div class="cc-stage-funnel-strip" id="ccPipelineFunnelStrip">
+            <div class="cc-funnel-segment seg-intro" style="flex:150;"><span>Intro</span> <strong>$150k</strong> <small>· 1</small></div>
+            <div class="cc-funnel-segment seg-disc" style="flex:95;"><span>Disc.</span> <strong>$95k</strong> <small>· 1</small></div>
+            <div class="cc-funnel-segment seg-prop" style="flex:895;"><span>Proposal</span> <strong>$895k</strong> <small>· 4 deals</small></div>
+            <div class="cc-funnel-segment seg-pilot" style="flex:700;"><span>Pilot</span> <strong>$700k</strong> <small>· 2</small></div>
+            <div class="cc-funnel-segment seg-contract" style="flex:450;"><span>Contract</span> <strong>$450k</strong> <small>· 1</small></div>
+          </div>
+        </div>
+        <div class="cc-dir-c-split" id="ccPipelineViewSplit">
+          <div class="cc-dir-loading-placeholder">
+            <i class="fa-solid fa-chart-column cc-placeholder-icon"></i>
+            <h3>Direction C: Pipeline + Signals Cockpit</h3>
+            <p>Deal-centric CRM cockpit with live telemetry diff showing what changed since your last touch.</p>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 </div>
@@ -385,6 +465,64 @@
   </div>
 </div>
 
+
+<!-- Add to Committee In-Place Modal -->
+<div class="cc-committee-backdrop" id="ccCommitteeBackdrop"></div>
+<div class="cc-committee-modal" id="ccCommitteeModal" role="dialog" aria-modal="true" aria-labelledby="ccCommitteeTitle">
+  <div class="cc-committee-modal-header">
+    <div class="cc-committee-modal-title-wrap">
+      <div class="cc-committee-icon-box"><i class="fa-solid fa-user-plus"></i></div>
+      <div>
+        <h3 class="cc-committee-modal-title" id="ccCommitteeTitle">Add to Buying Committee</h3>
+        <p class="cc-committee-modal-subtitle" id="ccCommitteeSubtitle">Map executive to deal buying committee</p>
+      </div>
+    </div>
+    <button type="button" class="cc-committee-modal-close" id="ccCommitteeClose" title="Close"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+  <form id="ccCommitteeForm" class="cc-committee-modal-form">
+    <div class="cc-committee-modal-body">
+      <div class="cc-form-group">
+        <label for="ccCommitteePerson">Person</label>
+        <input type="text" id="ccCommitteePerson" name="person" readonly class="cc-form-input cc-input-readonly">
+      </div>
+      <div class="cc-form-group">
+        <label for="ccCommitteeAccount">Account</label>
+        <input type="text" id="ccCommitteeAccount" name="account" readonly class="cc-form-input cc-input-readonly">
+      </div>
+      <div class="cc-form-group">
+        <label for="ccCommitteeDeal">Target Deal <span class="cc-req">*</span></label>
+        <select id="ccCommitteeDeal" name="deal_id" class="cc-form-select" required>
+        </select>
+      </div>
+      <div class="cc-form-row" style="display: flex; gap: 12px;">
+        <div class="cc-form-group" style="flex: 1.2;">
+          <label for="ccCommitteeRole">Role <span class="cc-req">*</span></label>
+          <select id="ccCommitteeRole" name="role" class="cc-form-select" required>
+            <option value="champion" selected>Champion</option>
+            <option value="economic_buyer">Economic Buyer</option>
+            <option value="technical_evaluator">Technical Evaluator</option>
+            <option value="influencer">Influencer</option>
+            <option value="user">User</option>
+            <option value="blocker">Blocker</option>
+          </select>
+        </div>
+        <div class="cc-form-group" style="flex: 0.8;">
+          <label for="ccCommitteeSentiment">Sentiment</label>
+          <select id="ccCommitteeSentiment" name="sentiment" class="cc-form-select">
+            <option value="positive" selected>Positive</option>
+            <option value="neutral">Neutral</option>
+            <option value="negative">Negative</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="cc-committee-modal-footer">
+      <button type="button" class="cc-btn cc-btn-ghost cc-btn-sm" id="ccCommitteeCancel">Cancel</button>
+      <button type="submit" class="cc-btn cc-btn-primary cc-btn-sm" id="ccCommitteeSubmit"><i class="fa-solid fa-check"></i> Add to Committee</button>
+    </div>
+  </form>
+</div>
+
 <div class="cc-drawer-backdrop" id="ccDrawerBackdrop"></div>
 <aside class="cc-drawer" id="ccDrawer">
   <div class="cc-drawer-header">
@@ -399,6 +537,6 @@
 {% include "partials/drawer.html" %}
 {% include "partials/copilot-dock.html" %}
 
-<script type="module" src="js/modules/command-center/main.js?v=8.2"></script>
+<script type="module" src="js/modules/command-center/main.js?v=8.4"></script>
 </body>
 </html>

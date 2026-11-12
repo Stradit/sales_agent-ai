@@ -126,6 +126,78 @@ function checkDashboardAccessNotice() {
   history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''));
 }
 
+
+// ── Direction Switcher (Directions A, B, and C) ──────────────────────────
+export function switchDirectionView(view, updateUrl = true) {
+  const validViews = ['day', 'accounts', 'pipeline'];
+  const targetView = validViews.includes(view) ? view : 'day';
+  ccState.activeView = targetView;
+
+  // Update tabs
+  const nav = document.getElementById('ccDirectionNav');
+  if (nav) {
+    nav.querySelectorAll('.cc-dir-btn').forEach(btn => {
+      const isTarget = btn.dataset.view === targetView;
+      btn.classList.toggle('active', isTarget);
+      btn.setAttribute('aria-selected', isTarget ? 'true' : 'false');
+    });
+  }
+
+  // Update containers
+  const viewDay = document.getElementById('ccViewDay');
+  const viewAccounts = document.getElementById('ccViewAccounts');
+  const viewPipeline = document.getElementById('ccViewPipeline');
+
+  if (viewDay) viewDay.style.display = targetView === 'day' ? 'block' : 'none';
+  if (viewAccounts) viewAccounts.style.display = targetView === 'accounts' ? 'block' : 'none';
+  if (viewPipeline) viewPipeline.style.display = targetView === 'pipeline' ? 'block' : 'none';
+
+  // Customize View button is primarily for Direction A's widgets
+  const customizeBtn = document.getElementById('ccCustomizeBtn');
+  if (customizeBtn) {
+    customizeBtn.style.display = targetView === 'day' ? 'inline-flex' : 'none';
+  }
+
+  if (updateUrl) {
+    try {
+      const url = new URL(window.location.href);
+      if (targetView === 'day') {
+        url.searchParams.delete('view');
+      } else {
+        url.searchParams.set('view', targetView);
+      }
+      window.history.replaceState(null, '', url.toString());
+      localStorage.setItem('cc_active_view', targetView);
+    } catch { /* ignore URL errors */ }
+  }
+
+  document.dispatchEvent(new CustomEvent('cc:view-changed', { detail: { view: targetView } }));
+
+  if (targetView === 'day' && ccState.matrixChart) {
+    setTimeout(() => { ccState.matrixChart.resize(); }, 50);
+  }
+}
+
+export function initDirectionSwitcher() {
+  const nav = document.getElementById('ccDirectionNav');
+  if (!nav) return;
+
+  nav.addEventListener('click', (e) => {
+    const btn = e.target.closest('.cc-dir-btn');
+    if (!btn || !btn.dataset.view) return;
+    switchDirectionView(btn.dataset.view, true);
+  });
+
+  // Read initial view from URL param -> hash -> localStorage -> default 'day'
+  const params = new URLSearchParams(window.location.search);
+  const paramView = params.get('view');
+  const hash = window.location.hash.replace('#view-', '');
+  const savedView = localStorage.getItem('cc_active_view');
+  const initial = paramView || (['accounts', 'pipeline', 'day'].includes(hash) ? hash : null) || savedView || 'day';
+
+  switchDirectionView(initial, false);
+}
+
 async function init() {
   initThemeToggle();
   checkDashboardAccessNotice();
@@ -135,6 +207,7 @@ async function init() {
   initGenerateButton();
   loadRefreshInfo();
   initMyDay();
+  initDirectionSwitcher();
   document.addEventListener('cc:plays-changed', () => { renderSubtitle(); renderKpi(); });
   // My Day's data names the open deals per account: the feed, exec moves, coverage and matrix show them
   document.addEventListener('cc:deal-context', () => { renderFeed(); renderTimeline(); renderCoverageGaps(); renderMatrix(); });

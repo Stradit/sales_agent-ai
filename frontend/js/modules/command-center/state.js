@@ -1,4 +1,5 @@
 export const ccState = {
+  activeView: 'day', // 'day' | 'accounts' | 'pipeline' (Direction A | B | C)
   activeRole: 'ae', // 'ae' | 'manager' | 'exec'
   activeDomainFilters: new Set(), // empty = all domains
   activeAccountId: null, // single / primary active account ID (backwards compatibility)

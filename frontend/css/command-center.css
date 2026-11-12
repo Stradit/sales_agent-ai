@@ -5788,3 +5788,461 @@
   .cc-wide .cc-header-controls > * { flex: 1 1 auto; justify-content: center; }
   .cc-wide .cc-header-controls .cc-acct-filter-btn { width: 100%; justify-content: center; }
 }
+
+
+/* ── Direction Switcher (Directions A, B, and C) ────────────────────────── */
+.cc-direction-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 22px;
+  padding: 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.cc-dir-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-secondary);
+  transition: all .18s ease-in-out;
+  text-decoration: none;
+}
+.cc-dir-btn i {
+  font-size: 1.15rem;
+  color: var(--text-secondary);
+  transition: color .18s ease-in-out;
+}
+.cc-dir-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--text-primary);
+}
+[data-theme="dark"] .cc-dir-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.cc-dir-btn.active {
+  background: var(--card-bg, #ffffff);
+  border-color: var(--border-mid);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  color: var(--text-primary);
+}
+[data-theme="dark"] .cc-dir-btn.active {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.cc-dir-btn.active i {
+  color: var(--brand);
+}
+.cc-dir-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  line-height: 1.25;
+}
+.cc-dir-name {
+  font-size: .88rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.cc-dir-badge {
+  font-size: .68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.cc-dir-btn.active .cc-dir-badge {
+  color: var(--brand);
+}
+
+/* ── Direction B & C View Shells ────────────────────────────────────────── */
+.cc-view-container {
+  min-width: 0;
+}
+.cc-dir-banner {
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+.cc-dir-banner-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.cc-dir-banner-info h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.cc-dir-banner-info p {
+  margin: 4px 0 0;
+  font-size: .84rem;
+  color: var(--text-secondary);
+}
+.cc-dir-sort-group {
+  display: inline-flex;
+  border: 1px solid var(--border-mid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.cc-dir-sort-btn {
+  border: 0;
+  background: var(--panel-bg);
+  padding: 7px 13px;
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all .15s ease;
+}
+.cc-dir-sort-btn + .cc-dir-sort-btn {
+  border-left: 1px solid var(--border-mid);
+}
+.cc-dir-sort-btn.active {
+  background: var(--text-primary);
+  color: var(--panel-bg);
+}
+
+/* Direction C Proportional Stage Funnel Strip */
+.cc-stage-funnel-strip {
+  display: flex;
+  height: 38px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 14px;
+}
+.cc-funnel-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: .78rem;
+  border-right: 1px solid var(--border-color);
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.cc-funnel-segment:last-child {
+  border-right: 0;
+}
+.cc-funnel-segment.seg-intro { background: rgba(201, 84, 26, 0.12); }
+.cc-funnel-segment.seg-disc { background: rgba(201, 84, 26, 0.07); }
+.cc-funnel-segment.seg-prop { background: rgba(62, 100, 198, 0.12); }
+.cc-funnel-segment.seg-pilot { background: rgba(14, 165, 233, 0.12); }
+.cc-funnel-segment.seg-contract { background: rgba(34, 183, 131, 0.14); }
+
+.cc-dir-loading-placeholder {
+  text-align: center;
+  padding: 64px 24px;
+  background: var(--panel-bg);
+  border: 1px dashed var(--border-mid);
+  border-radius: 6px;
+  margin-top: 16px;
+}
+.cc-dir-loading-placeholder .cc-placeholder-icon {
+  font-size: 2.2rem;
+  color: var(--brand);
+  margin-bottom: 12px;
+}
+.cc-dir-loading-placeholder h3 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.cc-dir-loading-placeholder p {
+  margin: 0;
+  font-size: .84rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 860px) {
+  .cc-direction-nav {
+    flex-direction: column;
+  }
+  .cc-dir-btn {
+    width: 100%;
+  }
+}
+
+
+/* ==========================================================================
+   Command Center · Step 1 Polish Styles
+   - Pilot Exit Criteria Badges
+   - Add to Committee In-Place Modal
+   - Capital Events Task Actions
+   - Mobile (390px / PhoneDay) Responsive Alignments
+   ========================================================================== */
+
+/* Pilot Exit Criteria Badges */
+.cc-md-pilot-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--brand, #4f46e5);
+  background: rgba(99, 102, 241, 0.09);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-left: 6px;
+  letter-spacing: -0.01em;
+}
+.cc-md-pilot-badge i {
+  font-size: 10px;
+}
+.cc-md-pilot-badge-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--brand, #4f46e5);
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 3px;
+}
+
+/* Timeline Add to Committee Action */
+.cc-timeline-committee-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--brand, #4f46e5);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+.cc-timeline-committee-btn:hover {
+  color: #001233;
+}
+
+/* Add to Committee In-Place Modal */
+.cc-committee-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(3px);
+  z-index: 1050;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.22s ease;
+}
+.cc-committee-backdrop.open {
+  opacity: 1;
+  visibility: visible;
+}
+.cc-committee-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -46%) scale(0.96);
+  width: 92%;
+  max-width: 520px;
+  max-height: 86vh;
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  box-shadow: 0 20px 40px -10px rgba(15, 23, 42, 0.25);
+  z-index: 1060;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+}
+.cc-committee-modal.open {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, -50%) scale(1);
+}
+.cc-committee-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+.cc-committee-modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cc-committee-icon-box {
+  width: 38px;
+  height: 38px;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--brand, #4f46e5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+.cc-committee-modal-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-color, #0f172a);
+}
+.cc-committee-modal-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
+}
+.cc-committee-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--text-muted, #64748b);
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cc-committee-modal-close:hover {
+  color: var(--text-color, #0f172a);
+  background: var(--bg-hover, #f1f5f9);
+}
+.cc-committee-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cc-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cc-form-group label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary, #475569);
+}
+.cc-form-group .cc-req {
+  color: #ef4444;
+}
+.cc-form-input, .cc-form-select {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  background: var(--bg-surface, #ffffff);
+  color: var(--text-color, #0f172a);
+  font-size: 0.88rem;
+  border-radius: 4px;
+  outline: none;
+  font-family: inherit;
+}
+.cc-form-input:focus, .cc-form-select:focus {
+  border-color: var(--brand, #4f46e5);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+.cc-input-readonly {
+  background: var(--bg-surface-alt, #f8fafc) !important;
+  color: var(--text-muted, #64748b) !important;
+  cursor: not-allowed;
+}
+.cc-committee-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+  background: var(--bg-surface-alt, #fafafa);
+}
+
+/* Capital Events Quick Action */
+.cc-feed-meta-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.cc-capital-task-btn {
+  white-space: nowrap;
+}
+
+/* Mobile Alignment (PhoneDay / 390px) */
+@media (max-width: 640px) {
+  .cc-md-tiles {
+    display: flex !important;
+    overflow-x: auto !important;
+    scroll-snap-type: x mandatory;
+    gap: 8px !important;
+    padding-bottom: 6px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cc-md-tile {
+    flex: 0 0 130px !important;
+    scroll-snap-align: start;
+    padding: 10px 12px !important;
+  }
+  .cc-md-tile strong {
+    font-size: 1.15rem !important;
+  }
+  .cc-md-item {
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 12px !important;
+    gap: 10px !important;
+    border-left-width: 4px !important;
+  }
+  .cc-md-item-acts {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    margin-top: 6px !important;
+    padding-top: 8px !important;
+    border-top: 1px solid var(--border-color, #e2e8f0) !important;
+    gap: 8px !important;
+  }
+  .cc-md-act {
+    height: 44px !important;
+    min-height: 44px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+  }
+  .cc-md-form {
+    flex-direction: column !important;
+    width: 100% !important;
+  }
+  .cc-committee-modal {
+    width: 96% !important;
+    max-height: 92vh !important;
+  }
+}

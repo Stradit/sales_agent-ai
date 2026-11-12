@@ -61,3 +61,9 @@ def test_short_gap_text():
     assert md._short_gap("No champion on the buying committee", TODAY) == "No champion"
     assert md._short_gap("No economic buyer identified", TODAY) == "No economic buyer"
     assert md._short_gap("Next step overdue since 2026-10-20", TODAY) == "next step 12 days late"
+
+
+def test_pilot_exit_criteria_surfaced():
+    item = md._deal_item(deal(stage="pilot", stage_progress={"done": 3, "total": 4}), TODAY)
+    assert item["pilot_exit_text"] == "75% of pilot exit criteria done (3 of 4)"
+    assert item["stage_progress"] == {"done": 3, "total": 4}

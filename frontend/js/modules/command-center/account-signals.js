@@ -10,6 +10,7 @@ import { dealsFor, dealContext } from './deal-context.js';
 import { esc, formatMoney } from './utils.js';
 import { renderSkeleton } from '../skeleton.js';
 import { ccState, matchesCurrentAccount } from './state.js';
+import { createTask, isTasked } from './actions.js';
 
 async function loadEnrichedAccounts() {
   const [raw, matrix] = await Promise.all([loadRealAccounts(), loadMatrixAccounts()]);
@@ -65,17 +66,44 @@ function capitalEntries(accounts) {
 function capitalRowHtml({ account: a, date }) {
   const amt = a.total_funding_amount_usd ? formatMoney(a.total_funding_amount_usd) : null;
   const acquisitions = a.num_acquisitions ? `${a.num_acquisitions} acquisition${a.num_acquisitions !== 1 ? 's' : ''}` : null;
+  const taskTitle = `Capital Event: ${a.last_funding_type || 'Funding'} at ${a.name}`;
+  const tasked = isTasked(a.name, taskTitle, a.id);
+  const btnCls = tasked ? 'cc-btn-done' : 'cc-btn-primary';
+  const btnHtml = tasked ? '<i class="fa-solid fa-check"></i> Tasked' : '<i class="fa-solid fa-plus"></i> Create task';
+
   return `
     <li class="cc-feed-row cc-clickable-row" data-account-id="${a.id}">
       <div class="cc-feed-body">
         <div class="cc-feed-title-row"><span class="cc-feed-title">${esc(a.name)}</span></div>
         <div class="cc-feed-summary">${esc(a.last_funding_type || 'Funding event')}${amt ? ` — ${amt}` : ''}${acquisitions ? ` · ${acquisitions}` : ''}</div>
       </div>
-      <div class="cc-feed-count">${esc(date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }))}</div>
+      <div class="cc-feed-meta-col">
+        <div class="cc-feed-count">${esc(date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }))}</div>
+        <button type="button" class="cc-btn ${btnCls} cc-btn-xs cc-capital-task-btn" data-act="capital-task" data-account-name="${esc(a.name)}" data-account-id="${a.id}" data-task-title="${esc(taskTitle)}" title="${tasked ? 'Task already created' : `Create task for ${esc(a.name)}`}" ${tasked ? 'disabled' : ''}>${btnHtml}</button>
+      </div>
     </li>`;
 }
-export function renderCapitalEvents() {
-  return renderWidget('ccCapitalList', 'No funding, IPO, or acquisition events on file in the last 12 months for your accounts.', capitalEntries, capitalRowHtml);
+export async function renderCapitalEvents() {
+  await renderWidget('ccCapitalList', 'No funding, IPO, or acquisition events on file in the last 12 months for your accounts.', capitalEntries, capitalRowHtml);
+  const list = document.getElementById('ccCapitalList');
+  if (list) {
+    list.querySelectorAll('.cc-capital-task-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        btn.disabled = true;
+        const acctName = btn.dataset.accountName;
+        const acctId = Number(btn.dataset.accountId);
+        const taskTitle = btn.dataset.taskTitle;
+        const ok = await createTask(acctName, taskTitle, acctId);
+        if (ok) {
+          btn.className = 'cc-btn cc-btn-done cc-btn-xs cc-capital-task-btn';
+          btn.innerHTML = '<i class="fa-solid fa-check"></i> Tasked';
+        } else {
+          btn.disabled = false;
+        }
+      });
+    });
+  }
 }
 
 // ── Org coverage gaps (no C-suite / thin contact coverage mapped) ──────

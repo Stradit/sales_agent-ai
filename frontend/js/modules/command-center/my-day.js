@@ -72,11 +72,12 @@ function inlineForm(q, op) {
 }
 
 function queueRow(q) {
+  const pilotBadge = q.pilot_exit_text ? `<span class="cc-md-pilot-badge" title="Pilot exit criteria progress"><i class="fa-solid fa-list-check"></i> ${esc(q.pilot_exit_text)}</span>` : '';
   const ctx = [q.deal ? esc(q.deal) : esc(q.account || ''), q.stage ? esc(q.stage) : '', q.value ? money(q.value) : '', q.extra ? esc(q.extra) : '']
     .filter(Boolean).join(' · ');
   const open = editing && editing.startsWith(`${rowKey(q)}:`);
   return `<li class="cc-md-item tone-${q.tone}${open ? ' is-editing' : ''}">
-    <div class="cc-md-item-main"><div class="cc-md-item-title">${esc(q.title)}</div>
+    <div class="cc-md-item-main"><div class="cc-md-item-title">${esc(q.title)}${pilotBadge}</div>
       <div class="cc-md-item-sub"><strong>${esc(q.why)}</strong>${ctx ? ` · ${ctx}` : ''}</div></div>
     <div class="cc-md-item-acts">${open ? inlineForm(q, editing.split(':')[1]) : (q.actions || []).slice().reverse().map(a => actionButton(a, q)).join('')}</div>
   </li>`;
@@ -138,7 +139,7 @@ function render() {
           <div class="cc-md-card-head"><h3>Deals needing attention</h3><a href="/deals">All deals</a></div>
           ${data.attention.length ? data.attention.map(d => `<a class="cc-md-deal" href="/deals?deal=${d.deal_id}">
             <span class="cc-md-health ${healthTone(d.health)}" title="Deal health">${d.health ?? '—'}</span>
-            <span class="cc-md-deal-main"><strong>${esc(d.deal)}</strong><small>${esc(d.why || d.account)}</small></span>
+            <span class="cc-md-deal-main"><strong>${esc(d.deal)}</strong><small>${esc(d.why || d.account)}${d.pilot_exit_text ? ` · <span class="cc-md-pilot-badge-sm"><i class="fa-solid fa-list-check"></i> ${esc(d.pilot_exit_text)}</span>` : ''}</small></span>
             <strong class="cc-md-deal-val">${money(d.value)}</strong></a>`).join('') : '<p class="cc-md-empty">No open deals.</p>'}
         </section>
         <section class="cc-md-card" id="ccMdReasons" aria-label="Reasons to reach out">

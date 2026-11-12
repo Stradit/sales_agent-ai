@@ -109,8 +109,17 @@ def _deal_item(d: Dict[str, Any], today: date) -> Optional[Dict[str, Any]]:
     """The single most urgent reason this deal needs the rep today, or None."""
     name, did = _short(d["name"]), d["id"]
     value = d.get("value_amount")
+    stage_prog = d.get("stage_progress")
+    pilot_exit_text = None
+    if d.get("stage") == "pilot" and stage_prog:
+        done = stage_prog.get("done", 0)
+        total = stage_prog.get("total", 4)
+        pct = int((done / total) * 100) if total else 0
+        pilot_exit_text = f"{pct}% of pilot exit criteria done ({done} of {total})"
+
     base = {"deal_id": did, "deal": name, "account": d["account_name"], "account_id": d["account_id"], "stage": d["stage_label"],
-            "value": value, "health": (d.get("health") or {}).get("score")}
+            "value": value, "health": (d.get("health") or {}).get("score"), "pilot_exit_text": pilot_exit_text,
+            "stage_progress": stage_prog, "expected_close": str(d.get("expected_close")) if d.get("expected_close") else None}
     over = _days_since(d.get("next_step_due"), today)
     quiet = _days_since(d.get("last_customer_touch"), today)
     touch = f"last touch {quiet} days ago" if quiet is not None else "no customer contact logged"
@@ -269,6 +278,8 @@ def build(s, user, today: Optional[date] = None) -> Dict[str, Any]:
         "quarter": _quarter(s, user, mine, today),
         "attention": [{"deal_id": d["id"], "deal": _short(d["name"]), "account": d["account_name"], "value": d.get("value_amount"),
                        "health": (d.get("health") or {}).get("score"), "level": (d.get("health") or {}).get("level"),
+                       "stage": d.get("stage"), "stage_label": d.get("stage_label"),
+                       "pilot_exit_text": f"{int((d.get('stage_progress', {}).get('done', 0) / (d.get('stage_progress', {}).get('total') or 1)) * 100)}% of pilot exit criteria done" if d.get("stage") == "pilot" and d.get("stage_progress") else None,
                        "why": " · ".join(_short_gap(g, today) for g in ((d.get("health") or {}).get("gaps") or [])[:2]).capitalize()} for d in attention],
         "reasons": reasons[:5],
         "reasons_window_days": reasons_days,
