@@ -20,6 +20,7 @@ import { initWidgetGuides } from './widget-guide.js';
 import { initAccountFilter } from './account-filter.js';
 import { initWidgetCustomizer } from './widget-customizer.js';
 import { initMyDay, refreshMyDay } from './my-day.js';
+import { initMyAccounts, renderMyAccounts } from './my-accounts.js';
 import { loadCommandCenter, generateCommandCenter, getCommandCenter, isGenerated } from './generator.js';
 import { esc, relativeTime } from './utils.js';
 
@@ -171,6 +172,10 @@ export function switchDirectionView(view, updateUrl = true) {
     } catch { /* ignore URL errors */ }
   }
 
+  if (targetView === 'accounts') {
+    initMyAccounts();
+  }
+
   document.dispatchEvent(new CustomEvent('cc:view-changed', { detail: { view: targetView } }));
 
   if (targetView === 'day' && ccState.matrixChart) {
@@ -210,7 +215,7 @@ async function init() {
   initDirectionSwitcher();
   document.addEventListener('cc:plays-changed', () => { renderSubtitle(); renderKpi(); });
   // My Day's data names the open deals per account: the feed, exec moves, coverage and matrix show them
-  document.addEventListener('cc:deal-context', () => { renderFeed(); renderTimeline(); renderCoverageGaps(); renderMatrix(); });
+  document.addEventListener('cc:deal-context', () => { renderFeed(); renderTimeline(); renderCoverageGaps(); renderMatrix(); renderMyAccounts(); });
   await loadCommandCenter();
   await initAccountFilter((accountId, accountObj) => {
     renderAll();

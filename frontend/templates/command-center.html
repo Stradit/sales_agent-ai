@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="css/action-items.css?v=1.0">
   <link rel="stylesheet" href="css/profile-page.css?v=3.1">
   <link rel="stylesheet" href="css/responsive.css?v=3.0">
-  <link rel="stylesheet" href="css/command-center.css?v=3.8">
+  <link rel="stylesheet" href="css/command-center.css?v=3.9">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body class="cc-wide">
@@ -359,27 +359,36 @@
       </section>
       </div><!-- /#ccViewDay -->
 
-      <!-- Direction B: My Accounts Container (Phase 3 Shell) -->
+      <!-- Direction B: My Accounts View Container -->
       <div class="cc-view-container" id="ccViewAccounts" role="tabpanel" aria-labelledby="ccTabAccounts" style="display:none;">
         <div class="cc-dir-banner">
           <div class="cc-dir-banner-head">
             <div class="cc-dir-banner-info">
               <h2>My accounts</h2>
-              <p>5 accounts · $2.29M open pipeline · sorted by what needs you most</p>
+              <p id="ccAccountsBannerMeta">5 accounts · $2.29M open pipeline · sorted by what needs you most</p>
             </div>
-            <div class="cc-dir-sort-group" role="group" aria-label="Sort accounts">
-              <button type="button" class="cc-dir-sort-btn active" data-sort="attention"><i class="fa-solid fa-triangle-exclamation"></i> Needs attention</button>
-              <button type="button" class="cc-dir-sort-btn" data-sort="value"><i class="fa-solid fa-arrow-down-wide-short"></i> Pipeline value</button>
-              <button type="button" class="cc-dir-sort-btn" data-sort="signals"><i class="fa-solid fa-bolt"></i> Newest signals</button>
+            <div class="cc-dir-b-controls">
+              <!-- Subview toggle: Grid vs Coverage Map -->
+              <div class="cc-dir-subtabs" role="tablist" aria-label="Accounts View Mode">
+                <button type="button" class="cc-dir-subtab active" data-acct-subview="grid" role="tab" aria-selected="true"><i class="fa-solid fa-grip"></i> Grid</button>
+                <button type="button" class="cc-dir-subtab" data-acct-subview="coverage" role="tab" aria-selected="false"><i class="fa-solid fa-chart-line"></i> Coverage map</button>
+              </div>
+              <!-- Sorting -->
+              <div class="cc-dir-sort-group" role="group" aria-label="Sort accounts" id="ccAccountsSortGroup">
+                <button type="button" class="cc-dir-sort-btn active" data-acct-sort="needs"><i class="fa-solid fa-triangle-exclamation"></i> Needs attention</button>
+                <button type="button" class="cc-dir-sort-btn" data-acct-sort="value"><i class="fa-solid fa-arrow-down-wide-short"></i> Pipeline value</button>
+                <button type="button" class="cc-dir-sort-btn" data-acct-sort="signals"><i class="fa-solid fa-bolt"></i> Newest signals</button>
+              </div>
             </div>
           </div>
         </div>
         <div class="cc-dir-b-grid" id="ccAccountsViewGrid">
           <div class="cc-dir-loading-placeholder">
-            <i class="fa-solid fa-building cc-placeholder-icon"></i>
-            <h3>Direction B: My Accounts View</h3>
-            <p>Portfolio-first intelligence ranking accounts by urgency, blindspots, and touch freshness.</p>
+            <i class="fa-solid fa-building-user cc-placeholder-icon"></i>
+            <h3>Loading accounts…</h3>
           </div>
+        </div>
+        <div class="cc-dir-b-coverage" id="ccAccountsCoverageView" style="display:none;">
         </div>
       </div>
 
@@ -537,6 +546,6 @@
 {% include "partials/drawer.html" %}
 {% include "partials/copilot-dock.html" %}
 
-<script type="module" src="js/modules/command-center/main.js?v=8.4"></script>
+<script type="module" src="js/modules/command-center/main.js?v=8.5"></script>
 </body>
 </html>
