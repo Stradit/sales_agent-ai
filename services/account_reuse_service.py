@@ -34,6 +34,7 @@ import config
 from db.column_types import get_column_kinds, get_real_columns
 from db.models.client import Client
 from db.models.credit_ledger import CreditLedger
+from db.models.user import User
 from db.models.platform_catalog import (
     AccountOrigin,
     Company,
@@ -43,6 +44,7 @@ from db.models.platform_catalog import (
     SnapshotBlob,
 )
 from db.tenant import schema_for, validate_slug
+from services.catalog_audit import log_catalog_audit
 from services.catalog_service import CatalogService, get_share_policy
 from services.credit_service import (
     AccountQuotaExceededError,
@@ -765,7 +767,51 @@ class AccountReuseService:
             share_event.completed_at = datetime.now(timezone.utc)
             share_event.created_ids = created_ids
             share_event.counts = counts_summary
-    
+
+            # 10. Audit Logging (S-14 inside caller transaction)
+            actor_id = approved_by_user_id or user_id
+            actor_user = session.query(User).filter_by(id=actor_id).first() if actor_id else None
+            is_actor_super = (actor_user.role == "super_admin") if actor_user else False
+
+            if is_admin_assign and not target_client.catalog_consume:
+                log_catalog_audit(
+                    session=session,
+                    actor_user_id=actor_id,
+                    action="catalog.consume_bypassed_by_admin",
+                    client_id=target_client.id,
+                    details={
+                        "snapshot_id": snapshot.id,
+                        "target_client_slug": clean_slug,
+                        "reason": "Admin assigned account while catalog_consume flag is false",
+                    },
+                    is_actor_super_admin=True,
+                )
+
+            if is_admin_assign:
+                audit_action = "catalog.assign"
+            elif existing_event and existing_event.status == "running" and approved_by_user_id:
+                audit_action = "catalog.request_approved"
+            else:
+                audit_action = "catalog.hydrate"
+
+            log_catalog_audit(
+                session=session,
+                actor_user_id=actor_id,
+                action=audit_action,
+                client_id=target_client.id,
+                target_user_id=share_event.requested_by if audit_action == "catalog.request_approved" else None,
+                details={
+                    "share_event_id": share_event.id,
+                    "snapshot_id": snapshot.id,
+                    "target_client_slug": clean_slug,
+                    "account_id": new_account_id,
+                    "fee_credits": fee_credits,
+                    "counts": counts_summary,
+                    "reason": reason,
+                },
+                is_actor_super_admin=is_actor_super,
+            )
+
             session.commit()
         except IntegrityError:
             session.rollback()
@@ -1148,6 +1194,22 @@ class AccountReuseService:
         share_event.rolled_back_at = datetime.now(timezone.utc)
         share_event.rolled_back_by = admin_user_id
         share_event.rollback_reason = reason
+
+        # 7. Audit Logging (S-14 inside caller transaction)
+        log_catalog_audit(
+            session=session,
+            actor_user_id=admin_user_id,
+            action="catalog.rollback",
+            client_id=target_client.id,
+            details={
+                "share_event_id": share_event.id,
+                "target_client_slug": clean_slug,
+                "fee_credits": share_event.fee_credits,
+                "reason": reason,
+            },
+            is_actor_super_admin=True,
+        )
+
         session.commit()
 
         return {

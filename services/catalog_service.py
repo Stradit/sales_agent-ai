@@ -21,6 +21,7 @@ from sqlalchemy import desc, func, text
 from sqlalchemy.orm import Session
 
 from db.models.client import Client
+from db.models.user import User
 from db.models.platform_catalog import (
     Company,
     CompanyIdentifier,
@@ -28,6 +29,7 @@ from db.models.platform_catalog import (
     SnapshotBlob,
 )
 from db.tenant import schema_for, validate_slug
+from services.catalog_audit import log_catalog_audit
 
 SHARE_POLICY_PATH = Path(__file__).resolve().parent.parent / "config" / "tenant_skeleton" / "share_policy.yaml"
 
@@ -519,6 +521,29 @@ class CatalogService:
                 """),
                 {"cid": company.id, "sid": snapshot.id},
             )
+
+        # 10. Audit Logging (S-14 inside caller transaction)
+        action = "catalog.publish_forced" if force else "catalog.publish"
+        is_super = False
+        if published_by_user_id:
+            user = session.query(User).filter_by(id=published_by_user_id).first()
+            if user and getattr(user, "role", None) == "super_admin":
+                is_super = True
+
+        log_catalog_audit(
+            session=session,
+            actor_user_id=published_by_user_id,
+            action=action,
+            client_id=client.id,
+            details={
+                "snapshot_id": snapshot.id,
+                "source_client_slug": source_client_slug,
+                "source_client_id": client.id,
+                "counts": snapshot.counts,
+                "quality_score": float(snapshot.quality_score or 0.0),
+            },
+            is_actor_super_admin=is_super,
+        )
 
         session.commit()
         return snapshot

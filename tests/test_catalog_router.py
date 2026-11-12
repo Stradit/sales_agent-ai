@@ -27,12 +27,14 @@ import auth
 from api import app
 from db.connection import SessionLocal, engine
 from db.models.client import Client
+from db.models.audit_log import AuditLog
 from db.models.platform_catalog import Company, ShareEvent, Snapshot, SnapshotBlob
 from db.models.user import User
 from db.models.user_client_access import UserClientAccess
 from db.provisioning import create_client_schema
 from services.catalog_service import CatalogService
 from services.account_reuse_service import AccountReuseService
+from services.catalog_audit import reuse_check_limiter
 
 api_client = TestClient(app)
 
@@ -857,4 +859,188 @@ def test_failure_handling_and_atomic_credits(setup_catalog_router_environment, m
             cb.api_credits_used = 0
             cb.reuse_requires_approval = True
         session.commit()
+        session.close()
+
+
+def test_catalog_audit_and_rate_limiting(setup_catalog_router_environment, monkeypatch):
+    """Verifies S-14:
+    - Audit rows created across catalog actions (publish, reuse_check, hydrate, rollback, etc.)
+    - Source client slug stripped for non-super-admins
+    - Rolled back transaction creates zero business audit rows
+    - Sliding window rate limit on reuse-check triggers 429 on 31st call
+    """
+    env = setup_catalog_router_environment
+    super_headers = _headers_for(env["super_id"])
+    admin_b_headers = _headers_for(env["admin_b_id"], CLIENT_B_SLUG)
+    session = SessionLocal()
+    try:
+        cb = session.query(Client).filter_by(slug=CLIENT_B_SLUG).first()
+        cb.catalog_consume = True
+        cb.reuse_requires_approval = False
+        session.commit()
+
+        # Clean slate in Schema B
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."account_origin"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."targets"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."personas"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."sub_lobs"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."lobs"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."accounts"'))
+        session.commit()
+
+        # 1. Reuse Check Rate Limiting (30 calls per 5 min, 31st triggers 429)
+        reuse_check_limiter.reset()
+        for i in range(30):
+            r = api_client.get(
+                "/api/catalog/reuse-check",
+                params={"identifier": f"company-{i}.com", "client": CLIENT_B_SLUG},
+                headers=admin_b_headers,
+            )
+            assert r.status_code == 200, f"Call {i+1} failed with status {r.status_code}"
+            assert r.json() == {"available": False}
+
+        # 31st call must trigger 429
+        r_31 = api_client.get(
+            "/api/catalog/reuse-check",
+            params={"identifier": "company-31.com", "client": CLIENT_B_SLUG},
+            headers=admin_b_headers,
+        )
+        assert r_31.status_code == 429
+        assert "Rate limit exceeded" in r_31.json()["detail"]
+
+        # Reset limiter for subsequent tests
+        reuse_check_limiter.reset()
+
+        # 2. Audit row for reuse_check_available (only on hit, hashes identifier)
+        r_hit = api_client.get(
+            "/api/catalog/reuse-check",
+            params={"identifier": "veritasglobal.com", "client": CLIENT_B_SLUG},
+            headers=admin_b_headers,
+        )
+        assert r_hit.status_code == 200
+        target_snapshot_id = r_hit.json()["snapshot_id"]
+        preview_tok = r_hit.json()["preview_token"]
+
+        audit_hit = session.query(AuditLog).filter_by(
+            action="catalog.reuse_check_available",
+            actor_user_id=env["admin_b_id"],
+        ).order_by(AuditLog.id.desc()).first()
+        assert audit_hit is not None
+        assert "identifier_hash" in audit_hit.details
+        # Raw company name or domain must NOT be stored
+        assert "veritasglobal.com" not in json.dumps(audit_hit.details)
+        assert audit_hit.details["target_client_slug"] == CLIENT_B_SLUG
+
+        # 3. Audit row for catalog.hydrate (source client stripped for non-super-admins)
+        r_hyd = api_client.post(
+            "/api/catalog/hydrate",
+            json={"snapshot_id": target_snapshot_id, "preview_token": preview_tok},
+            headers=admin_b_headers,
+        )
+        assert r_hyd.status_code == 200, f"r_hyd failed: {r_hyd.status_code} {r_hyd.text}"
+        sh_event_id = r_hyd.json()["share_event_id"]
+
+        audit_hyd = session.query(AuditLog).filter_by(
+            action="catalog.hydrate",
+            actor_user_id=env["admin_b_id"],
+        ).order_by(AuditLog.id.desc()).first()
+        assert audit_hyd is not None
+        assert audit_hyd.details["share_event_id"] == sh_event_id
+        assert audit_hyd.details["target_client_slug"] == CLIENT_B_SLUG
+        # Source client stripped because actor is client_admin, not super_admin
+        assert "source_client_slug" not in audit_hyd.details
+        assert "source_client_id" not in audit_hyd.details
+        # Prohibited keys / payload / PII absent
+        assert "payload" not in audit_hyd.details
+        assert "records" not in audit_hyd.details
+
+        # 4. Failure atomicity: rolled back transaction creates ZERO business audit rows
+        import services.account_reuse_service as ars
+        original_insert = ars._insert_row
+        def failing_insert(session, schema, table, row, kinds, **kwargs):
+            if table == "personas":
+                raise RuntimeError("Simulated failure to verify zero audit rows")
+            return original_insert(session, schema, table, row, kinds, **kwargs)
+
+        initial_hydrate_audits = session.query(AuditLog).filter_by(action="catalog.hydrate").count()
+
+        # Clean up account B so we can attempt hydration
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."account_origin"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."targets"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."personas"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."sub_lobs"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."lobs"'))
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."accounts"'))
+        session.commit()
+
+        monkeypatch.setattr(ars, "_insert_row", failing_insert)
+        preview_tok_fail = AccountReuseService.generate_preview_token(target_snapshot_id, CLIENT_B_SLUG, env["admin_b_id"])
+        r_fail = api_client.post(
+            "/api/catalog/hydrate",
+            json={"snapshot_id": target_snapshot_id, "preview_token": preview_tok_fail, "idempotency_key": "test_idem_fail_audit"},
+            headers=admin_b_headers,
+        )
+        assert r_fail.status_code == 500
+        monkeypatch.undo()
+
+        final_hydrate_audits = session.query(AuditLog).filter_by(action="catalog.hydrate").count()
+        assert final_hydrate_audits == initial_hydrate_audits, "Rolled back transaction must leave zero business audit rows"
+
+        # 5. Audit row for catalog.rollback_blocked and catalog.rollback
+        # Re-hydrate properly to test rollback audits
+        preview_tok_rb = AccountReuseService.generate_preview_token(target_snapshot_id, CLIENT_B_SLUG, env["admin_b_id"])
+        r_hyd2 = api_client.post(
+            "/api/catalog/hydrate",
+            json={"snapshot_id": target_snapshot_id, "preview_token": preview_tok_rb, "idempotency_key": "test_idem_rb_audit"},
+            headers=admin_b_headers,
+        )
+        assert r_hyd2.status_code == 200
+        sh_event_id2 = r_hyd2.json()["share_event_id"]
+        account_id2 = r_hyd2.json()["account_id"]
+
+        # Insert private deal to block rollback
+        deal_id = session.execute(
+            text(f"""
+                INSERT INTO "{SCHEMA_B}"."deals" (account_id, name, stage, value_amount, probability)
+                VALUES (:aid, 'Audit Blocked Deal', 'discovery', 100000, 20)
+                RETURNING id
+            """),
+            {"aid": account_id2},
+        ).scalar()
+        session.commit()
+
+        r_rb_blocked = api_client.post(
+            f"/api/catalog/share-events/{sh_event_id2}/rollback",
+            json={"reason": "Testing rollback_blocked audit"},
+            headers=super_headers,
+        )
+        assert r_rb_blocked.status_code == 409
+
+        audit_blocked = session.query(AuditLog).filter_by(
+            action="catalog.rollback_blocked",
+            actor_user_id=env["super_id"],
+        ).order_by(AuditLog.id.desc()).first()
+        assert audit_blocked is not None
+        assert audit_blocked.details["share_event_id"] == sh_event_id2
+        assert "deals" in audit_blocked.details["breakdown"]
+
+        # Clean deal and perform clean rollback
+        session.execute(text(f'DELETE FROM "{SCHEMA_B}"."deals" WHERE id = :id'), {"id": deal_id})
+        session.commit()
+
+        r_rb_ok = api_client.post(
+            f"/api/catalog/share-events/{sh_event_id2}/rollback",
+            json={"reason": "Testing clean rollback audit"},
+            headers=super_headers,
+        )
+        assert r_rb_ok.status_code == 200
+
+        audit_rb = session.query(AuditLog).filter_by(
+            action="catalog.rollback",
+            actor_user_id=env["super_id"],
+        ).order_by(AuditLog.id.desc()).first()
+        assert audit_rb is not None
+        assert audit_rb.details["share_event_id"] == sh_event_id2
+        assert audit_rb.details["target_client_slug"] == CLIENT_B_SLUG
+    finally:
         session.close()

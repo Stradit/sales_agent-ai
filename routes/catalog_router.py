@@ -36,6 +36,7 @@ from services.account_reuse_service import (
     DuplicateAccountError,
     RollbackBlockedError,
 )
+from services.catalog_audit import log_catalog_audit, reuse_check_limiter
 from services.catalog_service import CatalogService
 from services.credit_service import AccountQuotaExceededError, InsufficientCreditsError
 
@@ -190,10 +191,36 @@ def reuse_check(
         explicit_slug=client,
     )
 
+    # Rate limiting: 30 calls / 5 min per (user_id, client_slug), counts hits and misses (S-14)
+    rate_limit_key = f"{current_user.id}:{clean_slug}"
+    if not reuse_check_limiter.check_and_record(rate_limit_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded: 30 calls per 5 minutes",
+        )
+
     try:
         result = AccountReuseService.check_reuse_available(session, identifier, clean_slug)
         if not result or not result.get("available"):
             return {"available": False}
+
+        # S-14 Audit: Log reuse check hit with hashed identifier (anti-oracle)
+        target_client = session.query(Client).filter_by(slug=clean_slug).first()
+        ident_hash = hashlib.sha256(identifier.strip().lower().encode("utf-8")).hexdigest()
+        log_catalog_audit(
+            session=session,
+            actor_user_id=current_user.id,
+            action="catalog.reuse_check_available",
+            client_id=target_client.id if target_client else None,
+            details={
+                "identifier_hash": ident_hash,
+                "target_client_slug": clean_slug,
+                "target_client_id": target_client.id if target_client else None,
+                "snapshot_id": result.get("snapshot_id"),
+            },
+            is_actor_super_admin=(getattr(current_user, "role", None) == "super_admin"),
+        )
+        session.commit()
 
         # Generate cryptographically signed HMAC preview token
         token = AccountReuseService.generate_preview_token(
@@ -351,6 +378,23 @@ def submit_reuse_request(
         fee_credits=1,
     )
     session.add(share_event)
+    session.flush()
+
+    # S-14 Audit: Log request created inside caller transaction
+    log_catalog_audit(
+        session=session,
+        actor_user_id=current_user.id,
+        action="catalog.request_created",
+        client_id=target_client.id,
+        details={
+            "share_event_id": share_event.id,
+            "snapshot_id": req.snapshot_id,
+            "target_client_slug": clean_slug,
+            "reason": req.reason,
+        },
+        is_actor_super_admin=(getattr(current_user, "role", None) == "super_admin"),
+    )
+
     session.commit()
 
     return {
@@ -667,6 +711,24 @@ def reject_reuse_request(
     event.status = "rejected"
     event.reason = (req.reason if req else None) or "Rejected by platform administrator"
     event.completed_at = datetime.now(timezone.utc)
+
+    # S-14 Audit: Log request rejected inside caller transaction
+    target_client = session.query(Client).filter_by(id=event.target_client_id).first()
+    log_catalog_audit(
+        session=session,
+        actor_user_id=current_user.id,
+        action="catalog.request_rejected",
+        client_id=event.target_client_id,
+        target_user_id=event.requested_by,
+        details={
+            "share_event_id": event.id,
+            "snapshot_id": event.snapshot_id,
+            "target_client_slug": target_client.slug if target_client else None,
+            "reason": event.reason,
+        },
+        is_actor_super_admin=True,
+    )
+
     session.commit()
 
     return {"ok": True, "request_id": event.id, "status": "rejected"}
@@ -694,6 +756,24 @@ def rollback_share_event(
         )
         return res
     except RollbackBlockedError as e:
+        session.rollback()
+        event = session.query(ShareEvent).filter_by(id=share_event_id).first()
+        client_id = event.target_client_id if event else None
+        target_client = session.query(Client).filter_by(id=client_id).first() if client_id else None
+        log_catalog_audit(
+            session=session,
+            actor_user_id=current_user.id,
+            action="catalog.rollback_blocked",
+            client_id=client_id,
+            details={
+                "share_event_id": share_event_id,
+                "target_client_slug": target_client.slug if target_client else None,
+                "reason": str(e),
+                "breakdown": getattr(e, "breakdown", {}),
+            },
+            is_actor_super_admin=True,
+        )
+        session.commit()
         raise HTTPException(
             status_code=409,
             detail={
