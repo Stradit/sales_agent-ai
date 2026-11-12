@@ -7,7 +7,9 @@ Provides:
 4. Super-Admin Platform Catalog Management (/api/catalog/companies, publish, assign, rollback)
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+import hashlib
+import logging
 from typing import Any, Dict, List, Optional
 import uuid
 
@@ -36,6 +38,25 @@ from services.account_reuse_service import (
 )
 from services.catalog_service import CatalogService
 from services.credit_service import AccountQuotaExceededError, InsufficientCreditsError
+
+logger = logging.getLogger(__name__)
+
+
+def _sanitize_error_message(msg: str) -> str:
+    """Sanitizes error text to ensure no raw SQL queries or sensitive internals leak."""
+    if "[SQL:" in msg:
+        msg = msg.split("[SQL:")[0].strip()
+    return msg[:500]
+
+
+def _handle_unexpected_exception(endpoint_name: str, e: Exception) -> HTTPException:
+    """Logs unexpected exceptions with correlation ID and returns a safe sanitized response."""
+    correlation_id = uuid.uuid4().hex[:12]
+    logger.error(f"[{endpoint_name}] Unexpected error (correlation_id={correlation_id}): {e}", exc_info=True)
+    return HTTPException(
+        status_code=500,
+        detail={"detail": f"{endpoint_name} failed", "correlation_id": correlation_id},
+    )
 
 catalog_router = APIRouter(prefix="/api/catalog", tags=["Verified Intelligence Catalog"])
 
@@ -186,7 +207,7 @@ def reuse_check(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Reuse check failed: {str(e)}")
+        raise _handle_unexpected_exception("Reuse check", e)
 
 
 @catalog_router.post("/hydrate")
@@ -234,7 +255,11 @@ def hydrate_account(
         )
 
     # 3. Derive idempotency key if omitted
-    idem_key = req.idempotency_key or f"hydrate_{clean_slug}_{req.snapshot_id}_{uuid.uuid4().hex[:12]}"
+    if req.idempotency_key:
+        idem_key = req.idempotency_key
+    else:
+        raw_key = f"{clean_slug}:{req.snapshot_id}:{current_user.id}:{date.today().isoformat()}"
+        idem_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
     try:
         hydration_res = AccountReuseService.hydrate_account_from_catalog(
@@ -251,14 +276,18 @@ def hydrate_account(
 
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except InsufficientCreditsError as e:
+        raise HTTPException(status_code=402, detail=str(e))
     except AccountQuotaExceededError as e:
         raise HTTPException(status_code=402, detail=str(e))
     except DuplicateAccountError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except AccountReuseError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Hydration failed: {str(e)}")
+        raise _handle_unexpected_exception("Hydration", e)
 
 
 @catalog_router.post("/requests")
@@ -506,8 +535,10 @@ def publish_account(
         }
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Publish failed: {str(e)}")
+        raise _handle_unexpected_exception("Publish", e)
 
 
 @catalog_router.post("/assign")
@@ -536,14 +567,18 @@ def assign_account(
         return res
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except InsufficientCreditsError as e:
+        raise HTTPException(status_code=402, detail=str(e))
     except AccountQuotaExceededError as e:
         raise HTTPException(status_code=402, detail=str(e))
     except DuplicateAccountError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except AccountReuseError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Direct assignment failed: {str(e)}")
+        raise _handle_unexpected_exception("Direct assignment", e)
 
 
 @catalog_router.post("/requests/{request_id}/approve")
@@ -586,11 +621,32 @@ def approve_reuse_request(
             "account_id": res["account_id"],
             "counts": res["counts"],
         }
+    except InsufficientCreditsError as e:
+        raise HTTPException(status_code=402, detail=str(e))
+    except DuplicateAccountError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except AccountQuotaExceededError as e:
+        raise HTTPException(status_code=402, detail=str(e))
+    except AccountReuseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        event.status = "failed"
-        event.error = str(e)[:2000]
-        session.commit()
-        raise HTTPException(status_code=400, detail=f"Approval hydration failed: {str(e)}")
+        correlation_id = uuid.uuid4().hex[:12]
+        logger.error(f"[approve_reuse_request] Approval hydration failed (correlation_id={correlation_id}): {e}", exc_info=True)
+        session.rollback()
+        new_session = SessionLocal()
+        try:
+            failed_event = new_session.query(ShareEvent).filter_by(id=request_id).first()
+            if failed_event:
+                failed_event.status = "failed"
+                failed_event.error = _sanitize_error_message(str(e))
+                new_session.commit()
+        finally:
+            new_session.close()
+
+        raise HTTPException(
+            status_code=500,
+            detail={"detail": "Approval hydration failed", "correlation_id": correlation_id},
+        )
 
 
 @catalog_router.post("/requests/{request_id}/reject")
@@ -647,5 +703,7 @@ def rollback_share_event(
         )
     except AccountReuseError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Rollback failed: {str(e)}")
+        raise _handle_unexpected_exception("Rollback", e)

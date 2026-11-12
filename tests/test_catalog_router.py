@@ -741,3 +741,120 @@ def test_safe_rollback_with_introspection_guard(setup_catalog_router_environment
         assert res_repeat.status_code == 400
     finally:
         session.close()
+
+
+def test_failure_handling_and_atomic_credits(setup_catalog_router_environment, monkeypatch):
+    """Verifies S-10: credit-balance protection, failure atomicity, and sanitized error handling."""
+    env = setup_catalog_router_environment
+    super_headers = _headers_for(env["super_id"])
+    admin_b_headers = _headers_for(env["admin_b_id"], CLIENT_B_SLUG)
+    session = SessionLocal()
+    try:
+        cb = session.query(Client).filter_by(slug=CLIENT_B_SLUG).first()
+        cb.catalog_consume = True
+        cb.reuse_requires_approval = False
+        session.commit()
+
+        # 1. Credit Limit Exhaustion Protection
+        cb.api_credits_total = 10
+        cb.api_credits_used = 10
+        session.commit()
+
+        preview_tok = AccountReuseService.generate_preview_token(env["snapshot_id"], CLIENT_B_SLUG, env["admin_b_id"])
+        res_credit = api_client.post(
+            "/api/catalog/hydrate",
+            json={"snapshot_id": env["snapshot_id"], "preview_token": preview_tok},
+            headers=admin_b_headers,
+        )
+        assert res_credit.status_code == 402
+        assert "Insufficient credits" in res_credit.text
+
+        # Restore credits for next tests
+        cb.api_credits_used = 0
+        cb.api_credits_total = 1000
+        session.commit()
+
+        # 2. Failure Atomicity on Hydrate: monkeypatch an insert step to fail
+        initial_debits = session.execute(
+            text("SELECT count(*) FROM public.credit_ledger WHERE client_id = :cid AND delta < 0"),
+            {"cid": cb.id},
+        ).scalar() or 0
+
+        preview_tok2 = AccountReuseService.generate_preview_token(env["snapshot_id"], CLIENT_B_SLUG, env["admin_b_id"])
+
+        import services.account_reuse_service as ars
+        original_insert = ars._insert_row
+        def failing_insert(session, schema, table, row, kinds, **kwargs):
+            if table == "personas":
+                raise RuntimeError("Simulated database failure during personas insert [SQL: INSERT INTO personas ...]")
+            return original_insert(session, schema, table, row, kinds, **kwargs)
+
+        monkeypatch.setattr(ars, "_insert_row", failing_insert)
+
+        res_fail = api_client.post(
+            "/api/catalog/hydrate",
+            json={"snapshot_id": env["snapshot_id"], "preview_token": preview_tok2},
+            headers=admin_b_headers,
+        )
+        assert res_fail.status_code == 500
+        detail = res_fail.json()["detail"]
+        assert "correlation_id" in detail
+        # Ensure raw SQL is NOT leaked
+        assert "INSERT INTO" not in res_fail.text
+        assert "SELECT" not in res_fail.text
+
+        # Verify no rows created in client B accounts
+        acct_cnt = session.execute(text(f'SELECT count(*) FROM "{SCHEMA_B}"."accounts"')).scalar()
+        assert acct_cnt == 0
+        # Verify no new ledger debit was recorded
+        final_debits = session.execute(
+            text("SELECT count(*) FROM public.credit_ledger WHERE client_id = :cid AND delta < 0"),
+            {"cid": cb.id},
+        ).scalar() or 0
+        assert final_debits == initial_debits
+
+        # Undo monkeypatch
+        monkeypatch.undo()
+
+        # 3. Approval failure handling:
+        cb.reuse_requires_approval = True
+        session.commit()
+
+        preview_tok3 = AccountReuseService.generate_preview_token(env["snapshot_id"], CLIENT_B_SLUG, env["admin_b_id"])
+        res_req = api_client.post(
+            "/api/catalog/requests",
+            json={"snapshot_id": env["snapshot_id"], "preview_token": preview_tok3, "reason": "Request to approve"},
+            headers=admin_b_headers,
+        )
+        assert res_req.status_code == 200
+        req_id = res_req.json()["request_id"]
+
+        # Monkeypatch again
+        monkeypatch.setattr(ars, "_insert_row", failing_insert)
+
+        res_app_fail = api_client.post(
+            f"/api/catalog/requests/{req_id}/approve",
+            headers=super_headers,
+        )
+        assert res_app_fail.status_code == 500
+        app_detail = res_app_fail.json()["detail"]
+        assert "correlation_id" in app_detail
+        assert "INSERT INTO" not in res_app_fail.text
+
+        # Verify share_event marked 'failed' with sanitized error in separate session
+        failed_event = session.query(ShareEvent).filter_by(id=req_id).first()
+        session.refresh(failed_event)
+        assert failed_event.status == "failed"
+        assert failed_event.error is not None
+        assert "INSERT INTO" not in failed_event.error
+        assert len(failed_event.error) <= 500
+
+    finally:
+        monkeypatch.undo()
+        cb = session.query(Client).filter_by(slug=CLIENT_B_SLUG).first()
+        if cb:
+            cb.api_credits_total = 5000
+            cb.api_credits_used = 0
+            cb.reuse_requires_approval = True
+        session.commit()
+        session.close()

@@ -18,7 +18,7 @@ Manages tenant consumption of verified intelligence from platform_catalog:
 """
 
 import base64
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import hashlib
 import hmac
 import json
@@ -27,6 +27,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import config
@@ -413,21 +414,7 @@ class AccountReuseService:
         clean_slug = validate_slug(target_client_slug)
         target_schema = schema_for(clean_slug)
 
-        # 1. Idempotency Check
-        existing_event = session.query(ShareEvent).filter_by(idempotency_key=idempotency_key).first()
-        if existing_event:
-            if existing_event.status == "done":
-                return {
-                    "ok": True,
-                    "idempotent": True,
-                    "share_event_id": existing_event.id,
-                    "account_id": (existing_event.created_ids or {}).get("accounts", [None])[0],
-                    "counts": existing_event.counts,
-                }
-            elif existing_event.status == "running":
-                raise AccountReuseError("An identical hydration request is currently in progress.")
-
-        # 2. Verify target client and snapshot
+        # 1. Verify target client and snapshot
         target_client = session.query(Client).filter_by(slug=clean_slug).first()
         if not target_client:
             raise ValueError(f"Target client '{clean_slug}' not found.")
@@ -449,13 +436,23 @@ class AccountReuseService:
         company = session.query(Company).filter_by(id=snapshot.company_id).first()
         canonical_key = company.canonical_key if company else f"snap:{snapshot.id}"
 
-        # 3. Transaction-scoped Concurrency Locks
-        # Lock target client quota and account hydration namespace
+        # 2. Transaction-scoped Concurrency Locks (taken BEFORE idempotency lookup)
         session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
             {"k": f"catalog:hydrate:{clean_slug}:{canonical_key}"},
         )
         CreditService.acquire_account_quota_lock(session, clean_slug)
+
+        # 3. Idempotency Check
+        existing_event = session.query(ShareEvent).filter_by(idempotency_key=idempotency_key).first()
+        if existing_event and existing_event.status == "done":
+            return {
+                "ok": True,
+                "idempotent": True,
+                "share_event_id": existing_event.id,
+                "account_id": (existing_event.created_ids or {}).get("accounts", [None])[0],
+                "counts": existing_event.counts,
+            }
 
         # 4. Quota Enforcement
         CreditService.check_and_enforce_account_quota(
@@ -485,270 +482,306 @@ class AccountReuseService:
         if dup_check:
             raise DuplicateAccountError(f"Account '{acct_key or acct_domain}' already exists in tenant workspace.")
 
-        # 6. Credit Fee Billing & Ledger
-        if fee_credits > 0:
-            target_client.api_credits_used += fee_credits
-            ledger_entry = CreditLedger(
-                client_id=target_client.id,
-                delta=-fee_credits,
-                reason=f"Verified catalog intelligence hydration: {canonical_key}",
-            )
-            session.add(ledger_entry)
+        try:
+            # 6. Credit Fee Billing & Ledger (atomic check & deduction)
+            if fee_credits > 0:
+                if target_client.api_credits_total > 0 and (target_client.api_credits_used + fee_credits > target_client.api_credits_total):
+                    raise InsufficientCreditsError(
+                        f"Insufficient credits: client '{clean_slug}' requires {fee_credits} credits but only has {max(0, target_client.api_credits_total - target_client.api_credits_used)} remaining."
+                    )
 
-        # 7. Create or update ShareEvent in 'running' state
-        if existing_event:
-            share_event = existing_event
-            share_event.status = "running"
-            share_event.approved_by = approved_by_user_id or user_id
-            if reason:
-                share_event.reason = reason
-        else:
-            share_event = ShareEvent(
-                snapshot_id=snapshot.id,
-                target_client_id=target_client.id,
-                mode=mode,
-                requested_by=user_id,
-                approved_by=approved_by_user_id or user_id,
-                reason=reason or f"Hydrated verified intelligence for {canonical_key}",
-                status="running",
-                idempotency_key=idempotency_key,
-                fee_credits=fee_credits,
-            )
-            session.add(share_event)
-        session.flush()
+                res = session.execute(
+                    text("""
+                        UPDATE public.clients
+                        SET api_credits_used = api_credits_used + :fee
+                        WHERE id = :id AND (api_credits_total = 0 OR api_credits_used + :fee <= api_credits_total)
+                        RETURNING api_credits_used
+                    """),
+                    {"fee": fee_credits, "id": target_client.id},
+                ).fetchone()
 
-        created_ids: Dict[str, List[int]] = {
-            "accounts": [],
-            "lobs": [],
-            "sub_lobs": [],
-            "personas": [],
-            "posts": [],
-            "cxo_movements": [],
-            "linkedin_jobs": [],
-            "targets": [],
-        }
+                if not res:
+                    raise InsufficientCreditsError(
+                        f"Insufficient credits: client '{clean_slug}' has reached or exceeded its credit limit."
+                    )
 
-        # 8. Relational Insertion with Topological Remapping
-        share_policy = get_share_policy()
-
-        # 8a. Insert Account
-        clean_acct = _filter_payload_for_table(session, target_schema, "accounts", account_payload, share_policy)
-        # Reset tenant-specific CRM/verification flags
-        clean_acct["owner_user_id"] = user_id
-        clean_acct["primary_business_line_id"] = None
-        clean_acct["is_manually_verified"] = False
-        clean_acct["manually_verified_at"] = None
-        clean_acct["api_credits_total"] = 0
-        clean_acct["api_credits_used"] = 0
-
-        # Ensure unique target key
-        target_acct_key = clean_acct.get("key") or f"acct_{int(datetime.now().timestamp())}"
-        key_exists = session.execute(
-            text(f'SELECT 1 FROM "{target_schema}"."accounts" WHERE key = :k'),
-            {"k": target_acct_key},
-        ).scalar()
-        if key_exists:
-            target_acct_key = f"{target_acct_key}_{target_client.id}"
-            clean_acct["key"] = target_acct_key
-
-        acct_kinds = get_column_kinds(session, target_schema, "accounts")
-        new_account_id = _insert_row(
-            session=session,
-            schema=target_schema,
-            table="accounts",
-            row=clean_acct,
-            kinds=acct_kinds,
-            returning="id",
-        )
-        created_ids["accounts"].append(new_account_id)
-
-        # 8b. Insert LOBs
-        lob_kinds = get_column_kinds(session, target_schema, "lobs")
-        lob_id_map: Dict[int, int] = {}
-        for lob_data in blob.payload.get("lobs", []):
-            old_lob_id = lob_data.get("_old_id")
-            clean_lob = _filter_payload_for_table(session, target_schema, "lobs", lob_data, share_policy)
-            clean_lob["account_id"] = new_account_id
-            clean_lob["is_manually_verified"] = False
-            clean_lob["manually_verified_at"] = None
-
-            new_lob_id = _insert_row(
-                session=session,
-                schema=target_schema,
-                table="lobs",
-                row=clean_lob,
-                kinds=lob_kinds,
-                returning="id",
-            )
-            created_ids["lobs"].append(new_lob_id)
-            if old_lob_id:
-                lob_id_map[old_lob_id] = new_lob_id
-
-        # 8c. Insert Sub-LOBs (no account_id column; link strictly via lob_id)
-        sub_kinds = get_column_kinds(session, target_schema, "sub_lobs")
-        for sub_data in blob.payload.get("sub_lobs", []):
-            old_lob_ref = sub_data.get("lob_id")
-            new_lob_ref = lob_id_map.get(old_lob_ref)
-            if not new_lob_ref:
-                continue
-
-            clean_sub = _filter_payload_for_table(session, target_schema, "sub_lobs", sub_data, share_policy)
-            clean_sub["lob_id"] = new_lob_ref
-            clean_sub["is_manually_verified"] = False
-            clean_sub["manually_verified_at"] = None
-
-            new_sub_id = _insert_row(
-                session=session,
-                schema=target_schema,
-                table="sub_lobs",
-                row=clean_sub,
-                kinds=sub_kinds,
-                returning="id",
-            )
-            created_ids["sub_lobs"].append(new_sub_id)
-
-        # 8d. Insert Personas
-        per_kinds = get_column_kinds(session, target_schema, "personas")
-        persona_id_map: Dict[int, int] = {}
-        for per_data in blob.payload.get("personas", []):
-            old_per_id = per_data.get("_old_id")
-            old_lob_id = per_data.get("_old_lob_id")
-            clean_per = _filter_payload_for_table(session, target_schema, "personas", per_data, share_policy)
-            clean_per["account_id"] = new_account_id
-            clean_per["lob_id"] = lob_id_map.get(old_lob_id) if old_lob_id else None
-            clean_per["created_by_user_id"] = user_id
-            clean_per["is_manually_verified"] = False
-            clean_per["manually_verified_at"] = None
-
-            new_per_id = _insert_row(
-                session=session,
-                schema=target_schema,
-                table="personas",
-                row=clean_per,
-                kinds=per_kinds,
-                returning="id",
-            )
-            created_ids["personas"].append(new_per_id)
-            if old_per_id:
-                persona_id_map[old_per_id] = new_per_id
-
-        # 8e. Remap hierarchical reports_to_persona_id if present
-        # 8f. Deep Remap of organisational_hierarchy_tree (Spike S1)
-        raw_tree = clean_acct.get("organisational_hierarchy_tree")
-        if raw_tree:
-            if isinstance(raw_tree, str):
-                try:
-                    raw_tree = json.loads(raw_tree)
-                except Exception:
-                    raw_tree = None
-            if raw_tree:
-                remapped_tree = cls._remap_tree_ids(raw_tree, lob_id_map, persona_id_map)
-                session.execute(
-                    text(f'UPDATE "{target_schema}"."accounts" SET organisational_hierarchy_tree = CAST(:tree AS jsonb) WHERE id = :aid'),
-                    {"tree": json.dumps(remapped_tree), "aid": new_account_id},
+                target_client.api_credits_used = res[0]
+                ledger_entry = CreditLedger(
+                    client_id=target_client.id,
+                    delta=-fee_credits,
+                    reason=f"Verified catalog intelligence hydration: {canonical_key}",
                 )
+                session.add(ledger_entry)
 
-        # 8g. Insert Social Posts, CXO movements, Jobs
-        post_kinds = get_column_kinds(session, target_schema, "posts")
-        for post_data in blob.payload.get("posts", []):
-            clean_post = _filter_payload_for_table(session, target_schema, "posts", post_data, share_policy)
-            clean_post["target_key"] = target_acct_key
-            clean_post["new_in_last_run"] = False
-            pid = _insert_row(
+            # 7. Create or update ShareEvent
+            if existing_event and existing_event.status == "pending_approval":
+                share_event = existing_event
+                share_event.status = "running"
+                share_event.approved_by = approved_by_user_id or user_id
+                if reason:
+                    share_event.reason = reason
+            else:
+                share_event = ShareEvent(
+                    snapshot_id=snapshot.id,
+                    target_client_id=target_client.id,
+                    mode=mode,
+                    requested_by=user_id,
+                    approved_by=approved_by_user_id or user_id,
+                    reason=reason or f"Hydrated verified intelligence for {canonical_key}",
+                    status="running",
+                    idempotency_key=idempotency_key,
+                    fee_credits=fee_credits,
+                )
+                session.add(share_event)
+            session.flush()
+
+            created_ids: Dict[str, List[int]] = {
+                "accounts": [],
+                "lobs": [],
+                "sub_lobs": [],
+                "personas": [],
+                "posts": [],
+                "cxo_movements": [],
+                "linkedin_jobs": [],
+                "targets": [],
+            }
+    
+            # 8. Relational Insertion with Topological Remapping
+            share_policy = get_share_policy()
+    
+            # 8a. Insert Account
+            clean_acct = _filter_payload_for_table(session, target_schema, "accounts", account_payload, share_policy)
+            # Reset tenant-specific CRM/verification flags
+            clean_acct["owner_user_id"] = user_id
+            clean_acct["primary_business_line_id"] = None
+            clean_acct["is_manually_verified"] = False
+            clean_acct["manually_verified_at"] = None
+            clean_acct["api_credits_total"] = 0
+            clean_acct["api_credits_used"] = 0
+    
+            # Ensure unique target key
+            target_acct_key = clean_acct.get("key") or f"acct_{int(datetime.now().timestamp())}"
+            key_exists = session.execute(
+                text(f'SELECT 1 FROM "{target_schema}"."accounts" WHERE key = :k'),
+                {"k": target_acct_key},
+            ).scalar()
+            if key_exists:
+                target_acct_key = f"{target_acct_key}_{target_client.id}"
+                clean_acct["key"] = target_acct_key
+    
+            acct_kinds = get_column_kinds(session, target_schema, "accounts")
+            new_account_id = _insert_row(
                 session=session,
                 schema=target_schema,
-                table="posts",
-                row=clean_post,
-                kinds=post_kinds,
+                table="accounts",
+                row=clean_acct,
+                kinds=acct_kinds,
                 returning="id",
-                on_conflict="DO NOTHING",
             )
-            if pid:
-                created_ids["posts"].append(pid)
-
-        cxo_kinds = get_column_kinds(session, target_schema, "cxo_movements")
-        for cxo_data in blob.payload.get("cxo_movements", []):
-            clean_cxo = _filter_payload_for_table(session, target_schema, "cxo_movements", cxo_data, share_policy)
-            clean_cxo["target_key"] = target_acct_key
-            clean_cxo["new_in_last_run"] = False
-            cid = _insert_row(
-                session=session,
-                schema=target_schema,
-                table="cxo_movements",
-                row=clean_cxo,
-                kinds=cxo_kinds,
-                returning="id",
-                on_conflict="DO NOTHING",
+            created_ids["accounts"].append(new_account_id)
+    
+            # 8b. Insert LOBs
+            lob_kinds = get_column_kinds(session, target_schema, "lobs")
+            lob_id_map: Dict[int, int] = {}
+            for lob_data in blob.payload.get("lobs", []):
+                old_lob_id = lob_data.get("_old_id")
+                clean_lob = _filter_payload_for_table(session, target_schema, "lobs", lob_data, share_policy)
+                clean_lob["account_id"] = new_account_id
+                clean_lob["is_manually_verified"] = False
+                clean_lob["manually_verified_at"] = None
+    
+                new_lob_id = _insert_row(
+                    session=session,
+                    schema=target_schema,
+                    table="lobs",
+                    row=clean_lob,
+                    kinds=lob_kinds,
+                    returning="id",
+                )
+                created_ids["lobs"].append(new_lob_id)
+                if old_lob_id:
+                    lob_id_map[old_lob_id] = new_lob_id
+    
+            # 8c. Insert Sub-LOBs (no account_id column; link strictly via lob_id)
+            sub_kinds = get_column_kinds(session, target_schema, "sub_lobs")
+            for sub_data in blob.payload.get("sub_lobs", []):
+                old_lob_ref = sub_data.get("lob_id")
+                new_lob_ref = lob_id_map.get(old_lob_ref)
+                if not new_lob_ref:
+                    continue
+    
+                clean_sub = _filter_payload_for_table(session, target_schema, "sub_lobs", sub_data, share_policy)
+                clean_sub["lob_id"] = new_lob_ref
+                clean_sub["is_manually_verified"] = False
+                clean_sub["manually_verified_at"] = None
+    
+                new_sub_id = _insert_row(
+                    session=session,
+                    schema=target_schema,
+                    table="sub_lobs",
+                    row=clean_sub,
+                    kinds=sub_kinds,
+                    returning="id",
+                )
+                created_ids["sub_lobs"].append(new_sub_id)
+    
+            # 8d. Insert Personas
+            per_kinds = get_column_kinds(session, target_schema, "personas")
+            persona_id_map: Dict[int, int] = {}
+            for per_data in blob.payload.get("personas", []):
+                old_per_id = per_data.get("_old_id")
+                old_lob_id = per_data.get("_old_lob_id")
+                clean_per = _filter_payload_for_table(session, target_schema, "personas", per_data, share_policy)
+                clean_per["account_id"] = new_account_id
+                clean_per["lob_id"] = lob_id_map.get(old_lob_id) if old_lob_id else None
+                clean_per["created_by_user_id"] = user_id
+                clean_per["is_manually_verified"] = False
+                clean_per["manually_verified_at"] = None
+    
+                new_per_id = _insert_row(
+                    session=session,
+                    schema=target_schema,
+                    table="personas",
+                    row=clean_per,
+                    kinds=per_kinds,
+                    returning="id",
+                )
+                created_ids["personas"].append(new_per_id)
+                if old_per_id:
+                    persona_id_map[old_per_id] = new_per_id
+    
+            # 8e. Remap hierarchical reports_to_persona_id if present
+            # 8f. Deep Remap of organisational_hierarchy_tree (Spike S1)
+            raw_tree = clean_acct.get("organisational_hierarchy_tree")
+            if raw_tree:
+                if isinstance(raw_tree, str):
+                    try:
+                        raw_tree = json.loads(raw_tree)
+                    except Exception:
+                        raw_tree = None
+                if raw_tree:
+                    remapped_tree = cls._remap_tree_ids(raw_tree, lob_id_map, persona_id_map)
+                    session.execute(
+                        text(f'UPDATE "{target_schema}"."accounts" SET organisational_hierarchy_tree = CAST(:tree AS jsonb) WHERE id = :aid'),
+                        {"tree": json.dumps(remapped_tree), "aid": new_account_id},
+                    )
+    
+            # 8g. Insert Social Posts, CXO movements, Jobs
+            post_kinds = get_column_kinds(session, target_schema, "posts")
+            for post_data in blob.payload.get("posts", []):
+                clean_post = _filter_payload_for_table(session, target_schema, "posts", post_data, share_policy)
+                clean_post["target_key"] = target_acct_key
+                clean_post["new_in_last_run"] = False
+                pid = _insert_row(
+                    session=session,
+                    schema=target_schema,
+                    table="posts",
+                    row=clean_post,
+                    kinds=post_kinds,
+                    returning="id",
+                    on_conflict="DO NOTHING",
+                )
+                if pid:
+                    created_ids["posts"].append(pid)
+    
+            cxo_kinds = get_column_kinds(session, target_schema, "cxo_movements")
+            for cxo_data in blob.payload.get("cxo_movements", []):
+                clean_cxo = _filter_payload_for_table(session, target_schema, "cxo_movements", cxo_data, share_policy)
+                clean_cxo["target_key"] = target_acct_key
+                clean_cxo["new_in_last_run"] = False
+                cid = _insert_row(
+                    session=session,
+                    schema=target_schema,
+                    table="cxo_movements",
+                    row=clean_cxo,
+                    kinds=cxo_kinds,
+                    returning="id",
+                    on_conflict="DO NOTHING",
+                )
+                if cid:
+                    created_ids["cxo_movements"].append(cid)
+    
+            job_kinds = get_column_kinds(session, target_schema, "linkedin_jobs")
+            for job_data in blob.payload.get("linkedin_jobs", []):
+                clean_job = _filter_payload_for_table(session, target_schema, "linkedin_jobs", job_data, share_policy)
+                clean_job["target_key"] = target_acct_key
+                clean_job["new_in_last_run"] = False
+                jid = _insert_row(
+                    session=session,
+                    schema=target_schema,
+                    table="linkedin_jobs",
+                    row=clean_job,
+                    kinds=job_kinds,
+                    returning="id",
+                    on_conflict="DO NOTHING",
+                )
+                if jid:
+                    created_ids["linkedin_jobs"].append(jid)
+    
+            # 8h. Register Target for Continuous Monitoring (Spike S2)
+            tgt_data = blob.payload.get("targets")
+            if tgt_data:
+                clean_tgt = _filter_payload_for_table(session, target_schema, "targets", tgt_data, share_policy)
+                clean_tgt["key"] = target_acct_key
+                target_kinds = get_column_kinds(session, target_schema, "targets")
+                _insert_row(
+                    session=session,
+                    schema=target_schema,
+                    table="targets",
+                    row=clean_tgt,
+                    kinds=target_kinds,
+                    returning=None,
+                    on_conflict="(key) DO UPDATE SET updated_at = NOW()",
+                )
+                created_ids["targets"].append(target_acct_key)
+    
+            # 8i. Provenance: Insert into target account_origin
+            session.execute(
+                text(f"""
+                    INSERT INTO "{target_schema}"."account_origin"
+                    (account_id, origin_type, canonical_key, snapshot_id, snapshot_version, hydrated_at, hydrated_by, local_edits)
+                    VALUES (:aid, 'catalog', :ck, :sid, :sver, NOW(), :uid, false)
+                """),
+                {
+                    "aid": new_account_id,
+                    "ck": canonical_key,
+                    "sid": snapshot.id,
+                    "sver": snapshot.version,
+                    "uid": user_id,
+                },
             )
-            if cid:
-                created_ids["cxo_movements"].append(cid)
-
-        job_kinds = get_column_kinds(session, target_schema, "linkedin_jobs")
-        for job_data in blob.payload.get("linkedin_jobs", []):
-            clean_job = _filter_payload_for_table(session, target_schema, "linkedin_jobs", job_data, share_policy)
-            clean_job["target_key"] = target_acct_key
-            clean_job["new_in_last_run"] = False
-            jid = _insert_row(
-                session=session,
-                schema=target_schema,
-                table="linkedin_jobs",
-                row=clean_job,
-                kinds=job_kinds,
-                returning="id",
-                on_conflict="DO NOTHING",
-            )
-            if jid:
-                created_ids["linkedin_jobs"].append(jid)
-
-        # 8h. Register Target for Continuous Monitoring (Spike S2)
-        tgt_data = blob.payload.get("targets")
-        if tgt_data:
-            clean_tgt = _filter_payload_for_table(session, target_schema, "targets", tgt_data, share_policy)
-            clean_tgt["key"] = target_acct_key
-            target_kinds = get_column_kinds(session, target_schema, "targets")
-            _insert_row(
-                session=session,
-                schema=target_schema,
-                table="targets",
-                row=clean_tgt,
-                kinds=target_kinds,
-                returning=None,
-                on_conflict="(key) DO UPDATE SET updated_at = NOW()",
-            )
-            created_ids["targets"].append(target_acct_key)
-
-        # 8i. Provenance: Insert into target account_origin
-        session.execute(
-            text(f"""
-                INSERT INTO "{target_schema}"."account_origin"
-                (account_id, origin_type, canonical_key, snapshot_id, snapshot_version, hydrated_at, hydrated_by, local_edits)
-                VALUES (:aid, 'catalog', :ck, :sid, :sver, NOW(), :uid, false)
-            """),
-            {
-                "aid": new_account_id,
-                "ck": canonical_key,
-                "sid": snapshot.id,
-                "sver": snapshot.version,
-                "uid": user_id,
-            },
-        )
-
-        # 9. Update ShareEvent with success status and manifest
-        counts_summary = {
-            "accounts": len(created_ids["accounts"]),
-            "lobs": len(created_ids["lobs"]),
-            "sub_lobs": len(created_ids["sub_lobs"]),
-            "personas": len(created_ids["personas"]),
-            "posts": len(created_ids["posts"]),
-            "cxo_movements": len(created_ids["cxo_movements"]),
-            "jobs": len(created_ids["linkedin_jobs"]),
-        }
-        share_event.status = "done"
-        share_event.completed_at = datetime.now(timezone.utc)
-        share_event.created_ids = created_ids
-        share_event.counts = counts_summary
-
-        session.commit()
+    
+            # 9. Update ShareEvent with success status and manifest
+            counts_summary = {
+                "accounts": len(created_ids["accounts"]),
+                "lobs": len(created_ids["lobs"]),
+                "sub_lobs": len(created_ids["sub_lobs"]),
+                "personas": len(created_ids["personas"]),
+                "posts": len(created_ids["posts"]),
+                "cxo_movements": len(created_ids["cxo_movements"]),
+                "jobs": len(created_ids["linkedin_jobs"]),
+            }
+            share_event.status = "done"
+            share_event.completed_at = datetime.now(timezone.utc)
+            share_event.created_ids = created_ids
+            share_event.counts = counts_summary
+    
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            existing = session.query(ShareEvent).filter_by(idempotency_key=idempotency_key).first()
+            if existing and existing.status == 'done':
+                return {
+                    'ok': True,
+                    'idempotent': True,
+                    'share_event_id': existing.id,
+                    'account_id': (existing.created_ids or {}).get('accounts', [None])[0],
+                    'counts': existing.counts,
+                }
+            raise
+        except Exception:
+            session.rollback()
+            raise
 
         logger.info(
             f"Successfully hydrated snapshot {snapshot.id} for client '{clean_slug}' "
