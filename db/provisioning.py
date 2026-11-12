@@ -57,6 +57,7 @@ CLIENT_TABLES_ORDERED: List[str] = [
     "action_items",         # -> accounts(id), personas(id)
     "action_item_reminders",# -> action_items(id)
     "command_center_snapshots", # -> accounts(id)
+    "account_origin",           # -> accounts(id)
     # 4. Deals & sales flow
     "deals",                # -> accounts(id), lobs(id), business_lines(id)
     "deal_stakeholders",    # -> deals(id), personas(id)
@@ -118,6 +119,8 @@ class SchemaProvisioningService:
     def schema_exists(cls, engine: Engine, client_slug: str) -> bool:
         schema_name = cls.get_schema_name(client_slug)
         insp = inspect(engine)
+        from db.column_types import invalidate_column_kinds_cache
+        invalidate_column_kinds_cache(schema_name)
         return schema_name in insp.get_schema_names()
 
     @classmethod
@@ -295,6 +298,8 @@ class SchemaProvisioningService:
                 pass
             raise
 
+        from db.column_types import invalidate_column_kinds_cache
+        invalidate_column_kinds_cache(schema_name)
         return schema_name
 
     @classmethod
@@ -518,6 +523,9 @@ class SchemaProvisioningService:
             # Intra-schema and cross-schema foreign keys
             repaired_fks = cls._ensure_tenant_foreign_keys(conn, schema_name)
 
+        from db.column_types import invalidate_column_kinds_cache
+        invalidate_column_kinds_cache(schema_name)
+
         return {
             "schema_name": schema_name,
             "repaired": True,
@@ -533,6 +541,8 @@ class SchemaProvisioningService:
         schema_name = cls.resolve_schema_name(engine, client_slug, schema_name)
         with engine.begin() as conn:
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        from db.column_types import invalidate_column_kinds_cache
+        invalidate_column_kinds_cache(schema_name)
         return True
 
     @classmethod

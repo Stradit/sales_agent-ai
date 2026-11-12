@@ -1,0 +1,1142 @@
+policy_version: 1.0.0
+skeleton_version: T0002
+rules:
+  default_action: deny
+  require_exact_identifier: true
+  posts_max_age_days: 90
+  posts_max_rows: 100
+  strip_sensitive_by_default: true
+tables:
+  accounts:
+    classification: copy
+    copy:
+    - active_tech_count
+    - aliases
+    - blog_url
+    - bounce_rate
+    - c_suite_count
+    - city
+    - company_type
+    - contact_email
+    - country
+    - created_at
+    - crunchbase_url
+    - director_count
+    - display_name
+    - domain
+    - employee_count_range
+    - estimated_revenue_range
+    - extracted_at
+    - facebook_url
+    - founded_date
+    - founded_year
+    - founders
+    - full_description
+    - funding_status
+    - github_url
+    - glassdoor_url
+    - global_traffic_rank
+    - google_patents_url
+    - google_trends_url
+    - headquarters_location
+    - headquarters_regions
+    - heat_score
+    - industries
+    - industry_groups
+    - ipo_date
+    - ipo_status
+    - it_spend
+    - key
+    - keywords
+    - last_funding_date
+    - last_funding_type
+    - legal_name
+    - linkedin_url
+    - lobs_count
+    - manager_count
+    - monthly_visits
+    - multi_source_intelligence
+    - news_query
+    - num_acquisitions
+    - num_contacts
+    - num_founders
+    - num_funding_rounds
+    - num_suborganizations
+    - openalex_institution_url
+    - operating_status
+    - organisational_hierarchy_tree
+    - page_views_per_visit
+    - patents_granted
+    - phone_number
+    - postal_code
+    - primary_domain
+    - reddit_query
+    - reddit_rss_url
+    - rss_url
+    - sanitized_phone
+    - schema_version
+    - sec_cik
+    - sec_edgar_url
+    - sec_filings_rss
+    - sec_name
+    - sec_submissions_url
+    - short_description
+    - state
+    - stock_exchange
+    - stock_symbol
+    - total_apps
+    - total_contacts_captured
+    - total_downloads
+    - total_funding_amount
+    - total_funding_amount_usd
+    - total_funding_currency
+    - trademarks_registered
+    - trend_score_90d
+    - twitter_handle
+    - twitter_live_url
+    - twitter_url
+    - updated_at
+    - visit_duration
+    - vp_count
+    - website_url
+    - wikidata_entity_url
+    - youtube_channel_id
+    - youtube_search_url
+    regenerate: []
+    sensitive: []
+    never:
+    - api_credits_total
+    - api_credits_used
+    - id
+    - is_manually_verified
+    - manually_verified_at
+    - osint_feed_manifest
+    - owner_user_id
+    - primary_business_line_id
+    - raw_data
+  lobs:
+    classification: copy
+    copy:
+    - audited_segment_revenue
+    - competitors
+    - crunchbase_url
+    - domain
+    - financial_snippets
+    - google_news_rss_url
+    - google_patents_url
+    - google_trends_url
+    - jurisdiction
+    - key
+    - lei_code
+    - lob_name
+    - logo_url
+    - operating_head
+    - overview
+    - patents
+    - reddit_rss_url
+    - relationship_type
+    - segment_headcount
+    - technologies
+    - website_url
+    - wikipedia_url
+    - youtube_search_url
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - id
+    - is_manually_verified
+    - manually_verified_at
+    - osint_feed_manifest
+    - raw_data
+  sub_lobs:
+    classification: copy
+    copy:
+    - city
+    - country
+    - domain
+    - entity_level
+    - jurisdiction
+    - legal_name
+    - lei_code
+    - metadata
+    - name
+    - parent_lob_lei
+    - parent_lob_name
+    - relationship_type
+    - status
+    - website_url
+    regenerate: []
+    sensitive: []
+    never:
+    - id
+    - is_manually_verified
+    - lob_id
+    - manually_verified_at
+  personas:
+    classification: copy
+    copy:
+    - annual_report_url
+    - bloomberg_url
+    - budget_authority
+    - career_trajectory_score
+    - city
+    - corporate_bio_url
+    - country
+    - crunchbase_permalink
+    - crunchbase_url
+    - current_role_tenure_months
+    - decision_authority
+    - degree
+    - departments
+    - display_name
+    - education_history
+    - email_status
+    - employment_history
+    - engagement_rate
+    - extended_profile
+    - external_board_url
+    - external_id
+    - fec_contributions_url
+    - first_name
+    - full_name
+    - google_patents_url
+    - google_scholar_url
+    - google_trends_url
+    - headline
+    - hierarchy_level
+    - institution
+    - is_new_in_role
+    - key
+    - last_activity_at
+    - last_name
+    - linkedin_url
+    - media_interview_url
+    - news_query
+    - openalex_author_url
+    - openinsider_url
+    - orcid_search_url
+    - past_companies
+    - patents_query
+    - podcast_search_url
+    - podcast_url
+    - previous_titles
+    - prior_company
+    - quiver_insider_url
+    - reddit_query
+    - reddit_rss_url
+    - rss_url
+    - sec_cik
+    - sec_insider_trades_url
+    - secform4_url
+    - seeking_alpha_url
+    - seniority_raw
+    - skills
+    - social_platform
+    - social_presence_level
+    - social_profile_url
+    - source
+    - state
+    - theorg_url
+    - tier
+    - title
+    - twitter_handle
+    - twitter_live_url
+    - wayback_url
+    - wikidata_person_url
+    - wsj_article_url
+    - youtube_channel_id
+    - youtube_interviews_url
+    - youtube_url
+    - zoominfo_url
+    regenerate:
+    - communication_style
+    - key_objections
+    - operational_pain_points
+    - personalized_icebreaker
+    - target_kpis
+    - value_proposition
+    sensitive:
+    - direct_mobile_phone
+    - email
+    - personal_email
+    - phone
+    never:
+    - account_id
+    - created_by_user_id
+    - id
+    - is_manually_verified
+    - lob_id
+    - manually_verified_at
+    - osint_feed_manifest
+    - raw_data
+  posts:
+    classification: copy
+    copy:
+    - author
+    - body
+    - channel
+    - engagement
+    - extra
+    - first_seen
+    - kind
+    - last_seen
+    - media
+    - new_in_last_run
+    - post_key
+    - post_url
+    - published_at
+    - rank
+    - raw
+    - target_key
+    regenerate: []
+    sensitive: []
+    never:
+    - id
+  cxo_movements:
+    classification: copy
+    copy:
+    - article_body
+    - article_title
+    - article_url
+    - company_name
+    - context
+    - designation
+    - effective_date
+    - event_type
+    - extraction_status
+    - first_seen
+    - last_seen
+    - new_company
+    - new_in_last_run
+    - person_name
+    - previous_role
+    - published_at
+    - publisher_domain
+    - raw
+    - source
+    - target_key
+    regenerate: []
+    sensitive: []
+    never:
+    - id
+  linkedin_jobs:
+    classification: copy
+    copy:
+    - applicants
+    - company_name
+    - description
+    - employment_type
+    - first_seen
+    - job_key
+    - job_url
+    - last_seen
+    - location
+    - new_in_last_run
+    - posted_date
+    - raw
+    - salary
+    - target_key
+    - title
+    - views
+    - workplace_type
+    regenerate: []
+    sensitive: []
+    never:
+    - id
+  targets:
+    classification: copy
+    copy:
+    - config
+    - display_name
+    - key
+    - kind
+    - ticker
+    - updated_at
+    regenerate: []
+    sensitive: []
+    never: []
+  opportunity_signals:
+    classification: regenerate
+    copy: []
+    regenerate:
+    - account_id
+    - category
+    - created_at
+    - details
+    - first_seen
+    - id
+    - last_seen
+    - signal_key
+    - status
+    - title
+    - updated_at
+    sensitive: []
+    never: []
+  digests:
+    classification: regenerate
+    copy: []
+    regenerate:
+    - digest
+    - generated_at
+    - kind
+    - llm
+    - posts_considered
+    - priority
+    - target_key
+    - updated_at
+    sensitive: []
+    never: []
+  weekly_digest_snapshots:
+    classification: regenerate
+    copy: []
+    regenerate:
+    - account_id
+    - body
+    - confidence
+    - created_at
+    - data_gaps
+    - do_not_say
+    - generated_at
+    - id
+    - priority
+    - raw_email
+    - subject
+    - target_key
+    - week_of
+    sensitive: []
+    never: []
+  command_center_snapshots:
+    classification: regenerate
+    copy: []
+    regenerate:
+    - generated_at
+    - id
+    - playbook
+    - signals
+    - source_counts
+    - user_id
+    - velocity
+    sensitive: []
+    never: []
+  action_item_reminders:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - action_item_id
+    - id
+    - reminder_type
+    - sent_at
+    - sent_to_user_id
+  action_items:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - assigned_to_id
+    - completed_at
+    - created_at
+    - created_by_id
+    - deal_id
+    - description
+    - due_date
+    - id
+    - persona_id
+    - priority
+    - source
+    - source_ref_id
+    - status
+    - title
+    - updated_at
+  activities:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - body
+    - created_at
+    - direction
+    - duration_min
+    - external_id
+    - id
+    - metadata
+    - occurred_at
+    - owner_user_id
+    - participants
+    - source
+    - subject
+    - summary
+    - thread_id
+    - type
+    - updated_at
+    - visibility
+  activity_links:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - activity_id
+    - matched_by
+    - object_id
+    - object_type
+  business_lines:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - active
+    - id
+    - key
+    - name
+    - sort
+  capture_connections:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_email
+    - created_at
+    - cursors
+    - error
+    - id
+    - last_stats
+    - last_sync_at
+    - next_sync_at
+    - provider
+    - scopes
+    - settings
+    - status
+    - token_encrypted
+    - user_id
+  connectors:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - active
+    - created_at
+    - created_by
+    - default_attribution_pct
+    - email
+    - id
+    - kind
+    - name
+    - notes
+    - organisation
+    - user_id
+  copilot_memories:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - created_at
+    - deleted_at
+    - embedding
+    - expires_at
+    - id
+    - kind
+    - last_used_at
+    - persona_id
+    - pinned
+    - source_message_id
+    - text
+    - updated_at
+    - use_count
+    - user_id
+  copilot_messages:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - citations
+    - content
+    - created_at
+    - evidence_hash
+    - extras
+    - feedback
+    - feedback_note
+    - id
+    - index_version_id
+    - intent
+    - latency_ms
+    - llm_model
+    - mode
+    - role
+    - session_id
+    - tokens_in
+    - tokens_out
+  copilot_sessions:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - active_entities
+    - archived_at
+    - created_at
+    - id
+    - last_message_at
+    - persona_id
+    - pinned
+    - summary
+    - title
+    - user_id
+  copilot_user_prefs:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - answer_style
+    - default_account_id
+    - favorite_personas
+    - memory_enabled
+    - updated_at
+    - user_id
+  crm_demo_rows:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - created_at
+    - row_id
+    - table_name
+  crm_notification_prefs:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - settings
+    - updated_at
+    - user_id
+  crm_notifications:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - attempts
+    - body
+    - created_at
+    - dedupe_key
+    - error
+    - html
+    - id
+    - kind
+    - link
+    - sent_at
+    - status
+    - subject
+    - to_email
+    - user_id
+  crm_saved_views:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - created_at
+    - id
+    - name
+    - page
+    - state
+    - user_id
+  crm_settings:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - key
+    - updated_at
+    - updated_by
+    - value
+  crm_wanted_intros:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - business_line_id
+    - closed_at
+    - created_at
+    - created_by
+    - id
+    - note
+    - role_wanted
+    - status
+  deal_activity:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - created_at
+    - deal_id
+    - id
+    - kind
+    - text
+    - user_id
+  deal_buyer_rooms:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - created_at
+    - created_by
+    - deal_id
+    - expires_at
+    - first_viewed_at
+    - id
+    - last_viewed_at
+    - resources
+    - revoked_at
+    - title
+    - token_enc
+    - token_hash
+    - view_count
+    - welcome_note
+  deal_checklist:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - deal_id
+    - done
+    - done_at
+    - done_by
+    - item_key
+    - label
+    - note
+    - ordinal
+    - stage
+  deal_close_plan:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - created_at
+    - created_by
+    - deal_id
+    - done_at
+    - due_date
+    - id
+    - note
+    - ordinal
+    - owner_name
+    - side
+    - status
+    - title
+    - updated_at
+  deal_email_drafts:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - action_code
+    - body
+    - created_at
+    - deal_id
+    - id
+    - model
+    - recipient_email
+    - recipient_name
+    - stage
+    - subject
+    - user_id
+  deal_stage_history:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - changed_at
+    - changed_by
+    - deal_id
+    - from_stage
+    - id
+    - to_stage
+  deal_stakeholders:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - added_at
+    - deal_id
+    - persona_id
+    - role
+    - sentiment
+  deals:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - amount_usd
+    - business_line_id
+    - closed_at
+    - created_at
+    - currency
+    - expected_close
+    - forecast_category
+    - id
+    - introduction_id
+    - last_activity_at
+    - lob_id
+    - lost_category
+    - lost_competitor
+    - lost_reason
+    - name
+    - next_step
+    - next_step_due
+    - offerings
+    - owner_user_id
+    - probability
+    - qualification
+    - source
+    - stage
+    - stage_changed_at
+    - updated_at
+    - value_amount
+  forecast_snapshots:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - amount_usd
+    - business_line_id
+    - deal_id
+    - expected_close
+    - forecast_category
+    - name
+    - owner_user_id
+    - probability
+    - snapshot_date
+    - stage
+  introduction_events:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - at
+    - by_user
+    - from_status
+    - id
+    - introduction_id
+    - kind
+    - note
+    - partner_visible
+    - to_status
+  introductions:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - accepted_at
+    - account_id
+    - attribution_pct
+    - business_line_id
+    - closed_reason
+    - connector_id
+    - context
+    - converted_at
+    - created_at
+    - created_by
+    - deal_id
+    - id
+    - intro_made_at
+    - meeting_at
+    - next_step
+    - owner_user_id
+    - persona_id
+    - requested_at
+    - status
+    - submitted_account_name
+    - submitted_contact_email
+    - submitted_contact_name
+    - submitted_contact_title
+    - updated_at
+    - wanted_id
+  pipeline_runs:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - company_name
+    - completed_at
+    - created_at
+    - credits_breakdown
+    - duration_seconds
+    - enriched_storage_dir
+    - entities_extracted
+    - error_message
+    - execution_logs
+    - id
+    - quality_grade
+    - quality_score
+    - raw_storage_dir
+    - run_id
+    - started_at
+    - status
+    - target_url
+    - total_credits_used
+    - updated_at
+  rag_chunks:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - chunk_hash
+    - created_at
+    - text
+    - token_count
+    - tsv
+  rag_document_chunks:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - chunk_hash
+    - document_id
+    - ordinal
+  rag_document_entities:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - canonical_key
+    - confidence
+    - lob_id
+    - persona_id
+    - relation
+  rag_document_sources:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - canonical_key
+    - first_seen
+    - source_pk
+    - source_table
+  rag_documents:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - canonical_key
+    - content_hash
+    - deleted_at
+    - doc_type
+    - id
+    - is_current
+    - metadata
+    - near_dup_of
+    - published_at
+    - render_version
+    - simhash
+    - title
+    - url
+    - valid_from
+    - valid_to
+    - version
+  rag_index_entries:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - chunk_hash
+    - index_version_id
+    - indexed_at
+  rag_index_versions:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - activated_at
+    - attribution_version
+    - chunker_version
+    - collection_name
+    - created_at
+    - dims
+    - embed_model
+    - id
+    - status
+  rag_outbox:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - enqueued_at
+    - id
+    - op
+    - processed_at
+    - source_pk
+    - source_table
+  rag_pipeline_runs:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - finished_at
+    - id
+    - logs
+    - mode
+    - options
+    - stages
+    - started_at
+    - status
+    - summary
+    - triggered_by
+  rag_schema_meta:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - applied_at
+    - fingerprint
+    - id
+  rag_sync_state:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - last_reconcile_at
+    - last_reconcile_stats
+    - source_table
+  run_history:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - digest
+    - display_name
+    - duration_ms
+    - entry
+    - error
+    - id
+    - kind
+    - limit_requested
+    - new_posts
+    - platforms_failed
+    - platforms_scraped
+    - recorded_at
+    - success
+    - target_key
+    - total_posts
+  sales_targets:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - amount_usd
+    - business_line_id
+    - id
+    - period
+    - updated_at
+    - updated_by
+    - user_id
+  search_log:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - chosen_type
+    - created_at
+    - id
+    - n_results
+    - q
+    - semantic
+    - user_id
+  system_api_configs:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - category
+    - config_key
+    - display_name
+    - encrypted_value
+    - extra_metadata
+    - id
+    - is_secret
+    - updated_at
+    - updated_by
+  user_account_access:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - granted_at
+    - granted_by_id
+    - id
+    - user_id
+  user_business_lines:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - business_line_id
+    - user_id
+  account_origin:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - canonical_key
+    - hydrated_at
+    - hydrated_by
+    - local_edits
+    - origin_type
+    - snapshot_id
+    - snapshot_version
