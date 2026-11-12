@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="css/action-items.css?v=1.0">
   <link rel="stylesheet" href="css/profile-page.css?v=3.1">
   <link rel="stylesheet" href="css/responsive.css?v=3.0">
-  <link rel="stylesheet" href="css/command-center.css?v=4.0">
+  <link rel="stylesheet" href="css/command-center.css?v=4.1">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body class="cc-wide">
@@ -549,9 +549,22 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Step 4: Deep-Dive Entity Sheets Modal (DealDetail, AccountDetail, ContactDetail, Copilot) -->
+<div class="cc-entity-sheet-backdrop" id="ccEntitySheetBackdrop"></div>
+<aside class="cc-entity-sheet-modal" id="ccEntitySheetModal" role="dialog" aria-modal="true" aria-label="Entity Detail View" hidden>
+  <div class="cc-entity-sheet-topbar">
+    <div class="cc-entity-sheet-breadcrumb-wrap" id="ccEntityBreadcrumb"></div>
+    <div class="cc-entity-sheet-topbar-actions">
+      <button type="button" class="cc-entity-sheet-expand-btn" id="ccEntitySheetExpand" title="Expand view"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
+      <button type="button" class="cc-entity-sheet-close-btn" id="ccEntitySheetClose" title="Close (Esc)"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+  </div>
+  <div class="cc-entity-sheet-content" id="ccEntitySheetContent"></div>
+</aside>
+
 {% include "partials/drawer.html" %}
 {% include "partials/copilot-dock.html" %}
 
-<script type="module" src="js/modules/command-center/main.js?v=8.6"></script>
+<script type="module" src="js/modules/command-center/main.js?v=8.7"></script>
 </body>
 </html>

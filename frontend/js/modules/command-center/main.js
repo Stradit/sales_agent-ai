@@ -22,6 +22,7 @@ import { initWidgetCustomizer } from './widget-customizer.js';
 import { initMyDay, refreshMyDay } from './my-day.js';
 import { initMyAccounts, renderMyAccounts } from './my-accounts.js';
 import { initPipelineView, renderPipelineView } from './pipeline-view.js';
+import { initEntitySheets } from './entity-sheets.js';
 import { loadCommandCenter, generateCommandCenter, getCommandCenter, isGenerated } from './generator.js';
 import { esc, relativeTime } from './utils.js';
 
@@ -217,6 +218,7 @@ async function init() {
   loadRefreshInfo();
   initMyDay();
   initDirectionSwitcher();
+  initEntitySheets();
   document.addEventListener('cc:plays-changed', () => { renderSubtitle(); renderKpi(); });
   // My Day's data names the open deals per account: the feed, exec moves, coverage and matrix show them
   document.addEventListener('cc:deal-context', () => { renderFeed(); renderTimeline(); renderCoverageGaps(); renderMatrix(); renderMyAccounts(); renderPipelineView(); });

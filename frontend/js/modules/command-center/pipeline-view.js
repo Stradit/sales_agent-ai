@@ -377,11 +377,22 @@ function bindInspectorActions(container, selectedDeal) {
       }
 
       if (op === 'open-deal') {
+        if (typeof window.openDealDetail === 'function') {
+          window.openDealDetail(selectedDeal.key || dealId);
+          return;
+        }
         window.location.href = `/deals?deal=${dealId}`;
         return;
       }
 
       if (op === 'draft-email') {
+        if (typeof window.openCopilotModal === 'function') {
+          window.openCopilotModal({
+            dealKey: selectedDeal.key,
+            prompt: `Draft check-in email for ${selectedDeal.name}. Focus on ${selectedDeal.suggestedStep}`
+          });
+          return;
+        }
         const q = encodeURIComponent(`Draft check-in email for ${selectedDeal.name}. Focus on ${selectedDeal.suggestedStep}`);
         window.location.href = `/copilot?q=${q}&deal_id=${dealId}`;
         return;
@@ -395,6 +406,11 @@ function bindTableRows(container, deals) {
     tr.addEventListener('click', () => {
       selectedDealKey = tr.dataset.dealKey;
       renderPipelineView();
+    });
+    tr.addEventListener('dblclick', () => {
+      if (typeof window.openDealDetail === 'function') {
+        window.openDealDetail(tr.dataset.dealKey);
+      }
     });
   });
 }
@@ -460,3 +476,4 @@ export async function initPipelineView() {
 
   renderPipelineView();
 }
+

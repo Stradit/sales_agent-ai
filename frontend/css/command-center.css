@@ -7063,3 +7063,872 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================================================================
+   STEP 4: DEEP-DIVE ENTITY SHEETS (DealDetail, AccountDetail, ContactDetail, Copilot)
+   Matching Claude Artifact Design Specifications
+   ========================================================================= */
+
+/* Backdrop */
+.cc-entity-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 18, 51, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 1050;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+.cc-entity-sheet-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Modal / Slide-over */
+.cc-entity-sheet-modal {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(1200px, 92vw);
+  background: #F5F6F9;
+  z-index: 1060;
+  box-shadow: -10px 0 30px rgba(0, 18, 51, 0.2);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), width 0.2s ease;
+  font-family: Roboto, system-ui, -apple-system, sans-serif;
+  color: #001233;
+}
+.cc-entity-sheet-modal.is-open {
+  transform: translateX(0);
+}
+.cc-entity-sheet-modal.is-expanded {
+  width: 100vw;
+}
+
+body.cc-sheet-open {
+  overflow: hidden !important;
+}
+
+/* Topbar */
+.cc-entity-sheet-topbar {
+  height: 54px;
+  background: #001233;
+  border-bottom: 2px solid var(--accent, #E46521);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  color: #FFFFFF;
+  flex: none;
+}
+.cc-sheet-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: #9DB4EA;
+}
+.cc-sheet-crumb-link {
+  color: #C3CDE0;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+.cc-sheet-crumb-link:hover {
+  color: #FFFFFF;
+  text-decoration: underline;
+}
+.cc-crumb-sep {
+  opacity: 0.55;
+  font-size: 12px;
+}
+.cc-crumb-curr {
+  color: #FFFFFF;
+  font-weight: 700;
+}
+.cc-entity-sheet-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cc-entity-sheet-expand-btn,
+.cc-entity-sheet-close-btn {
+  background: transparent;
+  border: 0;
+  color: #C3CDE0;
+  font-size: 15px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+.cc-entity-sheet-expand-btn:hover,
+.cc-entity-sheet-close-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #FFFFFF;
+}
+
+/* Content Container */
+.cc-entity-sheet-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Shared Sheet Header */
+.cc-sheet-header {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.cc-sheet-header-main {
+  flex: 1;
+  min-width: 280px;
+}
+.cc-sheet-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cc-sheet-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  color: #001233;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+.cc-sheet-subtitle {
+  font-size: 14px;
+  color: #4C5671;
+  margin-top: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.cc-sheet-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Stage Stepper (DealDetail.dc.html lines 41-49) */
+.cc-stage-stepper-box {
+  background: #FFFFFF;
+  border: 1px solid #EEF0F5;
+  padding: 12px 14px;
+}
+.cc-stage-stepper-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+.cc-stepper-step {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  border-radius: 0;
+  transition: all 0.15s ease;
+}
+.cc-stepper-step.step-past {
+  background: #C3CDE0;
+  color: #001233;
+}
+.cc-stepper-step.step-current {
+  background: #3E64C6;
+  color: #FFFFFF;
+}
+.cc-stepper-step.step-future {
+  background: #001233;
+  color: #FFFFFF;
+  opacity: 0.55;
+}
+
+/* Two-Column Grid Layouts */
+.cc-deal-sheet-grid,
+.cc-account-sheet-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.cc-account-sheet-grid {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+}
+.cc-contact-sheet-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 16px;
+}
+.cc-sheet-col-left,
+.cc-sheet-col-right {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Card Shells */
+.cc-sheet-card {
+  background: #FFFFFF;
+  border: 1px solid #EEF0F5;
+  box-shadow: 0 1px 3px rgba(0, 18, 51, 0.03);
+}
+.cc-card-header-bar {
+  padding: 12px 16px;
+  border-bottom: 1px solid #EEF0F5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.cc-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #001233;
+}
+.cc-card-eyebrow {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4C5671;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cc-eyebrow-alert {
+  color: #8C1D18 !important;
+}
+
+/* Needs You & Why Now Urgency Banners */
+.cc-needs-you-card,
+.cc-why-now-card {
+  border-left: 4px solid #B3261E !important;
+  padding: 14px 16px;
+}
+.cc-needs-headline {
+  margin: 0 0 6px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #001233;
+}
+.cc-needs-sub,
+.cc-why-now-text {
+  margin: 0;
+  font-size: 14px;
+  color: #4C5671;
+  line-height: 1.5;
+}
+
+/* Pilot Exit Criteria Checklist (DealDetail.dc.html) */
+.cc-criteria-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4C5671;
+  margin-left: 6px;
+}
+.cc-criteria-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cc-criteria-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #EEF0F5;
+  font-size: 14px;
+  transition: background 0.15s ease;
+}
+.cc-criteria-item:last-child {
+  border-bottom: 0;
+}
+.cc-crit-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #3E64C6;
+}
+.cc-crit-label {
+  flex: 1;
+  cursor: pointer;
+  font-weight: 500;
+  color: #001233;
+}
+.cc-criteria-item.is-done .cc-crit-label {
+  text-decoration: line-through;
+  color: #64748B;
+}
+.cc-crit-owner {
+  font-size: 12px;
+  color: #4C5671;
+}
+
+/* Activity Timelines */
+.cc-activity-timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cc-activity-item {
+  padding: 11px 16px;
+  border-bottom: 1px solid #EEF0F5;
+  font-size: 14px;
+}
+.cc-activity-item:last-child {
+  border-bottom: 0;
+}
+.cc-activity-meta {
+  font-size: 12px;
+  color: #4C5671;
+  margin-bottom: 2px;
+  font-weight: 500;
+}
+.cc-activity-desc {
+  color: #001233;
+  line-height: 1.45;
+}
+
+/* Suggested Step & News */
+.cc-suggested-card,
+.cc-news-card,
+.cc-influence-card,
+.cc-intro-card {
+  padding: 14px 16px;
+}
+.cc-suggested-body,
+.cc-news-body,
+.cc-influence-body,
+.cc-intro-body {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #001233;
+}
+.cc-news-body {
+  margin: 0;
+}
+.cc-news-meta {
+  font-size: 13px;
+  color: #4C5671;
+}
+
+/* Buying Committee */
+.cc-committee-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cc-committee-member-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid #EEF0F5;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cc-committee-member-row:last-child {
+  border-bottom: 0;
+}
+.cc-committee-member-row.is-clickable {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.cc-committee-member-row.is-clickable:hover {
+  background: #F8FAFC;
+}
+.cc-acct-committee-row {
+  flex-direction: row !important;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.cc-member-name {
+  font-weight: 700;
+  color: #001233;
+}
+.cc-member-note {
+  color: #4C5671;
+  font-size: 13px;
+}
+
+/* Account Detail 5-Metric Strip (AccountDetail.dc.html lines 40-46) */
+.cc-sheet-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  background: #FFFFFF;
+  border: 1px solid #EEF0F5;
+}
+.cc-sheet-kpi-cell {
+  padding: 12px 16px;
+  border-right: 1px solid #EEF0F5;
+}
+.cc-sheet-kpi-cell:last-child {
+  border-right: 0;
+}
+.cc-sheet-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4C5671;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cc-sheet-kpi-val {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 2px;
+  color: #001233;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Account Open Deals Table */
+.cc-table-responsive {
+  overflow-x: auto;
+}
+.cc-account-deals-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.cc-account-deals-table th {
+  padding: 10px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4C5671;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  border-bottom: 1px solid #EEF0F5;
+}
+.cc-account-deals-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #EEF0F5;
+  color: #001233;
+}
+.cc-acct-deal-row.is-clickable {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.cc-acct-deal-row.is-clickable:hover {
+  background: #F8FAFC;
+}
+.cc-deal-cell-name {
+  color: #001233;
+}
+.cc-acct-deal-row:hover .cc-deal-cell-name {
+  color: var(--accent, #C9541A);
+}
+.cc-text-late {
+  color: #B3261E;
+  font-weight: 600;
+}
+
+/* Signals summary stat row */
+.cc-signal-stat-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid #EEF0F5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+.cc-signal-stat-row:last-child {
+  border-bottom: 0;
+}
+
+/* Contact Detail DL & Linked Deals */
+.cc-contact-dl {
+  margin: 0;
+  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px 14px;
+  font-size: 14px;
+}
+.cc-contact-dl dt {
+  color: #4C5671;
+  font-weight: 500;
+}
+.cc-contact-dl dd {
+  margin: 0;
+  font-weight: 600;
+  color: #001233;
+}
+.cc-linked-deals-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cc-linked-deal-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid #EEF0F5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+.cc-linked-deal-row.is-clickable {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.cc-linked-deal-row.is-clickable:hover {
+  background: #F8FAFC;
+}
+.cc-linked-deal-name {
+  font-weight: 700;
+  color: #001233;
+}
+.cc-linked-deal-row:hover .cc-linked-deal-name {
+  color: var(--accent, #C9541A);
+}
+.cc-linked-deal-sub {
+  color: #4C5671;
+  font-size: 12px;
+}
+.cc-linked-deal-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #001233;
+}
+
+/* =========================================================================
+   COPILOT WORKSPACE (Copilot.dc.html lines 23-89)
+   ========================================================================= */
+.cc-copilot-workspace-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  margin: -22px -28px;
+  min-height: 640px;
+}
+.cc-copilot-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 300px;
+}
+.cc-copilot-sidebar-nav {
+  background: #FFFFFF;
+  border-right: 1px solid #EEF0F5;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.cc-copilot-new-chat {
+  height: 38px;
+}
+.cc-copilot-nav-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4C5671;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 12px;
+  margin-bottom: 2px;
+}
+.cc-copilot-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cc-copilot-chat-link {
+  padding: 9px 12px;
+  color: #001233;
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 500;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.15s ease;
+}
+.cc-copilot-chat-link:hover {
+  background: #F5F6F9;
+}
+.cc-copilot-chat-link.is-active {
+  background: #F5F6F9;
+  font-weight: 700;
+  border-left: 3px solid var(--accent, #E46521);
+}
+
+/* Copilot Main Pane */
+.cc-copilot-main-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #F5F6F9;
+}
+.cc-copilot-messages-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.cc-copilot-bubble {
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.cc-copilot-bubble.cc-bubble-user {
+  align-self: flex-end;
+  max-width: 600px;
+  background: #001233;
+  color: #FFFFFF;
+  padding: 12px 16px;
+  border-radius: 6px 6px 0 6px;
+}
+.cc-bubble-tag {
+  display: block;
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+.cc-copilot-bubble.cc-bubble-assistant {
+  align-self: flex-start;
+  max-width: 720px;
+  background: #FFFFFF;
+  border: 1px solid #EEF0F5;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 6px 6px 6px 0;
+  box-shadow: 0 1px 4px rgba(0, 18, 51, 0.04);
+}
+.cc-bubble-intro {
+  margin: 0;
+  font-size: 15px;
+  color: #001233;
+}
+.cc-bubble-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #001233;
+}
+.cc-bubble-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.cc-bubble-sources {
+  font-size: 12px;
+  color: #4C5671;
+  margin-top: 4px;
+}
+
+/* Copilot Composer Form */
+.cc-copilot-composer-form {
+  flex: none;
+  border-top: 1px solid #DCE1E9;
+  background: #FFFFFF;
+  padding: 14px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cc-copilot-prompt-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cc-prompt-chip {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #DCE1E9;
+  background: #FFFFFF;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #4C5671;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border-radius: 3px;
+}
+.cc-prompt-chip:hover {
+  border-color: var(--accent, #E46521);
+  color: var(--accent, #E46521);
+  background: #FFFBF8;
+}
+.cc-copilot-input-row {
+  display: flex;
+  gap: 8px;
+}
+.cc-copilot-input {
+  flex: 1;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid #DCE1E9;
+  font: inherit;
+  font-size: 14.5px;
+  min-width: 0;
+  background: #FFFFFF;
+  color: #001233;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.cc-copilot-input:focus {
+  border-color: var(--accent, #E46521);
+  box-shadow: 0 0 0 2px rgba(228, 101, 33, 0.15);
+}
+.cc-copilot-send-btn {
+  height: 44px;
+  padding: 0 20px;
+}
+
+/* Copilot Context Aside (Right Column) */
+.cc-copilot-context-aside {
+  background: #FFFFFF;
+  border-left: 1px solid #EEF0F5;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  overflow-y: auto;
+}
+.cc-copilot-context-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cc-context-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4C5671;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cc-context-deal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #001233;
+  margin-top: 2px;
+}
+.cc-context-deal-sub {
+  font-size: 13px;
+  color: #4C5671;
+  margin-top: 2px;
+}
+.cc-copilot-sources-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+}
+.cc-copilot-sources-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.cc-source-on {
+  color: #1E6B34;
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.cc-source-off {
+  color: #64748B;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.cc-copilot-links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 13.5px;
+}
+.cc-quick-link {
+  color: var(--accent, #C9541A);
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s ease;
+}
+.cc-quick-link:hover {
+  color: #001233;
+  text-decoration: underline;
+}
+
+/* =========================================================================
+   MOBILE RESPONSIVE ALIGNMENT FOR ENTITY SHEETS (max-width: 960px & 640px)
+   ========================================================================= */
+@media (max-width: 960px) {
+  .cc-entity-sheet-modal {
+    width: 100vw;
+  }
+  .cc-deal-sheet-grid,
+  .cc-account-sheet-grid,
+  .cc-contact-sheet-grid {
+    grid-template-columns: 1fr;
+  }
+  .cc-copilot-layout {
+    grid-template-columns: 1fr;
+  }
+  .cc-copilot-sidebar-nav,
+  .cc-copilot-context-aside {
+    display: none;
+  }
+  .cc-sheet-kpi-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .cc-entity-sheet-content {
+    padding: 16px;
+  }
+  .cc-sheet-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .cc-stage-stepper-list {
+    display: flex;
+    overflow-x: auto;
+    gap: 4px;
+    padding-bottom: 4px;
+  }
+  .cc-stepper-step {
+    min-width: 90px;
+    font-size: 12px;
+    padding: 8px;
+  }
+  .cc-sheet-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cc-copilot-composer-form {
+    padding: 12px 16px;
+  }
+  .cc-copilot-messages-container {
+    padding: 16px;
+  }
+}

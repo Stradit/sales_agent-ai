@@ -323,6 +323,10 @@ function bindCardActions(container, accounts) {
       const dealId = btn.dataset.dealId;
 
       if (op === 'open-account') {
+        if (typeof window.openAccountDetail === 'function') {
+          window.openAccountDetail(acctName);
+          return;
+        }
         const found = accounts.find(a => normalizeName(a.name) === normalizeName(acctName));
         if (found && found.realAccount) {
           openDossier(found.realAccount);
@@ -354,12 +358,20 @@ function bindCardActions(container, accounts) {
       }
 
       if (op === 'prep_readout') {
+        if (typeof window.openCopilotModal === 'function') {
+          window.openCopilotModal({ dealKey: 'bny-pilot', prompt: `Prep CIO results readout for ${acctName}` });
+          return;
+        }
         const q = encodeURIComponent(`Prep CIO results readout for ${acctName}`);
         window.location.href = `/copilot?q=${q}${dealId ? `&deal_id=${dealId}` : ''}`;
         return;
       }
 
       if (op === 'review_pilot' || op === 'review_contract') {
+        if (typeof window.openDealDetail === 'function') {
+          window.openDealDetail(op === 'review_contract' ? 'blackrock-contract' : 'bny-pilot');
+          return;
+        }
         if (dealId) {
           window.location.href = `/deals?deal=${dealId}`;
         } else {
