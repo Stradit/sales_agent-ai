@@ -21,6 +21,7 @@ import { initAccountFilter } from './account-filter.js';
 import { initWidgetCustomizer } from './widget-customizer.js';
 import { initMyDay, refreshMyDay } from './my-day.js';
 import { initMyAccounts, renderMyAccounts } from './my-accounts.js';
+import { initPipelineView, renderPipelineView } from './pipeline-view.js';
 import { loadCommandCenter, generateCommandCenter, getCommandCenter, isGenerated } from './generator.js';
 import { esc, relativeTime } from './utils.js';
 
@@ -175,6 +176,9 @@ export function switchDirectionView(view, updateUrl = true) {
   if (targetView === 'accounts') {
     initMyAccounts();
   }
+  if (targetView === 'pipeline') {
+    initPipelineView();
+  }
 
   document.dispatchEvent(new CustomEvent('cc:view-changed', { detail: { view: targetView } }));
 
@@ -215,7 +219,7 @@ async function init() {
   initDirectionSwitcher();
   document.addEventListener('cc:plays-changed', () => { renderSubtitle(); renderKpi(); });
   // My Day's data names the open deals per account: the feed, exec moves, coverage and matrix show them
-  document.addEventListener('cc:deal-context', () => { renderFeed(); renderTimeline(); renderCoverageGaps(); renderMatrix(); renderMyAccounts(); });
+  document.addEventListener('cc:deal-context', () => { renderFeed(); renderTimeline(); renderCoverageGaps(); renderMatrix(); renderMyAccounts(); renderPipelineView(); });
   await loadCommandCenter();
   await initAccountFilter((accountId, accountObj) => {
     renderAll();

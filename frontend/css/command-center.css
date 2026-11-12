@@ -6726,3 +6726,340 @@
     border-left-color: #137333;
   }
 }
+
+/* ==========================================================================
+   Command Center · Direction C: Pipeline + Signals Cockpit (Pipeline.dc.html)
+   - Stage Filter Chips & Interactive Funnel Bar
+   - Split Cockpit Layout (1.9fr / 1fr)
+   - Deals Table & Selected Row Highlight
+   - Live Telemetry Diff Inspector ("What changed since you last spoke")
+   - Action Buttons (Log call, Open deal, Draft email)
+   - Mobile Responsive Rules (DealsPhone 390px)
+   ========================================================================== */
+
+/* Stage Filter Buttons (in banner header) */
+.cc-pipeline-stage-filters {
+  display: inline-flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.cc-stage-filter-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color, #dce1e9);
+  background: var(--card-bg, #ffffff);
+  color: var(--text-secondary, #4c5671);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+.cc-stage-filter-btn:hover {
+  color: var(--text-primary, #001233);
+  border-color: #cbd5e1;
+}
+.cc-stage-filter-btn.active {
+  background: #001233;
+  color: #ffffff;
+  border-color: #001233;
+}
+
+/* Interactive Funnel Ribbon */
+.cc-funnel-segment {
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.cc-funnel-segment:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+.cc-funnel-segment.active {
+  box-shadow: inset 0 -3px 0 var(--accent, #c9541a);
+}
+
+/* Split Cockpit Layout */
+.cc-dir-c-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 14px;
+  align-items: start;
+}
+
+/* Deals Table Card */
+.cc-pipeline-table-card {
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-color, #eef0f5);
+  display: flex;
+  flex-direction: column;
+}
+.cc-table-scroll-wrap {
+  overflow-x: auto;
+}
+.cc-pipeline-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.cc-pipeline-table thead tr {
+  background: var(--bg-surface-alt, #f5f6f9);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary, #4c5671);
+  border-bottom: 1px solid var(--border-color, #eef0f5);
+}
+.cc-deal-tr {
+  border-top: 1px solid var(--border-color, #eef0f5);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.cc-deal-tr:hover {
+  background: var(--bg-hover, #f8fafc);
+}
+.cc-deal-tr.is-selected {
+  background: #fff7f2 !important;
+  border-left: 3px solid var(--accent, #c9541a);
+}
+.cc-deal-td-name {
+  text-align: left;
+  padding: 10px 14px;
+  font-weight: 600;
+  color: var(--text-primary, #001233);
+}
+.cc-deal-row-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.cc-deal-row-stage {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary, #4c5671);
+  margin-top: 2px;
+}
+.cc-deal-td-val {
+  text-align: right;
+  padding: 10px 8px;
+  font-weight: 600;
+  color: var(--text-primary, #001233);
+  white-space: nowrap;
+}
+.cc-deal-td-health {
+  text-align: center;
+  padding: 10px 8px;
+}
+.cc-deal-health-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.cc-deal-health-pill.tone-risk {
+  background: #fbe9e7;
+  color: #8c1d18;
+}
+.cc-deal-health-pill.tone-watch {
+  background: #fff3d6;
+  color: #7a5300;
+}
+.cc-deal-health-pill.tone-good {
+  background: #e6f4ea;
+  color: #137333;
+}
+.cc-deal-td-step {
+  padding: 10px 8px;
+  font-size: 13px;
+  color: var(--text-primary, #001233);
+}
+.cc-step-late {
+  color: #b3261e;
+  font-weight: 600;
+}
+.cc-deal-td-touch {
+  text-align: right;
+  padding: 10px 8px;
+  font-size: 13px;
+  color: var(--text-secondary, #4c5671);
+  white-space: nowrap;
+}
+.cc-deal-td-touch.is-late {
+  color: #b3261e;
+  font-weight: 600;
+}
+.cc-deal-td-new {
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+.cc-sig-pill {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 2px;
+}
+.cc-sig-pill.pill-exec {
+  background: #e8eefb;
+  color: #24448f;
+}
+.cc-sig-pill.pill-hiring {
+  background: #f1f3f7;
+  color: #4c5671;
+}
+.cc-sig-pill.pill-news {
+  background: #f1f3f7;
+  color: #4c5671;
+}
+.cc-muted-dash {
+  color: var(--text-muted, #94a3b8);
+}
+.cc-deal-table-footer {
+  padding: 11px 14px;
+  border-top: 1px solid var(--border-color, #eef0f5);
+  font-size: 13px;
+  color: var(--text-secondary, #4c5671);
+  background: var(--bg-surface-alt, #fafafa);
+}
+.cc-table-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted, #64748b);
+}
+
+/* Right Pane: Live Telemetry Diff Inspector */
+.cc-pipeline-inspector {
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-color, #eef0f5);
+  display: flex;
+  flex-direction: column;
+}
+.cc-insp-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-color, #eef0f5);
+}
+.cc-insp-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-secondary, #4c5671);
+  letter-spacing: 0.04em;
+}
+.cc-insp-title {
+  margin: 3px 0 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary, #001233);
+}
+.cc-insp-sub {
+  font-size: 13px;
+  color: var(--text-secondary, #4c5671);
+  margin-top: 3px;
+}
+.cc-insp-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color, #eef0f5);
+}
+.cc-insp-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-secondary, #4c5671);
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+.cc-insp-diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cc-insp-diff-item {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary, #001233);
+}
+.cc-diff-type {
+  font-weight: 700;
+}
+.cc-insp-quiet {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary, #4c5671);
+  font-style: italic;
+}
+.cc-insp-suggested-step {
+  flex: 1;
+}
+.cc-insp-step-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary, #001233);
+}
+.cc-insp-actions-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color, #eef0f5);
+  background: var(--bg-surface-alt, #fafafa);
+}
+.cc-insp-btn {
+  height: 40px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+.cc-insp-btn-ghost {
+  border: 1px solid var(--border-color, #dce1e9);
+  background: #ffffff;
+  color: var(--text-primary, #001233);
+}
+.cc-insp-btn-ghost:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+.cc-insp-btn-primary {
+  border: 0;
+  background: var(--accent, #c9541a);
+  color: #ffffff;
+}
+.cc-insp-btn-primary:hover {
+  background: #b04612;
+}
+
+/* Mobile Responsive Alignment (DealsPhone 390px) */
+@media (max-width: 960px) {
+  .cc-dir-c-split {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .cc-pipeline-stage-filters {
+    width: 100%;
+    display: flex;
+  }
+  .cc-stage-funnel-strip {
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .cc-funnel-segment {
+    min-width: 110px;
+  }
+  .cc-pipeline-inspector {
+    margin-top: 12px;
+  }
+  .cc-insp-actions-row {
+    grid-template-columns: 1fr;
+  }
+}

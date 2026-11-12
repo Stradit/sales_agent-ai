@@ -470,3 +470,4 @@ export async function initMyAccounts() {
 
   renderMyAccounts();
 }
+

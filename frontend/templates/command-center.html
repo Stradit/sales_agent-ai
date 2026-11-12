@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="css/action-items.css?v=1.0">
   <link rel="stylesheet" href="css/profile-page.css?v=3.1">
   <link rel="stylesheet" href="css/responsive.css?v=3.0">
-  <link rel="stylesheet" href="css/command-center.css?v=3.9">
+  <link rel="stylesheet" href="css/command-center.css?v=4.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body class="cc-wide">
@@ -392,29 +392,35 @@
         </div>
       </div>
 
-      <!-- Direction C: Pipeline + Signals Container (Phase 4 Shell) -->
+      <!-- Direction C: Pipeline + Signals Container -->
       <div class="cc-view-container" id="ccViewPipeline" role="tabpanel" aria-labelledby="ccTabPipeline" style="display:none;">
         <div class="cc-dir-banner">
           <div class="cc-dir-banner-head">
             <div class="cc-dir-banner-info">
               <h2>My pipeline</h2>
-              <p>9 open deals · $2.29M · each deal shows what changed at its account since you last spoke</p>
+              <p id="ccPipelineBannerMeta">9 open deals · $2.29M · each deal shows what changed at its account since you last spoke</p>
+            </div>
+            <!-- Stage filter chips for mobile or quick filtering -->
+            <div class="cc-pipeline-stage-filters" role="group" aria-label="Filter by stage" id="ccPipelineStageFilters">
+              <button type="button" class="cc-stage-filter-btn active" data-stage="all">All 9</button>
+              <button type="button" class="cc-stage-filter-btn" data-stage="proposal">Proposal 4</button>
+              <button type="button" class="cc-stage-filter-btn" data-stage="pilot">Pilot 2</button>
+              <button type="button" class="cc-stage-filter-btn" data-stage="contract">Contract 1</button>
             </div>
           </div>
           <!-- Proportional stage funnel bar -->
           <div class="cc-stage-funnel-strip" id="ccPipelineFunnelStrip">
-            <div class="cc-funnel-segment seg-intro" style="flex:150;"><span>Intro</span> <strong>$150k</strong> <small>· 1</small></div>
-            <div class="cc-funnel-segment seg-disc" style="flex:95;"><span>Disc.</span> <strong>$95k</strong> <small>· 1</small></div>
-            <div class="cc-funnel-segment seg-prop" style="flex:895;"><span>Proposal</span> <strong>$895k</strong> <small>· 4 deals</small></div>
-            <div class="cc-funnel-segment seg-pilot" style="flex:700;"><span>Pilot</span> <strong>$700k</strong> <small>· 2</small></div>
-            <div class="cc-funnel-segment seg-contract" style="flex:450;"><span>Contract</span> <strong>$450k</strong> <small>· 1</small></div>
+            <button type="button" class="cc-funnel-segment seg-intro" data-stage="intro" style="flex:150;"><span>Intro</span> <strong>$150k</strong> <small>· 1</small></button>
+            <button type="button" class="cc-funnel-segment seg-disc" data-stage="discovery" style="flex:95;"><span>Disc.</span> <strong>$95k</strong> <small>· 1</small></button>
+            <button type="button" class="cc-funnel-segment seg-prop" data-stage="proposal" style="flex:895;"><span>Proposal</span> <strong>$895k</strong> <small>· 4 deals</small></button>
+            <button type="button" class="cc-funnel-segment seg-pilot" data-stage="pilot" style="flex:700;"><span>Pilot</span> <strong>$700k</strong> <small>· 2</small></button>
+            <button type="button" class="cc-funnel-segment seg-contract" data-stage="contract" style="flex:450;"><span>Contract</span> <strong>$450k</strong> <small>· 1</small></button>
           </div>
         </div>
         <div class="cc-dir-c-split" id="ccPipelineViewSplit">
           <div class="cc-dir-loading-placeholder">
             <i class="fa-solid fa-chart-column cc-placeholder-icon"></i>
-            <h3>Direction C: Pipeline + Signals Cockpit</h3>
-            <p>Deal-centric CRM cockpit with live telemetry diff showing what changed since your last touch.</p>
+            <h3>Loading pipeline cockpit…</h3>
           </div>
         </div>
       </div>
@@ -546,6 +552,6 @@
 {% include "partials/drawer.html" %}
 {% include "partials/copilot-dock.html" %}
 
-<script type="module" src="js/modules/command-center/main.js?v=8.5"></script>
+<script type="module" src="js/modules/command-center/main.js?v=8.6"></script>
 </body>
 </html>
