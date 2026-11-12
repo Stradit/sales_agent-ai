@@ -44,10 +44,22 @@ INVITE_TOKEN_EXPIRE_HOURS = int(os.getenv("JWT_INVITE_TOKEN_EXPIRE_HOURS", "72")
 MAX_FAILED_LOGINS = int(os.getenv("AUTH_MAX_FAILED_LOGINS", "5"))
 LOCKOUT_MINUTES = int(os.getenv("AUTH_LOCKOUT_MINUTES", "15"))
 
-# Whether any protected route actually enforces auth yet — see api.py's
-# router-level `Depends(get_current_user)`. False during Phase 1 so the
-# rest of the app stays reachable while login/refresh/logout are verified.
-AUTH_ENFORCED = os.getenv("AUTH_ENFORCED", "false").strip().lower() == "true"
+# Application Environment & Authentication Enforcement
+APP_ENV = os.getenv("APP_ENV", "prod").strip().lower()
+AUTH_ENFORCED = os.getenv("AUTH_ENFORCED", "true").strip().lower() == "true"
+
+if not AUTH_ENFORCED and APP_ENV not in ("dev", "test"):
+    raise RuntimeError(
+        f"AUTH_ENFORCED cannot be false when APP_ENV is '{APP_ENV}'. "
+        "Disabling authentication is strictly prohibited in staging/prod environments."
+    )
+
+if not AUTH_ENFORCED and APP_ENV == "dev":
+    import logging
+    logging.getLogger("auth").warning(
+        "SECURITY WARNING: AUTH_ENFORCED is false in 'dev' environment! "
+        "All unauthenticated requests run with synthetic super_admin permissions."
+    )
 
 if not JWT_SECRET_KEY:
     # Fail loud, not silent — a blank/default secret would let anyone forge
@@ -368,11 +380,10 @@ def log_audit(session, actor_user_id: Optional[int], action: str,
 # ── FastAPI dependencies ───────────────────────────────────────────
 
 def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer)) -> User:
-    # Phase 1: auth endpoints exist but nothing requires them yet.
-    # When AUTH_ENFORCED=false, unauthenticated requests get a synthetic
+    # When AUTH_ENFORCED=false in dev/test, unauthenticated requests get a synthetic
     # super_admin bypass user so every route stays reachable during dev.
     if creds is None:
-        if not AUTH_ENFORCED:
+        if not AUTH_ENFORCED and APP_ENV in ("dev", "test"):
             session = get_session()
             try:
                 user = session.query(User).filter_by(role="super_admin").first() or session.query(User).first()
@@ -390,7 +401,7 @@ def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(_be
     try:
         payload = decode_access_token(creds.credentials)
     except jwt.ExpiredSignatureError:
-        if not AUTH_ENFORCED:
+        if not AUTH_ENFORCED and APP_ENV in ("dev", "test"):
             session = get_session()
             try:
                 user = session.query(User).filter_by(role="super_admin").first() or session.query(User).first()
@@ -401,7 +412,7 @@ def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(_be
                 session.close()
         raise HTTPException(status_code=401, detail="Access token expired")
     except jwt.PyJWTError:
-        if not AUTH_ENFORCED:
+        if not AUTH_ENFORCED and APP_ENV in ("dev", "test"):
             session = get_session()
             try:
                 user = session.query(User).filter_by(role="super_admin").first() or session.query(User).first()
@@ -416,15 +427,35 @@ def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(_be
     try:
         user = session.query(User).filter_by(id=int(payload["sub"])).first()
         if not user or not user.is_active:
-            if not AUTH_ENFORCED:
+            if not AUTH_ENFORCED and APP_ENV in ("dev", "test"):
                 admin_user = session.query(User).filter_by(role="super_admin").first() or session.query(User).first()
                 if admin_user:
                     session.expunge(admin_user)
                     return admin_user
             raise HTTPException(status_code=401, detail="Account is inactive")
-        # Detach from the session before closing it so the caller can still
-        # read attributes (SQLAlchemy would otherwise lazy-reload on access
-        # and hit a closed session) — the same object, not a live query.
+        session.expunge(user)
+        user.token_client_slug = payload.get("client_slug")
+        return user
+    finally:
+        session.close()
+
+
+def get_current_user_strict(creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer)) -> User:
+    """Strict JWT authentication: never bypasses authentication or uses synthetic users."""
+    if creds is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = decode_access_token(creds.credentials)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Access token expired")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+
+    session = get_session()
+    try:
+        user = session.query(User).filter_by(id=int(payload["sub"])).first()
+        if not user or not user.is_active:
+            raise HTTPException(status_code=401, detail="Account is inactive")
         session.expunge(user)
         user.token_client_slug = payload.get("client_slug")
         return user
@@ -604,7 +635,7 @@ def resolve_request_client_slug(request: Request, user: Optional[User] = None) -
     return None
 
 
-def get_effective_role(session, user: User, client_slug: Optional[str] = None) -> Optional[str]:
+def get_effective_role(session, user: User, client_slug: Optional[str] = None, enforce: bool = False) -> Optional[str]:
     """Returns the effective role for a user in the given client context.
     
     Rules (§8 Specification v2):
@@ -614,7 +645,10 @@ def get_effective_role(session, user: User, client_slug: Optional[str] = None) -
     4. If client_slug is not specified, returns client_admin if user has that grant in any active client,
        otherwise returns user.role.
     """
-    if not AUTH_ENFORCED or getattr(user, "role", None) == "super_admin":
+    if not AUTH_ENFORCED and not enforce:
+        return "super_admin"
+
+    if getattr(user, "role", None) == "super_admin":
         return "super_admin"
 
     # Global read-only roles cap to 'viewer'
@@ -690,6 +724,40 @@ def require_permission(permission: str, require_client_context: bool = False):
         session = get_session()
         try:
             effective = get_effective_role(session, user, client_slug)
+            if not effective or not has_permission(effective, permission):
+                raise HTTPException(status_code=403, detail="Not authorized")
+
+            user.effective_role = effective
+            return user
+        finally:
+            session.close()
+    return dependency
+
+
+def require_permission_strict(permission: str, require_client_context: bool = False):
+    """FastAPI dependency strictly verifying JWT authentication and required permission.
+    
+    Always enforces authentication and authorization regardless of AUTH_ENFORCED.
+    Unauthenticated requests -> 401. Unauthorized requests -> 403.
+    """
+    def dependency(request: Request, user: User = Depends(get_current_user_strict)) -> User:
+        allowed_roles = PERMISSION_ROLES.get(permission)
+        if allowed_roles is None:
+            raise HTTPException(status_code=500, detail=f"Unknown permission '{permission}'")
+
+        if getattr(user, "role", None) == "super_admin":
+            return user
+
+        client_slug = resolve_request_client_slug(request, user)
+        if require_client_context and not client_slug:
+            raise HTTPException(
+                status_code=400,
+                detail="Client context required (pass X-Client-Slug header or client parameter)",
+            )
+
+        session = get_session()
+        try:
+            effective = get_effective_role(session, user, client_slug, enforce=True)
             if not effective or not has_permission(effective, permission):
                 raise HTTPException(status_code=403, detail="Not authorized")
 

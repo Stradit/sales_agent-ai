@@ -27,8 +27,11 @@ if not raw_db_url:
 os.environ["DATABASE_URL"] = raw_db_url
 os.environ["TEST_DATABASE_URL"] = raw_db_url
 
-# ── 2. Test-Only JWT Secret ──────────────────────────────────────────────────
+# ── 2. Test-Only JWT & Catalog Secrets ───────────────────────────────────────
 os.environ.setdefault("JWT_SECRET_KEY", "test-only-" + secrets.token_urlsafe(32))
+os.environ.setdefault("APP_ENV", "test")
+os.environ.setdefault("AUTH_ENFORCED", "false")
+os.environ.setdefault("CATALOG_TOKEN_SECRET", "test-catalog-secret-token-32b-long-secret")
 
 
 # ── 3. Transient Test Schema Cleanup Hook ─────────────────────────────────────

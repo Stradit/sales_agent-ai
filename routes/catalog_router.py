@@ -99,7 +99,7 @@ def resolve_target_client(
         raise HTTPException(status_code=404, detail=f"Target client '{target}' not found or inactive")
 
     # Re-authorize against that exact slug
-    effective_role = auth.get_effective_role(session, user, target)
+    effective_role = auth.get_effective_role(session, user, target, enforce=True)
     if not effective_role or not auth.has_permission(effective_role, permission):
         raise HTTPException(status_code=403, detail="Not authorized for this client")
 
@@ -152,7 +152,7 @@ def reuse_check(
     identifier: str = Query(..., min_length=2, description="Domain, CIK, LEI, or company key"),
     client: Optional[str] = Query(None, description="Client slug context"),
     request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission("account:reuse_check", require_client_context=True)),
+    current_user: auth.User = Depends(auth.require_permission_strict("account:reuse_check", require_client_context=True)),
     session: Session = Depends(get_platform_db),
 ):
     """Anti-Oracle verified intelligence lookup.
@@ -193,7 +193,7 @@ def reuse_check(
 def hydrate_account(
     req: HydrateRequest,
     request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission("account:write", require_client_context=True)),
+    current_user: auth.User = Depends(auth.require_permission_strict("account:write", require_client_context=True)),
     session: Session = Depends(get_platform_db),
 ):
     """Atomically imports verified intelligence into the target client workspace."""
@@ -257,7 +257,7 @@ def hydrate_account(
 def submit_reuse_request(
     req: ReuseRequestCreate,
     request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission("account:reuse_request", require_client_context=True)),
+    current_user: auth.User = Depends(auth.require_permission_strict("account:reuse_request", require_client_context=True)),
     session: Session = Depends(get_platform_db),
 ):
     """Submits a reuse request for super admin approval when reuse_requires_approval is true."""
@@ -323,7 +323,7 @@ def list_reuse_requests(
     client: Optional[str] = Query(None, description="Filter by client slug"),
     status: Optional[str] = Query(None, description="Filter by status (pending_approval, done, rejected)"),
     request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission("account:reuse_request", require_client_context=True)),
+    current_user: auth.User = Depends(auth.require_permission_strict("account:reuse_request", require_client_context=True)),
     session: Session = Depends(get_platform_db),
 ):
     """Lists intelligence reuse requests."""
@@ -404,7 +404,7 @@ def list_catalog_companies(
     search: Optional[str] = Query(None, description="Search legal or display name, or identifier"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user: auth.User = Depends(auth.require_permission("catalog:view_library")),
+    current_user: auth.User = Depends(auth.require_permission_strict("catalog:view_library")),
     session: Session = Depends(get_platform_db),
 ):
     """Platform Account Library overview for Super Administrators."""
@@ -466,7 +466,7 @@ def list_catalog_companies(
 @catalog_router.post("/publish")
 def publish_account(
     req: PublishRequest,
-    current_user: auth.User = Depends(auth.require_permission("catalog:publish")),
+    current_user: auth.User = Depends(auth.require_permission_strict("catalog:publish")),
     session: Session = Depends(get_platform_db),
 ):
     """Publishes a sanitized account snapshot from a tenant schema to platform_catalog."""
@@ -497,7 +497,7 @@ def publish_account(
 @catalog_router.post("/assign")
 def assign_account(
     req: AssignRequest,
-    current_user: auth.User = Depends(auth.require_permission("catalog:assign")),
+    current_user: auth.User = Depends(auth.require_permission_strict("catalog:assign")),
     session: Session = Depends(get_platform_db),
 ):
     """Super Admin direct assignment drawer: imports catalog intelligence directly into a client."""
@@ -530,7 +530,7 @@ def assign_account(
 @catalog_router.post("/requests/{request_id}/approve")
 def approve_reuse_request(
     request_id: int,
-    current_user: auth.User = Depends(auth.require_permission("catalog:approve")),
+    current_user: auth.User = Depends(auth.require_permission_strict("catalog:approve")),
     session: Session = Depends(get_platform_db),
 ):
     """Super Admin approves a pending reuse request and triggers hydration."""
@@ -578,7 +578,7 @@ def approve_reuse_request(
 def reject_reuse_request(
     request_id: int,
     req: RejectRequest = None,
-    current_user: auth.User = Depends(auth.require_permission("catalog:approve")),
+    current_user: auth.User = Depends(auth.require_permission_strict("catalog:approve")),
     session: Session = Depends(get_platform_db),
 ):
     """Super Admin rejects a pending reuse request."""
@@ -601,7 +601,7 @@ def reject_reuse_request(
 def rollback_share_event(
     share_event_id: int,
     req: RollbackRequest = None,
-    current_user: auth.User = Depends(auth.require_permission("catalog:rollback")),
+    current_user: auth.User = Depends(auth.require_permission_strict("catalog:rollback")),
     session: Session = Depends(get_platform_db),
 ):
     """Super Admin exact rollback of a completed hydration event.

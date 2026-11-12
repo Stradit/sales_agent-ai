@@ -416,3 +416,49 @@ def test_cross_tenant_slug_override_prevention(setup_catalog_router_environment)
         assert res.json()["available"] is True
     finally:
         auth.AUTH_ENFORCED = original_enforced
+
+
+def test_strict_auth_enforcement(setup_catalog_router_environment):
+    """Verifies that all catalog routes enforce strict JWT authentication (401 when unauthenticated)."""
+    env = setup_catalog_router_environment
+
+    # Even if AUTH_ENFORCED is false in the test environment, catalog endpoints must return 401
+    original_enforced = auth.AUTH_ENFORCED
+    auth.AUTH_ENFORCED = False
+    try:
+        # 1. Unauthenticated publish -> 401
+        res = api_client.post(
+            "/api/catalog/publish",
+            json={"source_client_slug": CLIENT_A_SLUG, "account_id": env["client_a_account_id"]},
+        )
+        assert res.status_code == 401
+        assert "Not authenticated" in res.json()["detail"]
+
+        # 2. Unauthenticated reuse-check -> 401
+        res = api_client.get("/api/catalog/reuse-check?identifier=veritasglobal.com")
+        assert res.status_code == 401
+
+        # 3. Unauthenticated hydrate -> 401
+        res = api_client.post("/api/catalog/hydrate", json={"snapshot_id": 1, "preview_token": "foo"})
+        assert res.status_code == 401
+
+        # 4. Unauthenticated requests GET -> 401
+        res = api_client.get("/api/catalog/requests")
+        assert res.status_code == 401
+
+        # 5. Unauthenticated companies GET -> 401
+        res = api_client.get("/api/catalog/companies")
+        assert res.status_code == 401
+
+        # 6. Verify APP_ENV=prod and AUTH_ENFORCED=false raises at import time
+        import subprocess, sys
+        cmd = [
+            sys.executable,
+            "-c",
+            "import os; os.environ['APP_ENV']='prod'; os.environ['AUTH_ENFORCED']='false'; import auth",
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        assert proc.returncode != 0
+        assert "AUTH_ENFORCED cannot be false when APP_ENV is 'prod'" in proc.stderr
+    finally:
+        auth.AUTH_ENFORCED = original_enforced
