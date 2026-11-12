@@ -398,8 +398,11 @@ class CatalogService:
         if not client:
             raise ValueError(f"Client '{clean_slug}' not found.")
 
-        if not client.catalog_publish and not force:
-            raise PermissionError(f"Client '{clean_slug}' is not authorized to publish to the catalog.")
+        if client.status != "active":
+            raise PermissionError(f"Client '{clean_slug}' is not active (status='{client.status}').")
+
+        if not client.catalog_publish:
+            raise PermissionError(f"Client '{clean_slug}' is not authorized to publish to the catalog (catalog_publish=False).")
 
         # 1. Extract sanitized payload
         payload = cls.extract_and_sanitize_payload(session, clean_slug, account_id)

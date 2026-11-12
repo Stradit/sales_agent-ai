@@ -219,6 +219,12 @@ def hydrate_account(
     if not target_client:
         raise HTTPException(status_code=404, detail=f"Client '{clean_slug}' not found")
 
+    if not target_client.catalog_consume:
+        raise HTTPException(
+            status_code=403,
+            detail="Catalog reuse is not enabled for this organization",
+        )
+
     is_super_admin = getattr(current_user, "role", None) == "super_admin"
     if target_client.reuse_requires_approval and not is_super_admin:
         raise HTTPException(
@@ -243,6 +249,8 @@ def hydrate_account(
         )
         return hydration_res
 
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except AccountQuotaExceededError as e:
         raise HTTPException(status_code=402, detail=str(e))
     except DuplicateAccountError as e:
@@ -277,6 +285,12 @@ def submit_reuse_request(
     target_client = session.query(Client).filter_by(slug=clean_slug).first()
     if not target_client:
         raise HTTPException(status_code=404, detail=f"Client '{clean_slug}' not found")
+
+    if not target_client.catalog_consume:
+        raise HTTPException(
+            status_code=403,
+            detail="Catalog reuse is not enabled for this organization",
+        )
 
     snapshot = session.query(Snapshot).filter_by(id=req.snapshot_id).first()
     if not snapshot:
@@ -490,6 +504,8 @@ def publish_account(
             "quality_grade": snapshot.quality_grade,
             "counts": snapshot.counts,
         }
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Publish failed: {str(e)}")
 
@@ -515,8 +531,11 @@ def assign_account(
             fee_credits=0,  # Super admin direct assign is 0 fee by default
             reason=req.reason or f"Super admin direct assignment to {clean_slug}",
             approved_by_user_id=current_user.id,
+            is_admin_assign=True,
         )
         return res
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except AccountQuotaExceededError as e:
         raise HTTPException(status_code=402, detail=str(e))
     except DuplicateAccountError as e:

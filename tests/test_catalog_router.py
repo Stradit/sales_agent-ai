@@ -32,6 +32,7 @@ from db.models.user import User
 from db.models.user_client_access import UserClientAccess
 from db.provisioning import create_client_schema
 from services.catalog_service import CatalogService
+from services.account_reuse_service import AccountReuseService
 
 api_client = TestClient(app)
 
@@ -462,3 +463,132 @@ def test_strict_auth_enforcement(setup_catalog_router_environment):
         assert "AUTH_ENFORCED cannot be false when APP_ENV is 'prod'" in proc.stderr
     finally:
         auth.AUTH_ENFORCED = original_enforced
+
+
+def test_catalog_flags_enforcement(setup_catalog_router_environment):
+    """Verifies S-4: catalog_publish and catalog_consume flags enforcement."""
+    env = setup_catalog_router_environment
+    super_headers = _headers_for(env["super_id"])
+    admin_b_headers = _headers_for(env["admin_b_id"], CLIENT_B_SLUG)
+
+    session = SessionLocal()
+    try:
+        ca = session.query(Client).filter_by(slug=CLIENT_A_SLUG).first()
+        cb = session.query(Client).filter_by(slug=CLIENT_B_SLUG).first()
+
+        # 1. Publish flag enforcement: client_a catalog_publish = False
+        ca.catalog_publish = False
+        session.commit()
+
+        # Direct service call with force=True still raises PermissionError
+        with pytest.raises(PermissionError) as exc_info:
+            CatalogService.publish_account_snapshot(
+                session=session,
+                source_client_slug=CLIENT_A_SLUG,
+                account_id=env["client_a_account_id"],
+                published_by_user_id=env["super_id"],
+                force=True,
+            )
+        assert "not authorized to publish" in str(exc_info.value)
+
+        # HTTP /publish endpoint returns 403
+        res = api_client.post(
+            "/api/catalog/publish",
+            json={"source_client_slug": CLIENT_A_SLUG, "account_id": env["client_a_account_id"], "force": True},
+            headers=super_headers,
+        )
+        assert res.status_code == 403
+
+        # Inactive client raises PermissionError
+        ca.catalog_publish = True
+        ca.status = "suspended"
+        session.commit()
+
+        with pytest.raises(PermissionError) as exc_info:
+            CatalogService.publish_account_snapshot(
+                session=session,
+                source_client_slug=CLIENT_A_SLUG,
+                account_id=env["client_a_account_id"],
+                published_by_user_id=env["super_id"],
+                force=True,
+            )
+        assert "is not active" in str(exc_info.value)
+
+        # Restore client A
+        ca.status = "active"
+        ca.catalog_publish = True
+        session.commit()
+
+        # Publish a snapshot to test consume flag
+        snap = CatalogService.publish_account_snapshot(
+            session=session,
+            source_client_slug=CLIENT_A_SLUG,
+            account_id=env["client_a_account_id"],
+            published_by_user_id=env["super_id"],
+            force=True,
+        )
+
+        # 2. Consume flag enforcement: client_b catalog_consume = False
+        cb.catalog_consume = False
+        session.commit()
+
+        # (a) Service check_reuse_available returns None
+        avail = AccountReuseService.check_reuse_available(session, "veritasglobal.com", CLIENT_B_SLUG)
+        assert avail is None
+
+        # (b) GET /reuse-check returns available: false
+        res = api_client.get(
+            f"/api/catalog/reuse-check?identifier=veritasglobal.com&client={CLIENT_B_SLUG}",
+            headers=admin_b_headers,
+        )
+        assert res.status_code == 200
+        assert res.json() == {"available": False}
+
+        # (c) Service hydrate raises PermissionError
+        with pytest.raises(PermissionError) as exc_info:
+            AccountReuseService.hydrate_account_from_catalog(
+                session=session,
+                target_client_slug=CLIENT_B_SLUG,
+                snapshot_id=snap.id,
+                user_id=env["admin_b_id"],
+                idempotency_key="test_consume_off",
+            )
+        assert "Catalog reuse is not enabled" in str(exc_info.value)
+
+        # (d) POST /hydrate returns 403
+        tok = AccountReuseService.generate_preview_token(snap.id, CLIENT_B_SLUG, env["admin_b_id"])
+        res = api_client.post(
+            "/api/catalog/hydrate",
+            json={"snapshot_id": snap.id, "preview_token": tok},
+            headers=admin_b_headers,
+        )
+        assert res.status_code == 403
+        assert "Catalog reuse is not enabled" in res.json()["detail"]
+
+        # (e) POST /requests returns 403
+        res = api_client.post(
+            "/api/catalog/requests",
+            json={"snapshot_id": snap.id, "preview_token": tok, "reason": "Test consume off"},
+            headers=admin_b_headers,
+        )
+        assert res.status_code == 403
+        assert "Catalog reuse is not enabled" in res.json()["detail"]
+
+        # (f) Super-admin direct assign can bypass catalog_consume
+        res = api_client.post(
+            "/api/catalog/assign",
+            json={"snapshot_id": snap.id, "target_client_slug": CLIENT_B_SLUG, "mode": "instant"},
+            headers=super_headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["ok"] is True
+    finally:
+        ca = session.query(Client).filter_by(slug=CLIENT_A_SLUG).first()
+        cb = session.query(Client).filter_by(slug=CLIENT_B_SLUG).first()
+        if ca:
+            ca.catalog_publish = True
+            ca.status = "active"
+        if cb:
+            cb.catalog_consume = True
+        session.commit()
+        session.close()

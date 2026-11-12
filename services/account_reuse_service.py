@@ -229,6 +229,9 @@ class AccountReuseService:
         if not target_client:
             raise ValueError(f"Target client '{clean_slug}' not found.")
 
+        if not target_client.catalog_consume:
+            return None
+
         company = CatalogService.get_company_by_identifier(session, identifier)
         if not company:
             return None
@@ -392,6 +395,7 @@ class AccountReuseService:
         fee_credits: int = 1,
         reason: Optional[str] = None,
         approved_by_user_id: Optional[int] = None,
+        is_admin_assign: bool = False,
     ) -> Dict[str, Any]:
         """Atomically imports a catalog snapshot into the target tenant workspace.
         
@@ -427,6 +431,8 @@ class AccountReuseService:
             raise ValueError(f"Target client '{clean_slug}' not found.")
         if target_client.status != "active":
             raise AccountReuseError(f"Target client is in '{target_client.status}' status.")
+        if not target_client.catalog_consume and not is_admin_assign:
+            raise PermissionError("Catalog reuse is not enabled for this organization")
 
         snapshot = session.query(Snapshot).filter_by(id=snapshot_id).first()
         if not snapshot:
