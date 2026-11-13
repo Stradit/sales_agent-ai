@@ -666,6 +666,19 @@ class AccountAutomationEngine:
                 session.add(new_acct)
                 session.commit()
                 session.refresh(new_acct)
+                try:
+                    from sqlalchemy import text
+                    session.execute(
+                        text("""
+                            INSERT INTO account_origin (account_id, origin_type, canonical_key, snapshot_id, snapshot_version, hydrated_at, local_edits)
+                            VALUES (:aid, 'fetched', :ckey, NULL, NULL, NULL, false)
+                            ON CONFLICT (account_id) DO NOTHING
+                        """),
+                        {"aid": new_acct.id, "ckey": new_acct.domain or new_acct.key},
+                    )
+                    session.commit()
+                except Exception:
+                    pass
                 account_id = new_acct.id
                 account_key = new_acct.key
         except Exception as e:

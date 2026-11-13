@@ -1386,6 +1386,19 @@ if FASTAPI_AVAILABLE:
             session.commit()
             session.refresh(new_account)
 
+            try:
+                session.execute(
+                    text("""
+                        INSERT INTO account_origin (account_id, origin_type, canonical_key, snapshot_id, snapshot_version, hydrated_at, local_edits)
+                        VALUES (:aid, 'fetched', :ckey, NULL, NULL, NULL, false)
+                        ON CONFLICT (account_id) DO NOTHING
+                    """),
+                    {"aid": new_account.id, "ckey": new_account.domain or new_account.key},
+                )
+                session.commit()
+            except Exception:
+                pass
+
             return {
                 "status": "created",
                 "account_id": new_account.id,
@@ -2316,6 +2329,7 @@ if FASTAPI_AVAILABLE:
             "is_manually_verified": bool(getattr(acct, "is_manually_verified", False)),
             "manually_verified_at": acct.manually_verified_at.isoformat() if getattr(acct, "manually_verified_at", None) else None,
             "osint_feed_manifest": getattr(acct, "osint_feed_manifest", None) or {},
+            "provenance": getattr(acct, "_provenance", None) or getattr(acct, "_origin", None),
             "origin": getattr(acct, "_origin", None),
             "_is_full_loaded": True,
         }
@@ -2514,6 +2528,8 @@ if FASTAPI_AVAILABLE:
             "created_at": acct.created_at.isoformat() if getattr(acct, "created_at", None) else None,
             "updated_at": acct.updated_at.isoformat() if getattr(acct, "updated_at", None) else None,
             "manually_verified_at": acct.manually_verified_at.isoformat() if getattr(acct, "manually_verified_at", None) else None,
+            "provenance": getattr(acct, "_provenance", None) or getattr(acct, "_origin", None),
+            "origin": getattr(acct, "_origin", None),
         }
 
     @account_router.get("")
@@ -2539,7 +2555,24 @@ if FASTAPI_AVAILABLE:
                 selectinload(Account.personas),
                 selectinload(Account.lobs).selectinload(Lob.sub_lobs)
             )
-            if user.role != "super_admin":
+            is_admin = (getattr(user, "role", None) in ("super_admin", "client_admin"))
+            if not is_admin:
+                try:
+                    from db.tenant import get_current_slug
+                    slug = get_current_slug()
+                    if slug:
+                        cl_id = session.execute(text("SELECT id FROM clients WHERE slug = :s"), {"s": slug}).scalar()
+                        if cl_id:
+                            uca_role = session.execute(
+                                text("SELECT role FROM user_client_access WHERE user_id = :u AND client_id = :c"),
+                                {"u": user.id, "c": cl_id}
+                            ).scalar()
+                            if uca_role == "client_admin":
+                                is_admin = True
+                except Exception:
+                    pass
+
+            if not is_admin:
                 accessible_ids = auth.get_accessible_account_ids(session, user.id)
                 query = query.filter(Account.id.in_(accessible_ids)) if accessible_ids else query.filter(False)
             # Pre-fetch latest run timestamps from pipeline_runs for real Last Run display
@@ -2595,8 +2628,13 @@ if FASTAPI_AVAILABLE:
                 pass
 
             accounts = query.order_by(Account.id.desc()).all()
+            from services.catalog_presenter import batch_get_account_provenances
+            account_ids = [acct.id for acct in accounts]
+            provenance_map = batch_get_account_provenances(session, account_ids)
             for acct in accounts:
-                setattr(acct, "_origin", account_origins.get(acct.id))
+                prov = provenance_map.get(acct.id)
+                setattr(acct, "_provenance", prov)
+                setattr(acct, "_origin", prov)
             serializer = _serialize_account_full if full else _serialize_account_summary
             return {"accounts": [serializer(acct) for acct in accounts]}
 
@@ -2672,17 +2710,11 @@ if FASTAPI_AVAILABLE:
                 print(f"[RunTimestamps] Non-fatal pre-fetch error: {_e}")
 
             try:
-                origin_row = session.execute(
-                    text("SELECT origin_type, snapshot_id, snapshot_version, hydrated_at FROM account_origin WHERE account_id = :aid"),
-                    {"aid": acct.id}
-                ).fetchone()
-                if origin_row:
-                    setattr(acct, "_origin", {
-                        "origin_type": origin_row[0],
-                        "snapshot_id": origin_row[1],
-                        "snapshot_version": origin_row[2],
-                        "hydrated_at": origin_row[3].isoformat() if origin_row[3] else None,
-                    })
+                from services.catalog_presenter import batch_get_account_provenances
+                prov_map = batch_get_account_provenances(session, [acct.id])
+                prov = prov_map.get(acct.id)
+                setattr(acct, "_provenance", prov)
+                setattr(acct, "_origin", prov)
             except Exception:
                 pass
 
@@ -5426,7 +5458,24 @@ if FASTAPI_AVAILABLE:
                 Persona.operational_pain_points, Persona.key_objections,
                 func.coalesce(Account.display_name, Account.legal_name).label("acct_name"),
             ).join(Account, Persona.account_id == Account.id)
-            if user.role != "super_admin":
+            is_admin = (getattr(user, "role", None) in ("super_admin", "client_admin"))
+            if not is_admin:
+                try:
+                    from db.tenant import get_current_slug
+                    slug = get_current_slug()
+                    if slug:
+                        cl_id = session.execute(text("SELECT id FROM clients WHERE slug = :s"), {"s": slug}).scalar()
+                        if cl_id:
+                            uca_role = session.execute(
+                                text("SELECT role FROM user_client_access WHERE user_id = :u AND client_id = :c"),
+                                {"u": user.id, "c": cl_id}
+                            ).scalar()
+                            if uca_role == "client_admin":
+                                is_admin = True
+                except Exception:
+                    pass
+
+            if not is_admin:
                 accessible_ids = auth.get_accessible_account_ids(session, user.id)
                 query = query.filter(Account.id.in_(accessible_ids)) if accessible_ids else query.filter(False)
             personas = query.all()

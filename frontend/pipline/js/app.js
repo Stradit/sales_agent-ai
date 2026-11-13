@@ -1042,16 +1042,99 @@ $(function () {
     });
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // PROVENANCE BADGE MANAGER (C4)
+  // ══════════════════════════════════════════════════════════════════
+  const ProvenanceBadge = {
+    renderPill: function(provenance, accountId) {
+      if (!provenance) {
+        return `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;" title="Extracted via pipeline run"><i class="bi bi-cloud-arrow-down me-1"></i>Fetched</span>`;
+      }
+      const badge = provenance.badge || provenance.kind || (provenance.origin_type === 'catalog' ? 'verified' : 'fetched');
+      const v = provenance.snapshot_version || 1;
+      const latestV = provenance.latest_catalog_version || provenance.latest_version;
+      const tooltip = esc(provenance.tooltip || provenance.label || '');
+
+      if (badge === 'update_available' || provenance.has_newer_version || provenance.refresh_available) {
+        return `<span class="badge bg-primary-subtle text-primary border border-primary-subtle cursor-pointer provenance-badge" data-account-id="${accountId}" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;cursor:pointer;" title="${tooltip}" onclick="event.stopPropagation(); if (typeof CatalogRefreshManager !== 'undefined') CatalogRefreshManager.openRefreshModal(${accountId});">
+          <i class="bi bi-arrow-repeat me-1"></i>Update v${latestV || v}
+        </span>`;
+      }
+      if (badge === 'edited' || badge === 'edited_catalog' || provenance.local_edits) {
+        return `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;" title="${tooltip}">
+          <i class="bi bi-pencil-square me-1"></i>Verified &bull; Edited
+        </span>`;
+      }
+      if (badge === 'verified' || badge === 'catalog' || provenance.origin_type === 'catalog') {
+        return `<span class="badge bg-success-subtle text-success border border-success-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;" title="${tooltip}">
+          <i class="bi bi-shield-check me-1"></i>Verified (v${v})
+        </span>`;
+      }
+      return `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;" title="${tooltip}">
+        <i class="bi bi-cloud-arrow-down me-1"></i>Fetched
+      </span>`;
+    },
+
+    renderHeader: function(provenance, accountId) {
+      if (!provenance) {
+        return `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle" style="font-size:0.75rem;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;" title="Extracted via direct pipeline execution for this tenant"><i class="bi bi-cloud-arrow-down"></i> Fetched</span>`;
+      }
+      const badge = provenance.badge || provenance.kind || (provenance.origin_type === 'catalog' ? 'verified' : 'fetched');
+      const v = provenance.snapshot_version || 1;
+      const latestV = provenance.latest_catalog_version || provenance.latest_version;
+      const tooltip = esc(provenance.tooltip || provenance.label || '');
+
+      if (badge === 'update_available' || provenance.has_newer_version || provenance.refresh_available) {
+        return `<button type="button" class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1" style="font-size:0.75rem;padding:3px 10px;border-radius:6px;font-weight:600;" title="${tooltip}" onclick="if (typeof CatalogRefreshManager !== 'undefined') CatalogRefreshManager.openRefreshModal(${accountId});">
+          <i class="bi bi-arrow-repeat"></i> Update Available (v${latestV}) &bull; Review Diff
+        </button>`;
+      }
+      if (badge === 'edited' || badge === 'edited_catalog' || provenance.local_edits) {
+        return `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle" style="font-size:0.75rem;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;" title="${tooltip}">
+          <i class="bi bi-pencil-square text-warning"></i> Verified Catalog v${v} &bull; Edited Locally
+        </span>`;
+      }
+      if (badge === 'verified' || badge === 'catalog' || provenance.origin_type === 'catalog') {
+        return `<span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size:0.75rem;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;" title="${tooltip}">
+          <i class="bi bi-shield-check text-success"></i> Verified Catalog v${v}
+        </span>`;
+      }
+      return `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle" style="font-size:0.75rem;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;" title="${tooltip}">
+        <i class="bi bi-cloud-arrow-down"></i> Fetched
+      </span>`;
+    }
+  };
+
+  $(document).on("click", "#sidebarProvenanceFilters .prov-chip", function () {
+    $("#sidebarProvenanceFilters .prov-chip").removeClass("active");
+    $(this).addClass("active");
+    renderSidebar();
+  });
+
   // 1. Render Clean Enterprise Sidebar Accounts
   function renderSidebar(filterQuery = "") {
     updateGlobalTelemetry();
     const $list = $("#accountList").empty();
     const q = (filterQuery !== undefined ? filterQuery : ($("#accountSearch").val() || "")).trim().toLowerCase();
+    const activeProvFilter = $("#sidebarProvenanceFilters .prov-chip.active").data("filter") || "all";
 
     const accounts = Array.isArray(MOCK_DATA.accounts) ? [...MOCK_DATA.accounts] : [];
 
-    // Filter by search query
+    // Filter by search query and provenance
     const filtered = accounts.filter((acct) => {
+      if (activeProvFilter !== "all") {
+        const prov = acct.provenance || acct.origin;
+        const badge = prov ? (prov.badge || prov.kind || (prov.origin_type === 'catalog' ? 'verified' : 'fetched')) : 'fetched';
+        if (activeProvFilter === "verified") {
+          if (badge !== "verified" && badge !== "update_available" && badge !== "edited" && prov?.origin_type !== "catalog") return false;
+        } else if (activeProvFilter === "update_available") {
+          if (badge !== "update_available" && !prov?.has_newer_version && !prov?.refresh_available) return false;
+        } else if (activeProvFilter === "edited") {
+          if (badge !== "edited" && badge !== "edited_catalog" && !prov?.local_edits) return false;
+        } else if (activeProvFilter === "fetched") {
+          if (badge !== "fetched" && prov?.origin_type === "catalog") return false;
+        }
+      }
       const acctName = (acct.name || acct.display_name || "").toLowerCase();
       const domain = (acct.primary_domain || acct.domain || "").toLowerCase();
       const ticker = (acct.stock_symbol || acct.ticker || "").toLowerCase();
@@ -1107,8 +1190,9 @@ $(function () {
               <span class="acct-name" title="${esc(acctName)}">${esc(acctName)}</span>
               <span class="acct-score-pill ${healthClass}">${completenessScore}%</span>
             </div>
-            <div class="acct-meta-row">
-              ${subtext}
+            <div class="acct-meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+              <span class="text-truncate">${subtext}</span>
+              ${typeof ProvenanceBadge !== "undefined" ? ProvenanceBadge.renderPill(acct.provenance || acct.origin, acct.id) : ""}
             </div>
           </div>
         </div>
@@ -6782,11 +6866,7 @@ $(function () {
           <div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
               <h1 class="header-entity-name" style="margin-bottom:0;">${esc(account.name)}</h1>
-              ${(account.origin && account.origin.origin_type === 'catalog') ? `
-                <span class="badge" style="background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe;font-size:0.72rem;font-weight:700;padding:3px 9px;border-radius:6px;display:inline-flex;align-items:center;gap:4px;" title="Hydrated from Platform Catalog (Snapshot v${account.origin.snapshot_version || 1})">
-                  <i class="bi bi-patch-check-fill text-purple"></i> From Catalog &bull; ${formatTimeAgo(account.origin.hydrated_at)}
-                </span>
-              ` : ""}
+              ${typeof ProvenanceBadge !== "undefined" ? ProvenanceBadge.renderHeader(account.provenance || account.origin, account.id) : ""}
             </div>
             <div class="header-badges-row" style="margin-top:6px;">
               <div class="header-firmographics-group" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">

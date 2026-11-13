@@ -60,6 +60,21 @@ class AccountRepository:
 
         self.session.flush()
 
+        if not existing:
+            # Creation hook: create account_origin with origin_type='fetched' (C4)
+            from sqlalchemy import text
+            try:
+                self.session.execute(
+                    text("""
+                        INSERT INTO account_origin (account_id, origin_type, canonical_key, snapshot_id, snapshot_version, hydrated_at, local_edits)
+                        VALUES (:aid, 'fetched', :ckey, NULL, NULL, NULL, false)
+                        ON CONFLICT (account_id) DO NOTHING
+                    """),
+                    {"aid": acct.id, "ckey": acct.domain or acct.key},
+                )
+            except Exception:
+                pass
+
         # Ingest Board of Directors and Founders from Account Level Intelligence
         if raw_data and isinstance(raw_data, dict):
             self._ingest_account_board_and_founders(acct, raw_data)

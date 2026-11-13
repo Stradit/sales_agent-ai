@@ -9,6 +9,7 @@ Guarantees:
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from sqlalchemy.orm import Session
 
 
 def build_preview_view(
@@ -383,11 +384,11 @@ def build_provenance_view(
     local_edits: bool,
     snapshot_version: Optional[int],
     hydrated_at: Optional[datetime],
-    hydrated_by_name: Optional[str],
-    latest_snapshot_version: Optional[int],
-    snapshot_taken_at: Optional[datetime],
+    hydrated_by_name: Optional[str] = None,
+    latest_snapshot_version: Optional[int] = None,
+    snapshot_taken_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Builds a tenant-safe ProvenanceView for accounts list and account detail."""
+    """Builds a tenant-safe ProvenanceView for accounts list and account detail (C4)."""
     now = datetime.now(timezone.utc)
     age_days = None
     freshness = "unknown"
@@ -397,36 +398,137 @@ def build_provenance_view(
         age_days = max(0, (now - t_at).days)
         freshness = "fresh" if age_days <= 15 else ("stale" if age_days <= 45 else "old")
 
-    if origin_type == "catalog":
-        if local_edits:
+    clean_origin = "catalog" if origin_type == "catalog" else ("manual" if origin_type == "manual" else "fetched")
+    has_newer_version = bool(
+        clean_origin == "catalog"
+        and latest_snapshot_version is not None
+        and snapshot_version is not None
+        and latest_snapshot_version > snapshot_version
+    )
+
+    if clean_origin == "catalog":
+        if has_newer_version:
+            badge = "update_available"
+            kind = "update_available"
+            label = f"Update available (v{latest_snapshot_version})"
+            tooltip = f"Hydrated from verified catalog v{snapshot_version or 1}. Newer v{latest_snapshot_version} is available."
+        elif local_edits:
+            badge = "edited"
             kind = "edited_catalog"
             label = f"Verified catalog v{snapshot_version or 1} · edited"
+            tooltip = f"Hydrated from verified catalog v{snapshot_version or 1}, with local tenant modifications."
         else:
+            badge = "verified"
             kind = "catalog"
             label = f"Verified catalog v{snapshot_version or 1}"
-    elif origin_type == "manual":
+            tooltip = f"Hydrated from verified platform catalog (v{snapshot_version or 1})."
+    elif clean_origin == "manual":
+        badge = "manual"
         kind = "manual"
         label = "Manual"
+        tooltip = "Manually created or registered account."
     else:
+        badge = "fetched"
         kind = "fetched"
         label = "Fetched"
-
-    refresh_available = False
-    if origin_type == "catalog" and latest_snapshot_version and snapshot_version:
-        refresh_available = latest_snapshot_version > snapshot_version
+        tooltip = "Extracted via direct pipeline execution for this tenant."
 
     return {
+        "badge": badge,
         "kind": kind,
+        "origin_type": clean_origin,
         "label": label,
+        "tooltip": tooltip,
         "snapshot_version": snapshot_version,
+        "latest_catalog_version": latest_snapshot_version,
+        "latest_version": latest_snapshot_version,
+        "has_newer_version": has_newer_version,
+        "refresh_available": has_newer_version,
+        "local_edits": bool(local_edits),
         "hydrated_at": hydrated_at.isoformat() if hydrated_at else None,
         "hydrated_by": {"name": hydrated_by_name} if hydrated_by_name else None,
-        "local_edits": bool(local_edits),
-        "refresh_available": refresh_available,
-        "latest_version": latest_snapshot_version,
+        "source_extracted_at": snapshot_taken_at.isoformat() if snapshot_taken_at else None,
         "age_days": age_days,
         "freshness": freshness,
     }
+
+
+def batch_get_account_provenances(session: Session, account_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    """Batches provenance retrieval for a list of account IDs in O(1) query count (C4)."""
+    if not account_ids:
+        return {}
+
+    from sqlalchemy import text
+    try:
+        rows = session.execute(
+            text("""
+                SELECT account_id, origin_type, canonical_key, snapshot_id, snapshot_version, hydrated_at, local_edits, source_extracted_at
+                FROM account_origin
+                WHERE account_id = ANY(:aids)
+            """),
+            {"aids": account_ids},
+        ).fetchall()
+    except Exception:
+        rows = []
+
+    origin_by_aid = {r[0]: r for r in rows}
+
+    catalog_canonical_keys = {
+        r[2] for r in rows
+        if r[1] == "catalog" and r[2]
+    }
+
+    latest_versions: Dict[str, int] = {}
+    if catalog_canonical_keys:
+        try:
+            snap_rows = session.execute(
+                text("""
+                    SELECT c.canonical_key, MAX(s.version) as latest_v
+                    FROM platform_catalog.snapshots s
+                    JOIN platform_catalog.companies c ON c.id = s.company_id
+                    WHERE c.canonical_key = ANY(:ckeys)
+                      AND s.status = 'ready'
+                    GROUP BY c.canonical_key
+                """),
+                {"ckeys": list(catalog_canonical_keys)},
+            ).fetchall()
+            for sr in snap_rows:
+                if sr[0] and sr[1] is not None:
+                    latest_versions[sr[0]] = int(sr[1])
+        except Exception:
+            pass
+
+    results = {}
+    for aid in account_ids:
+        r = origin_by_aid.get(aid)
+        if r:
+            orig_type = r[1]
+            ckey = r[2]
+            snap_v = r[4]
+            hyd_at = r[5]
+            loc_edits = bool(r[6])
+            src_ext_at = r[7]
+            latest_v = latest_versions.get(ckey) if ckey else None
+
+            results[aid] = build_provenance_view(
+                origin_type=orig_type,
+                local_edits=loc_edits,
+                snapshot_version=snap_v,
+                hydrated_at=hyd_at,
+                latest_snapshot_version=latest_v,
+                snapshot_taken_at=src_ext_at,
+            )
+        else:
+            results[aid] = build_provenance_view(
+                origin_type="fetched",
+                local_edits=False,
+                snapshot_version=None,
+                hydrated_at=None,
+                latest_snapshot_version=None,
+                snapshot_taken_at=None,
+            )
+
+    return results
 
 
 def build_ledger_entry_view(
