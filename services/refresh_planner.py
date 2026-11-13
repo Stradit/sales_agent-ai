@@ -150,6 +150,22 @@ class RefreshPlanner:
         remote_cxo = blob_payload.get("cxo_movements", [])
         remote_jobs = blob_payload.get("linkedin_jobs", [])
 
+        # Bounded diff computation guard (Phase C C6 performance & stability)
+        MAX_DIFF_ROWS = 2000
+        if (
+            len(local_personas) > MAX_DIFF_ROWS
+            or len(remote_personas) > MAX_DIFF_ROWS
+            or len(local_lobs) > MAX_DIFF_ROWS
+            or len(remote_lobs) > MAX_DIFF_ROWS
+            or len(local_sub_lobs) > MAX_DIFF_ROWS
+            or len(remote_sub_lobs) > MAX_DIFF_ROWS
+        ):
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail="Dataset exceeds maximum diff computation limit (2,000 rows per table). Please contact support for assisted sync.",
+            )
+
         protected_rows: List[Dict[str, Any]] = []
         table_edits_count: Dict[str, int] = {}
 

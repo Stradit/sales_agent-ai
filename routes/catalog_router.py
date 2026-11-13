@@ -9,6 +9,7 @@ Provides:
 
 from datetime import date, datetime, timezone
 import hashlib
+import json
 import logging
 from typing import Any, Dict, List, Literal, Optional
 import uuid
@@ -62,6 +63,22 @@ from services.refresh_planner import RefreshPlanner
 import threading
 
 logger = logging.getLogger(__name__)
+
+
+def emit_sharing_telemetry(event: str, correlation_id: str, client_id: int, **extra):
+    """Emits structured, non-PII, tenant-safe telemetry logs for sharing events (Phase C C6)."""
+    try:
+        payload = {
+            "telemetry_event": event,
+            "correlation_id": correlation_id,
+            "client_id": client_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **{k: v for k, v in extra.items() if v is not None},
+        }
+        logger.info(f"[TELEMETRY] {json.dumps(payload)}")
+    except Exception as e:
+        logger.warning(f"Failed to emit sharing telemetry for {event}: {e}")
+
 
 
 def _sanitize_error_message(msg: str) -> str:
@@ -346,6 +363,8 @@ def get_catalog_preview(
         )
         session.commit()
 
+        emit_sharing_telemetry("preview_opened", ctx.correlation_id, ctx.client_id, snapshot_id=snapshot.id)
+
         return {
             "match_found": True,
             "available": True,
@@ -461,6 +480,14 @@ def fetch_fresh_account(
 
     threading.Thread(target=_bg_worker, daemon=True).start()
 
+    emit_sharing_telemetry(
+        "fetch_fresh_chosen",
+        ctx.correlation_id,
+        ctx.client_id,
+        declined_snapshot_id=req.declined_snapshot_id,
+        job_id=job_id,
+    )
+
     return {
         "status": "queued",
         "job_id": job_id,
@@ -512,6 +539,14 @@ def hydrate_account(
             mode=req.mode,
             fee_credits=fee,
             approved_by_user_id=ctx.user_id if ctx.is_super_admin else None,
+        )
+        emit_sharing_telemetry(
+            "hydrate_chosen",
+            ctx.correlation_id,
+            ctx.client_id,
+            snapshot_id=req.snapshot_id,
+            mode=req.mode,
+            fee_credits=fee,
         )
         return hydration_res
 
@@ -717,6 +752,14 @@ def apply_refresh(
             reason=req.reason,
             idempotency_key=req.idempotency_key,
         )
+        emit_sharing_telemetry(
+            "refresh_applied",
+            ctx.correlation_id,
+            ctx.client_id,
+            account_id=account_id,
+            snapshot_id=req.snapshot_id,
+            strategy=req.strategy,
+        )
         return res
     except PlanChangedError as e:
         raise HTTPException(
@@ -836,6 +879,14 @@ def submit_reuse_request(
         is_actor_super_admin=ctx.is_super_admin,
     )
     session.commit()
+
+    emit_sharing_telemetry(
+        "request_created",
+        ctx.correlation_id,
+        ctx.client_id,
+        request_id=share_event.id,
+        snapshot_id=req.snapshot_id,
+    )
 
     return build_request_view(
         event=share_event,
@@ -1289,6 +1340,15 @@ def apply_request_decision(
         )
         session.commit()
 
+        emit_sharing_telemetry(
+            "request_decided",
+            correlation_id,
+            event.target_client_id,
+            request_id=event.id,
+            decision="approved",
+            snapshot_id=target_snapshot_id,
+        )
+
         return {
             "ok": True,
             "status": "approved",
@@ -1339,6 +1399,15 @@ def apply_request_decision(
             is_actor_super_admin=True,
         )
         session.commit()
+
+        emit_sharing_telemetry(
+            "request_decided",
+            correlation_id,
+            event.target_client_id,
+            request_id=event.id,
+            decision="rejected",
+            snapshot_id=event.snapshot_id,
+        )
 
         return {
             "ok": True,

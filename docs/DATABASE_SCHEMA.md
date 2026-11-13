@@ -484,26 +484,64 @@ The `platform_catalog` schema manages centralized, immutable Golden Records for 
 | `status` | `VARCHAR(32)` | **NO** | `INDEX` | `'previewed'::character varying` | — |
 | `idempotency_key` | `VARCHAR(128)` | **NO** | `INDEX` | — | — |
 | `fee_credits` | `INTEGER` | **NO** | — | `0` | — |
+| `estimated_credits_saved` | `INTEGER` | YES | — | — | Stored credits saved vs fresh vendor fetch at event time. |
+| `quality_score_at_event` | `NUMERIC(5, 2)` | YES | — | — | Snapshot quality score at event time. |
+| `freshness_at_event` | `VARCHAR(16)` | YES | — | — | Freshness classification ('fresh', 'stale', 'old'). |
+| `fetch_fresh_credits_est` | `INTEGER` | YES | — | — | Baseline cost estimate for autonomous fresh crawl. |
+| `decided_by` | `INTEGER` | YES | FK &rarr; `public.users.id` | — | Platform admin who approved or rejected the request. |
+| `decided_at` | `TIMESTAMP` | YES | — | — | Timestamp of approval/rejection decision. |
+| `decision_note` | `TEXT` | YES | — | — | Administrative review decision note. |
 | `created_ids` | `JSONB` | YES | — | — | Structured JSONB payload containing semi-structured intelligence. |
 | `counts` | `JSONB` | YES | — | — | Structured JSONB payload containing semi-structured intelligence. |
 | `error` | `TEXT` | YES | — | — | — |
 | `created_at` | `TIMESTAMP` | **NO** | — | `now()` | System audit timestamp tracking creation and mutation. |
 | `completed_at` | `TIMESTAMP` | YES | — | — | — |
 | `rolled_back_at` | `TIMESTAMP` | YES | — | — | — |
-| `rolled_back_by` | `INTEGER` | YES | FK &rarr; `platform_catalog.users.id` | — | — |
+| `rolled_back_by` | `INTEGER` | YES | FK &rarr; `public.users.id` | — | — |
 | `rollback_reason` | `TEXT` | YES | — | — | — |
 
 **Foreign Key Constraints:**
-- (`approved_by`) &rarr; `platform_catalog.users` (`id`)
-- (`requested_by`) &rarr; `platform_catalog.users` (`id`)
-- (`rolled_back_by`) &rarr; `platform_catalog.users` (`id`)
+- (`approved_by`) &rarr; `public.users` (`id`)
+- (`decided_by`) &rarr; `public.users` (`id`)
+- (`requested_by`) &rarr; `public.users` (`id`)
+- (`rolled_back_by`) &rarr; `public.users` (`id`)
 - (`snapshot_id`) &rarr; `platform_catalog.snapshots` (`id`)
-- (`target_client_id`) &rarr; `platform_catalog.clients` (`id`)
+- (`target_client_id`) &rarr; `public.clients` (`id`)
 
 **Secondary Indexes:**
 - `ix_share_events_snapshot_id`: on (`snapshot_id`)
 - `ix_share_events_target_status`: on (`target_client_id`, `status`)
 - `share_events_idempotency_key_key` (UNIQUE): on (`idempotency_key`)
+
+---
+
+### Table: `platform_catalog.reuse_request_notifications`
+**Purpose:** Multi-channel in-app and email delivery tracking for catalog reuse approval requests, approvals, and rejections (Phase C C0/C3).
+
+| Column Name | Data Type | Nullable | Key / Constraint | Default Value | Notes / Description |
+| :--- | :--- | :---: | :---: | :--- | :--- |
+| `id` | `BIGINT` | **NO** | `PK` | `nextval('platform_catalog.reuse_request_notifications_id_seq'::regclass)` | Surrogate primary key. |
+| `event_id` | `BIGINT` | **NO** | FK &rarr; `platform_catalog.share_events.id`<br>`INDEX` | — | Underlying reuse request event. |
+| `recipient_user_id` | `INTEGER` | YES | FK &rarr; `public.users.id`<br>`INDEX` | — | Target recipient user. |
+| `recipient_scope` | `VARCHAR(32)` | **NO** | `INDEX` | — | Target audience scope ('super_admin' or 'client_admin'). |
+| `channels` | `VARCHAR(32)[]` | **NO** | — | — | Delivery channels ('in_app', 'email'). |
+| `kind` | `VARCHAR(32)` | **NO** | `INDEX` | — | Notification classification ('request_created', 'approved', 'rejected', 'reminder'). |
+| `target_client_id` | `INTEGER` | YES | FK &rarr; `public.clients.id`<br>`INDEX` | — | Client organization context. |
+| `company_name` | `VARCHAR(255)` | YES | — | — | Target enterprise account name. |
+| `payload` | `JSONB` | YES | — | — | Structured notification payload. |
+| `read_at` | `TIMESTAMP` | YES | — | — | In-app read acknowledgement timestamp. |
+| `email_sent_at` | `TIMESTAMP` | YES | — | — | Outbound email dispatch timestamp. |
+| `created_at` | `TIMESTAMP` | **NO** | `INDEX` | `now()` | Creation timestamp. |
+
+**Foreign Key Constraints:**
+- (`event_id`) &rarr; `platform_catalog.share_events` (`id`) ON DELETE CASCADE
+- (`recipient_user_id`) &rarr; `public.users` (`id`) ON DELETE CASCADE
+- (`target_client_id`) &rarr; `public.clients` (`id`) ON DELETE CASCADE
+
+**Secondary Indexes:**
+- `ix_reuse_req_notif_recipient_read`: on (`recipient_user_id`, `read_at`)
+- `ix_reuse_req_notif_scope_read`: on (`recipient_scope`, `read_at`)
+- `ix_reuse_req_notif_event_id`: on (`event_id`)
 
 ---
 
@@ -631,21 +669,42 @@ The `platform_catalog` schema manages centralized, immutable Golden Records for 
 | Column Name | Data Type | Nullable | Key / Constraint | Default Value | Notes / Description |
 | :--- | :--- | :---: | :---: | :--- | :--- |
 | `account_id` | `INTEGER` | **NO** | `PK`<br>FK &rarr; `client_stradit_india.accounts.id` | — | Foreign key reference to `client_stradit_india.accounts.id`. |
-| `origin_type` | `VARCHAR(32)` | **NO** | — | `'fetched'::character varying` | — |
-| `canonical_key` | `VARCHAR(255)` | YES | `INDEX` | — | — |
-| `snapshot_id` | `BIGINT` | YES | `INDEX` | — | — |
-| `snapshot_version` | `INTEGER` | YES | — | — | — |
-| `hydrated_at` | `TIMESTAMP` | YES | — | — | — |
-| `hydrated_by` | `INTEGER` | YES | FK &rarr; `client_stradit_india.users.id` | — | — |
-| `local_edits` | `BOOLEAN` | **NO** | — | `false` | Boolean operational flag. |
+| `origin_type` | `VARCHAR(32)` | **NO** | — | `'fetched'::character varying` | Origin kind ('catalog', 'fetched', 'manual'). |
+| `canonical_key` | `VARCHAR(255)` | YES | `INDEX` | — | Platform canonical key. |
+| `snapshot_id` | `BIGINT` | YES | `INDEX` | — | Platform catalog snapshot id. |
+| `snapshot_version` | `INTEGER` | YES | — | — | Snapshot version at hydration time. |
+| `hydrated_at` | `TIMESTAMP` | YES | — | — | Hydration timestamp. |
+| `hydrated_by` | `INTEGER` | YES | FK &rarr; `public.users.id` | — | User who hydrated or refreshed the intelligence. |
+| `local_edits` | `BOOLEAN` | **NO** | — | `false` | Tracks whether local tenant users have modified intelligence fields. |
+| `source_extracted_at` | `TIMESTAMP` | YES | — | — | Original crawl/extraction timestamp from catalog snapshot. |
 
 **Foreign Key Constraints:**
 - (`account_id`) &rarr; `client_stradit_india.accounts` (`id`)
-- (`hydrated_by`) &rarr; `client_stradit_india.users` (`id`)
+- (`hydrated_by`) &rarr; `public.users` (`id`)
 
 **Secondary Indexes:**
 - `account_origin_canonical_key_idx`: on (`canonical_key`)
 - `account_origin_snapshot_id_idx`: on (`snapshot_id`)
+
+---
+
+### Table: `client_stradit_india.account_origin_backups`
+**Purpose:** Pre-refresh point-in-time backups of account, LOB, and persona trees before catalog refresh overwrites (Phase C C2).
+
+| Column Name | Data Type | Nullable | Key / Constraint | Default Value | Notes / Description |
+| :--- | :--- | :---: | :---: | :--- | :--- |
+| `id` | `INTEGER` | **NO** | `PK` | `nextval('account_origin_backups_id_seq'::regclass)` | Backup identifier. |
+| `account_id` | `INTEGER` | **NO** | FK &rarr; `client_stradit_india.accounts.id`<br>`INDEX` | — | Target account ID. |
+| `origin_payload` | `JSONB` | **NO** | — | — | Full serialized JSON backup of pre-refresh account, LOBs, and personas. |
+| `backup_reason` | `VARCHAR(64)` | **NO** | — | `'pre_refresh_backup'` | Trigger reason for backup snapshot. |
+| `created_at` | `TIMESTAMP` | **NO** | `INDEX` | `now()` | Backup timestamp. |
+
+**Foreign Key Constraints:**
+- (`account_id`) &rarr; `client_stradit_india.accounts` (`id`) ON DELETE CASCADE
+
+**Secondary Indexes:**
+- `ix_account_origin_backups_account_id`: on (`account_id`)
+- `ix_account_origin_backups_created_at`: on (`created_at`)
 
 ---
 
