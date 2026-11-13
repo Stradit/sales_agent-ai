@@ -1048,7 +1048,7 @@ $(function () {
   const ProvenanceBadge = {
     renderPill: function(provenance, accountId) {
       if (!provenance) {
-        return `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;" title="Extracted via pipeline run"><i class="bi bi-cloud-arrow-down me-1"></i>Fetched</span>`;
+        return `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;white-space:nowrap;flex-shrink:0;" title="Extracted via pipeline run"><i class="bi bi-cloud-arrow-down me-1"></i>Fetched</span>`;
       }
       const badge = provenance.badge || provenance.kind || (provenance.origin_type === 'catalog' ? 'verified' : 'fetched');
       const v = provenance.snapshot_version || 1;
@@ -1056,21 +1056,21 @@ $(function () {
       const tooltip = esc(provenance.tooltip || provenance.label || '');
 
       if (badge === 'update_available' || provenance.has_newer_version || provenance.refresh_available) {
-        return `<span class="badge bg-primary-subtle text-primary border border-primary-subtle cursor-pointer provenance-badge" data-account-id="${accountId}" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;cursor:pointer;" title="${tooltip}" onclick="event.stopPropagation(); if (typeof CatalogRefreshManager !== 'undefined') CatalogRefreshManager.openRefreshModal(${accountId});">
+        return `<span class="badge bg-primary-subtle text-primary border border-primary-subtle cursor-pointer provenance-badge" data-account-id="${accountId}" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;cursor:pointer;white-space:nowrap;flex-shrink:0;" title="${tooltip}" onclick="event.stopPropagation(); if (typeof CatalogRefreshManager !== 'undefined') CatalogRefreshManager.openRefreshModal(${accountId});">
           <i class="bi bi-arrow-repeat me-1"></i>Update v${latestV || v}
         </span>`;
       }
       if (badge === 'edited' || badge === 'edited_catalog' || provenance.local_edits) {
-        return `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;" title="${tooltip}">
+        return `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;white-space:nowrap;flex-shrink:0;" title="${tooltip}">
           <i class="bi bi-pencil-square me-1"></i>Verified &bull; Edited
         </span>`;
       }
       if (badge === 'verified' || badge === 'catalog' || provenance.origin_type === 'catalog') {
-        return `<span class="badge bg-success-subtle text-success border border-success-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;" title="${tooltip}">
+        return `<span class="badge bg-success-subtle text-success border border-success-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;white-space:nowrap;flex-shrink:0;" title="${tooltip}">
           <i class="bi bi-shield-check me-1"></i>Verified (v${v})
         </span>`;
       }
-      return `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;" title="${tooltip}">
+      return `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle provenance-badge" style="font-size:0.65rem;padding:2px 5px;border-radius:4px;white-space:nowrap;flex-shrink:0;" title="${tooltip}">
         <i class="bi bi-cloud-arrow-down me-1"></i>Fetched
       </span>`;
     },
@@ -1183,15 +1183,15 @@ $(function () {
       }
 
       $list.append(`
-        <div class="account-item fade-in ${isActive ? 'active' : ''}" data-id="${acct.id}" role="button" tabindex="0" title="${esc(acctName)} &bull; ${completenessScore}% Data Filled (${aHealth.populatedCount}/${aHealth.totalFields}) &bull; ${lobsCount} LOBs &bull; ${personasCount} Personas">
+        <div class="account-item fade-in ${isActive ? 'active' : ''}" data-id="${acct.id}" role="button" tabindex="0">
           <div class="acct-avatar">${esc(getInitials(acctName))}</div>
-          <div class="acct-body">
-            <div class="acct-main-row">
-              <span class="acct-name" title="${esc(acctName)}">${esc(acctName)}</span>
-              <span class="acct-score-pill ${healthClass}">${completenessScore}%</span>
+          <div class="acct-body" style="min-width:0;flex:1;">
+            <div class="acct-main-row" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+              <span class="acct-name text-truncate" style="min-width:0;flex:1;" title="${esc(acctName)}">${esc(acctName)}</span>
+              <span class="acct-score-pill ${healthClass}" style="flex-shrink:0;" title="${completenessScore}% Data Populated (${aHealth.populatedCount}/${aHealth.totalFields} fields)">${completenessScore}%</span>
             </div>
             <div class="acct-meta-row" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-              <span class="text-truncate">${subtext}</span>
+              <span class="text-truncate" style="min-width:0;flex:1;" title="${esc(subtext)}">${subtext}</span>
               ${typeof ProvenanceBadge !== "undefined" ? ProvenanceBadge.renderPill(acct.provenance || acct.origin, acct.id) : ""}
             </div>
           </div>
@@ -3829,7 +3829,6 @@ $(function () {
         $btn.html(originalBtnText).prop("disabled", false);
         showNotification(`❌ Error initiating fresh fetch: ${esc(err.message)}`, "error");
       }
-    },
     },
 
     updateModalButtons() {
