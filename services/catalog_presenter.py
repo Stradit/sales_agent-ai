@@ -280,10 +280,11 @@ def build_diff_view(
 def build_request_view(
     event: Any,
     company_name: str,
-    canonical_key: Optional[str],
     snapshot_version: int,
+    canonical_key: Optional[str] = None,
     sla_hours: int = 24,
     already_pending: bool = False,
+    is_super_admin: bool = False,
 ) -> Dict[str, Any]:
     """Builds a tenant-safe RequestView for reuse request status."""
     timeline = []
@@ -319,9 +320,16 @@ def build_request_view(
             "timestamp": event.decided_at.isoformat() if getattr(event, "decided_at", None) else None,
             "label": f"Request rejected: {event.decision_note or event.reason or 'No reason provided'}",
         })
+    elif event.status == "cancelled":
+        timeline.append({
+            "step": "review",
+            "status": "cancelled",
+            "timestamp": event.completed_at.isoformat() if event.completed_at else None,
+            "label": "Request cancelled by user",
+        })
 
     # 3. Fulfillment
-    if event.status == "done":
+    if event.status in ("done", "approved"):
         timeline.append({
             "step": "fulfillment",
             "status": "completed",
@@ -335,6 +343,13 @@ def build_request_view(
             "timestamp": event.completed_at.isoformat() if event.completed_at else None,
             "label": "Hydration failed; credits were refunded",
         })
+    elif event.status == "cancelled":
+        timeline.append({
+            "step": "fulfillment",
+            "status": "cancelled",
+            "timestamp": event.completed_at.isoformat() if event.completed_at else None,
+            "label": "Request cancelled",
+        })
 
     account_id = None
     created_ids = getattr(event, "created_ids", None)
@@ -343,12 +358,11 @@ def build_request_view(
         if accts:
             account_id = accts[0]
 
-    return {
+    view = {
         "request_id": getattr(event, "id", None),
         "status": getattr(event, "status", "pending_approval"),
         "created_at": created_at_str,
         "company_name": company_name,
-        "canonical_key": canonical_key,
         "snapshot_version": snapshot_version,
         "mode": getattr(event, "mode", "hydrate"),
         "fee_credits": getattr(event, "fee_credits", 0),
@@ -359,6 +373,9 @@ def build_request_view(
         "sla_hint": f"Most requests are reviewed within {sla_hours} hours.",
         "already_pending": bool(already_pending),
     }
+    if is_super_admin and canonical_key:
+        view["canonical_key"] = canonical_key
+    return view
 
 
 def build_provenance_view(

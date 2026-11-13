@@ -10,9 +10,10 @@ Provides:
 from datetime import date, datetime, timezone
 import hashlib
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 import uuid
 
+import config
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, or_, text
@@ -36,7 +37,9 @@ from db.models.platform_catalog import (
     ShareEvent,
     Snapshot,
     SnapshotBlob,
+    ReuseRequestNotification,
 )
+from db.models.user import User
 from db.tenant import schema_for, validate_slug
 from services.account_reuse_service import (
     AccountMatcher,
@@ -50,10 +53,11 @@ from services.account_reuse_service import (
     SkeletonIncompatibleError,
 )
 from services.catalog_audit import log_catalog_audit, reuse_check_limiter
-from services.catalog_presenter import build_diff_view, build_preview_view
+from services.catalog_presenter import build_diff_view, build_preview_view, build_request_view
 from services.catalog_pricing import CatalogPricing
 from services.catalog_service import AmbiguousIdentifierError, CatalogService
-from services.credit_service import AccountQuotaExceededError, InsufficientCreditsError
+from services.credit_service import AccountQuotaExceededError, CreditService, InsufficientCreditsError
+from services.notification_service import NotificationService
 from services.refresh_planner import RefreshPlanner
 import threading
 
@@ -80,9 +84,28 @@ def _handle_unexpected_exception(endpoint_name: str, e: Exception, correlation_i
 
 catalog_router = APIRouter(prefix="/api/catalog", tags=["Verified Intelligence Catalog"])
 accounts_reuse_router = APIRouter(prefix="/api/accounts", tags=["Account Reuse"])
+catalog_notifications_router = APIRouter(prefix="/api/notifications/catalog", tags=["Catalog Notifications"])
 
 
 # ── Pydantic Request & Response Schemas ──────────────────────────────────────
+
+class DecisionRequest(BaseModel):
+    decision: Literal["approve", "reject"] = Field(..., description="Decision action: 'approve' or 'reject'")
+    note: Optional[str] = Field(None, description="Optional decision explanation")
+    fee_override: Optional[int] = Field(None, description="Optional fee override in credits")
+    use_latest_version: bool = Field(False, description="Whether to approve newer ready version if snapshot superseded")
+
+
+class BulkDecisionItem(BaseModel):
+    id: int = Field(..., description="ShareEvent request ID")
+    decision: Literal["approve", "reject"] = Field(..., description="Decision action: 'approve' or 'reject'")
+    note: Optional[str] = Field(None, description="Optional decision explanation")
+    fee_override: Optional[int] = Field(None, description="Optional fee override")
+
+
+class BulkDecisionRequest(BaseModel):
+    decisions: List[BulkDecisionItem] = Field(..., description="List of decisions (max 50)")
+    use_latest_version: bool = Field(False, description="Whether to approve newer ready version if snapshot superseded")
 
 class HydrateRequest(BaseModel):
     snapshot_id: int = Field(..., description="ID of catalog snapshot to hydrate")
@@ -741,18 +764,24 @@ def submit_reuse_request(
     if not snapshot:
         raise HTTPException(status_code=404, detail=f"Snapshot {req.snapshot_id} not found")
 
+    company = session.query(Company).filter_by(id=snapshot.company_id).first()
+    comp_name = company.display_name if company else "Company"
+
     existing_req = session.query(ShareEvent).filter_by(
         snapshot_id=req.snapshot_id,
         target_client_id=ctx.client_id,
         status="pending_approval",
     ).first()
     if existing_req:
-        return {
-            "ok": True,
-            "request_id": existing_req.id,
-            "status": "pending_approval",
-            "message": "A reuse request for this account is already pending approval.",
-        }
+        return build_request_view(
+            event=existing_req,
+            company_name=comp_name,
+            snapshot_version=snapshot.version,
+            canonical_key=company.canonical_key if company else None,
+            sla_hours=config.CATALOG_APPROVAL_SLA_HOURS,
+            already_pending=True,
+            is_super_admin=ctx.is_super_admin,
+        )
 
     fee = CatalogPricing.fee_for(snapshot=snapshot, mode=req.mode or "instant", is_super_admin=ctx.is_super_admin)
     idem_key = f"{ctx.client_id}:{req.snapshot_id}:request:{uuid.uuid4().hex[:12]}"
@@ -768,6 +797,29 @@ def submit_reuse_request(
     )
     session.add(share_event)
     session.flush()
+
+    # Outbox notifications (C0/C3)
+    NotificationService.enqueue(
+        db=session,
+        event_id=share_event.id,
+        recipient_scope="super_admin",
+        channels=["in_app", "email"],
+        kind="request_created",
+        target_client_id=ctx.client_id,
+        company_name=comp_name,
+        payload={"company_name": comp_name, "event_id": share_event.id, "reason": share_event.reason},
+    )
+    NotificationService.enqueue(
+        db=session,
+        event_id=share_event.id,
+        recipient_user_id=ctx.user_id,
+        recipient_scope="client_admin",
+        channels=["in_app", "email"],
+        kind="request_created",
+        target_client_id=ctx.client_id,
+        company_name=comp_name,
+        payload={"company_name": comp_name, "event_id": share_event.id, "reason": share_event.reason},
+    )
 
     log_catalog_audit(
         session=session,
@@ -785,21 +837,113 @@ def submit_reuse_request(
     )
     session.commit()
 
-    return {
-        "ok": True,
-        "request_id": share_event.id,
-        "status": "pending_approval",
-        "message": "Reuse request submitted for administrator review.",
-    }
+    return build_request_view(
+        event=share_event,
+        company_name=comp_name,
+        snapshot_version=snapshot.version,
+        canonical_key=company.canonical_key if company else None,
+        sla_hours=config.CATALOG_APPROVAL_SLA_HOURS,
+        already_pending=False,
+        is_super_admin=ctx.is_super_admin,
+    )
+
+
+@catalog_router.get("/requests/{request_id}")
+def get_reuse_request(
+    request_id: int,
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_request", explicit_slug_from="query", allow_optional_client_for_super_admin=True)),
+    session: Session = Depends(get_platform_db),
+):
+    """Fetches a single reuse request with status timeline (C3)."""
+    row = session.query(
+        ShareEvent,
+        Snapshot.version.label("snapshot_version"),
+        Company.display_name.label("company_name"),
+        Company.canonical_key.label("canonical_key"),
+    ).join(Snapshot, Snapshot.id == ShareEvent.snapshot_id)\
+     .join(Company, Company.id == Snapshot.company_id)\
+     .filter(ShareEvent.id == request_id).first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
+
+    event, snap_ver, comp_name, canon_key = row
+    if not ctx.is_super_admin and event.target_client_id != ctx.client_id:
+        raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
+
+    return build_request_view(
+        event=event,
+        company_name=comp_name,
+        snapshot_version=snap_ver,
+        canonical_key=canon_key,
+        sla_hours=config.CATALOG_APPROVAL_SLA_HOURS,
+        is_super_admin=ctx.is_super_admin,
+    )
+
+
+@catalog_router.post("/requests/{request_id}/cancel")
+def cancel_reuse_request(
+    request_id: int,
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_request", explicit_slug_from="query")),
+    session: Session = Depends(get_platform_db),
+):
+    """Cancels a pending reuse request (requester or client_admin)."""
+    event = session.query(ShareEvent).filter_by(id=request_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
+
+    if not ctx.is_super_admin and event.target_client_id != ctx.client_id:
+        raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
+
+    is_requester = (event.requested_by == ctx.user_id)
+    is_admin = (ctx.effective_role == "client_admin" or ctx.user_role == "client_admin" or ctx.is_super_admin)
+    if not (is_requester or is_admin):
+        raise HTTPException(status_code=403, detail="Only the requester or client administrator can cancel this request.")
+
+    if event.status != "pending_approval":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel request in status '{event.status}'. Only pending requests can be cancelled.",
+        )
+
+    event.status = "cancelled"
+    event.completed_at = datetime.now(timezone.utc)
+
+    snapshot = session.query(Snapshot).filter_by(id=event.snapshot_id).first()
+    company = session.query(Company).filter_by(id=snapshot.company_id).first() if snapshot else None
+
+    log_catalog_audit(
+        session=session,
+        actor_user_id=ctx.user_id,
+        action="catalog.request_cancelled",
+        client_id=event.target_client_id,
+        details={
+            "share_event_id": event.id,
+            "snapshot_id": event.snapshot_id,
+            "target_client_slug": ctx.client_slug,
+            "correlation_id": ctx.correlation_id,
+        },
+        is_actor_super_admin=ctx.is_super_admin,
+    )
+    session.commit()
+
+    return build_request_view(
+        event=event,
+        company_name=company.display_name if company else "Company",
+        snapshot_version=snapshot.version if snapshot else 1,
+        canonical_key=company.canonical_key if company else None,
+        sla_hours=config.CATALOG_APPROVAL_SLA_HOURS,
+        is_super_admin=ctx.is_super_admin,
+    )
 
 
 @catalog_router.get("/requests")
 def list_reuse_requests(
-    status: Optional[str] = Query(None, description="Filter by status (pending_approval, done, rejected)"),
+    status: Optional[str] = Query(None, description="Filter by status (pending_approval, done, rejected, cancelled)"),
     ctx: TenantRequestContext = Depends(tenant_context("account:reuse_request", explicit_slug_from="query", allow_optional_client_for_super_admin=True)),
     session: Session = Depends(get_platform_db),
 ):
-    """Lists intelligence reuse requests."""
+    """Lists intelligence reuse requests with timelines and SLA hints."""
     query = session.query(
         ShareEvent,
         Client.slug.label("client_slug"),
@@ -822,21 +966,14 @@ def list_reuse_requests(
     rows = query.order_by(desc(ShareEvent.created_at)).limit(100).all()
     results = []
     for event, c_slug, c_name, snap_ver, comp_name, canon_key in rows:
-        results.append({
-            "request_id": event.id,
-            "status": event.status,
-            "client_slug": c_slug,
-            "client_name": c_name,
-            "snapshot_id": event.snapshot_id,
-            "snapshot_version": snap_ver,
-            "company_name": comp_name,
-            "canonical_key": canon_key,
-            "mode": event.mode,
-            "fee_credits": event.fee_credits,
-            "reason": event.reason,
-            "created_at": event.created_at.isoformat() if event.created_at else None,
-            "completed_at": event.completed_at.isoformat() if event.completed_at else None,
-        })
+        results.append(build_request_view(
+            event=event,
+            company_name=comp_name,
+            snapshot_version=snap_ver,
+            canonical_key=canon_key,
+            sla_hours=config.CATALOG_APPROVAL_SLA_HOURS,
+            is_super_admin=ctx.is_super_admin,
+        ))
     return {"requests": results, "total": len(results)}
 
 
@@ -1003,16 +1140,29 @@ def assign_account(
         raise _handle_unexpected_exception("Direct assignment", e, ctx.correlation_id)
 
 
-@catalog_router.post("/requests/{request_id}/approve")
-def approve_reuse_request(
+def apply_request_decision(
+    session: Session,
     request_id: int,
-    ctx: PlatformRequestContext = Depends(platform_context("catalog:approve")),
-    session: Session = Depends(get_platform_db),
-):
-    """Super Admin approves a pending reuse request and triggers hydration."""
+    decision: str,
+    actor_user_id: int,
+    correlation_id: str,
+    note: Optional[str] = None,
+    fee_override: Optional[int] = None,
+    use_latest_version: bool = False,
+) -> Dict[str, Any]:
+    """Core decision engine shared by single-decision, bulk-decision, and legacy approve/reject routes."""
     event = session.query(ShareEvent).filter_by(id=request_id).first()
     if not event:
         raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
+
+    # Idempotent response if already decided
+    if event.status in ("done", "approved", "rejected", "cancelled"):
+        return {
+            "ok": True,
+            "request_id": event.id,
+            "status": event.status,
+            "message": f"Request has already been processed with status '{event.status}'.",
+        }
 
     if event.status != "pending_approval":
         raise HTTPException(
@@ -1020,72 +1170,477 @@ def approve_reuse_request(
             detail=f"Request {request_id} is in status '{event.status}', expected 'pending_approval'",
         )
 
-    target_ctx = TenantRequestContext.for_client(
-        session=session,
-        client=event.target_client_id,
-        user_id=event.requested_by or ctx.user_id,
-        user_role="super_admin",
-        effective_role="super_admin",
-        correlation_id=ctx.correlation_id,
-    )
+    snapshot = session.query(Snapshot).filter_by(id=event.snapshot_id).first()
+    if not snapshot:
+        raise HTTPException(status_code=404, detail=f"Snapshot {event.snapshot_id} not found")
 
-    try:
-        res = AccountReuseService.hydrate_account_from_catalog(
-            session=session,
-            ctx=target_ctx,
-            snapshot_id=event.snapshot_id,
-            user_id=event.requested_by or ctx.user_id,
-            idempotency_key=event.idempotency_key,
-            mode=event.mode,
-            fee_credits=event.fee_credits,
-            reason=event.reason,
-            approved_by_user_id=ctx.user_id,
+    company = session.query(Company).filter_by(id=snapshot.company_id).first()
+    comp_name = company.display_name if company else "Company"
+
+    if decision == "approve":
+        if snapshot.status != "ready":
+            raise HTTPException(status_code=400, detail=f"Snapshot {snapshot.id} is not ready for hydration (status: {snapshot.status})")
+
+        # Check for newer ready snapshot version
+        latest_snapshot = (
+            session.query(Snapshot)
+            .filter_by(company_id=snapshot.company_id, status="ready")
+            .order_by(Snapshot.version.desc())
+            .first()
         )
+        target_snapshot_id = snapshot.id
+        if latest_snapshot and latest_snapshot.id != snapshot.id:
+            if not use_latest_version:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "snapshot_superseded",
+                        "message": f"A newer snapshot version (v{latest_snapshot.version}) is available. Set use_latest_version=true to proceed with the newer version.",
+                        "new_version": latest_snapshot.version,
+                        "new_snapshot_id": latest_snapshot.id,
+                    },
+                )
+            target_snapshot_id = latest_snapshot.id
+            event.snapshot_id = target_snapshot_id
+            session.flush()
+
+        target_ctx = TenantRequestContext.for_client(
+            session=session,
+            client=event.target_client_id,
+            user_id=event.requested_by or actor_user_id,
+            user_role="super_admin",
+            effective_role="super_admin",
+            correlation_id=correlation_id,
+        )
+
+        fee = fee_override if fee_override is not None else event.fee_credits
+
+        try:
+            res = AccountReuseService.hydrate_account_from_catalog(
+                session=session,
+                ctx=target_ctx,
+                snapshot_id=target_snapshot_id,
+                user_id=event.requested_by or actor_user_id,
+                idempotency_key=event.idempotency_key,
+                mode=event.mode or "instant",
+                fee_credits=fee or 0,
+                reason=event.reason,
+                approved_by_user_id=actor_user_id,
+            )
+        except LocalEditsPresentError as e:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "local_edits_present", "message": str(e), "diff": e.diff},
+                headers={"X-Correlation-ID": correlation_id},
+            )
+        except InsufficientCreditsError as e:
+            raise HTTPException(status_code=402, detail=str(e))
+        except SkeletonIncompatibleError as e:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "skeleton_incompatible", "message": str(e)},
+                headers={"X-Correlation-ID": correlation_id},
+            )
+        except DuplicateAccountError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except AccountQuotaExceededError as e:
+            raise HTTPException(status_code=402, detail=str(e))
+        except AccountReuseError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"[apply_request_decision] Hydration failed (correlation_id={correlation_id}): {e}", exc_info=True)
+            session.rollback()
+            new_session = SessionLocal()
+            try:
+                failed_event = new_session.query(ShareEvent).filter_by(id=request_id).first()
+                if failed_event:
+                    failed_event.status = "failed"
+                    failed_event.error = _sanitize_error_message(str(e))
+                    new_session.commit()
+            finally:
+                new_session.close()
+
+            raise HTTPException(
+                status_code=500,
+                detail={"detail": "Approval hydration failed", "correlation_id": correlation_id},
+                headers={"X-Correlation-ID": correlation_id},
+            )
+
+        event.decided_by = actor_user_id
+        event.decided_at = datetime.now(timezone.utc)
+        event.decision_note = note
+
+        NotificationService.enqueue(
+            db=session,
+            event_id=event.id,
+            recipient_user_id=event.requested_by,
+            recipient_scope="client_admin",
+            channels=["in_app", "email"],
+            kind="approved",
+            target_client_id=event.target_client_id,
+            company_name=comp_name,
+            payload={
+                "company_name": comp_name,
+                "event_id": event.id,
+                "account_id": res.get("account_id"),
+                "fee_credits": fee,
+                "decision_note": note,
+            },
+        )
+        session.commit()
+
         return {
             "ok": True,
             "status": "approved",
             "request_id": event.id,
-            "account_id": res["account_id"],
-            "counts": res["counts"],
+            "account_id": res.get("account_id"),
+            "counts": res.get("counts"),
+            "decision_note": note,
         }
-    except LocalEditsPresentError as e:
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "local_edits_present", "message": str(e), "diff": e.diff},
-            headers={"X-Correlation-ID": ctx.correlation_id},
-        )
-    except InsufficientCreditsError as e:
-        raise HTTPException(status_code=402, detail=str(e))
-    except SkeletonIncompatibleError as e:
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "skeleton_incompatible", "message": str(e)},
-            headers={"X-Correlation-ID": ctx.correlation_id},
-        )
-    except DuplicateAccountError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except AccountQuotaExceededError as e:
-        raise HTTPException(status_code=402, detail=str(e))
-    except AccountReuseError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"[approve_reuse_request] Approval hydration failed (correlation_id={ctx.correlation_id}): {e}", exc_info=True)
-        session.rollback()
-        new_session = SessionLocal()
-        try:
-            failed_event = new_session.query(ShareEvent).filter_by(id=request_id).first()
-            if failed_event:
-                failed_event.status = "failed"
-                failed_event.error = _sanitize_error_message(str(e))
-                new_session.commit()
-        finally:
-            new_session.close()
 
-        raise HTTPException(
-            status_code=500,
-            detail={"detail": "Approval hydration failed", "correlation_id": ctx.correlation_id},
-            headers={"X-Correlation-ID": ctx.correlation_id},
+    elif decision == "reject":
+        event.status = "rejected"
+        event.decided_by = actor_user_id
+        event.decided_at = datetime.now(timezone.utc)
+        event.completed_at = datetime.now(timezone.utc)
+        event.decision_note = note or "Rejected by platform administrator"
+        event.approved_by = actor_user_id
+
+        NotificationService.enqueue(
+            db=session,
+            event_id=event.id,
+            recipient_user_id=event.requested_by,
+            recipient_scope="client_admin",
+            channels=["in_app", "email"],
+            kind="rejected",
+            target_client_id=event.target_client_id,
+            company_name=comp_name,
+            payload={
+                "company_name": comp_name,
+                "event_id": event.id,
+                "decision_note": event.decision_note,
+            },
         )
+
+        target_client = session.query(Client).filter_by(id=event.target_client_id).first()
+        log_catalog_audit(
+            session=session,
+            actor_user_id=actor_user_id,
+            action="catalog.request_rejected",
+            client_id=event.target_client_id,
+            target_user_id=event.requested_by,
+            details={
+                "share_event_id": event.id,
+                "snapshot_id": event.snapshot_id,
+                "target_client_slug": target_client.slug if target_client else None,
+                "reason": event.decision_note,
+                "correlation_id": correlation_id,
+            },
+            is_actor_super_admin=True,
+        )
+        session.commit()
+
+        return {
+            "ok": True,
+            "request_id": event.id,
+            "status": "rejected",
+            "decision_note": event.decision_note,
+        }
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid decision '{decision}', expected 'approve' or 'reject'")
+
+
+@catalog_router.get("/inbox")
+def get_catalog_approval_inbox(
+    status: Optional[str] = Query("pending_approval", description="Filter status: pending_approval, done, rejected, all"),
+    client: Optional[str] = Query(None, description="Filter by client slug or ID"),
+    q: Optional[str] = Query(None, description="Search company name or requester"),
+    sort: Optional[str] = Query("created_desc", description="Sort order: created_desc, created_asc, score_desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:approve")),
+    session: Session = Depends(get_platform_db),
+):
+    """Super-Admin Approval Inbox with QualityReports, RiskFlags, and Quota Checks (C3)."""
+    query = (
+        session.query(ShareEvent, Client, Snapshot, Company, User)
+        .join(Client, Client.id == ShareEvent.target_client_id)
+        .join(Snapshot, Snapshot.id == ShareEvent.snapshot_id)
+        .join(Company, Company.id == Snapshot.company_id)
+        .outerjoin(User, User.id == ShareEvent.requested_by)
+    )
+
+    if status and status != "all":
+        query = query.filter(ShareEvent.status == status)
+
+    if client:
+        c_clean = client.strip()
+        if c_clean.isdigit():
+            query = query.filter(Client.id == int(c_clean))
+        else:
+            query = query.filter(Client.slug == c_clean)
+
+    if q:
+        search = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                Company.display_name.ilike(search),
+                Company.legal_name.ilike(search),
+                Company.canonical_key.ilike(search),
+                User.full_name.ilike(search),
+                User.email.ilike(search),
+            )
+        )
+
+    if sort == "created_asc":
+        query = query.order_by(ShareEvent.created_at.asc())
+    elif sort == "score_desc":
+        query = query.order_by(Snapshot.quality_score.desc())
+    else:
+        query = query.order_by(ShareEvent.created_at.desc())
+
+    total = query.count()
+    rows = query.offset((page - 1) * page_size).limit(page_size).all()
+
+    now = datetime.now(timezone.utc)
+    inbox_items = []
+
+    for event, cl, snap, comp, req_user in rows:
+        t_at = snap.taken_at if snap.taken_at else snap.created_at or now
+        if t_at.tzinfo is None:
+            t_at = t_at.replace(tzinfo=timezone.utc)
+        age_days = max(0, (now - t_at).days)
+
+        if age_days <= 15:
+            freshness = "fresh"
+        elif age_days <= 45:
+            freshness = "moderate"
+        else:
+            freshness = "stale"
+
+        latest_ready = (
+            session.query(Snapshot)
+            .filter_by(company_id=comp.id, status="ready")
+            .order_by(Snapshot.version.desc())
+            .first()
+        )
+        is_latest_ready = bool(latest_ready and latest_ready.id == snap.id)
+        ready_version = latest_ready.version if latest_ready else snap.version
+
+        identifiers = session.query(CompanyIdentifier).filter_by(company_id=comp.id).all()
+        id_types = {ident.id_type.lower() for ident in identifiers}
+        has_domain = ("domain" in id_types) or bool(comp.canonical_key and "." in comp.canonical_key)
+        has_cik = ("sec_cik" in id_types) or ("cik" in id_types)
+        has_lei = ("lei" in id_types)
+        identifier_coverage = {
+            "domain": has_domain,
+            "cik": has_cik,
+            "lei": has_lei,
+        }
+
+        score = round(float(snap.quality_score or 85.0), 1)
+        grade = snap.quality_grade or ("A" if score >= 85 else ("B" if score >= 70 else ("C" if score >= 50 else "D")))
+        counts = snap.counts or {}
+
+        acc_pts = 30.0 if counts.get("accounts", 1) >= 1 else 0.0
+        lob_pts = min(25.0, round(counts.get("lobs", 0) * 8.33, 1))
+        per_pts = min(25.0, round(counts.get("personas", 0) * 5.0, 1))
+        sig_pts = min(20.0, round((counts.get("posts", 0) + counts.get("cxo_movements", 0) + counts.get("jobs", 0)) * 2.0, 1))
+
+        rubric_breakdown = [
+            {"criterion": "Core Enterprise Metadata", "points": acc_pts, "max": 30.0},
+            {"criterion": "Lines of Business Hierarchy", "points": lob_pts, "max": 25.0},
+            {"criterion": "Key Decision Makers & Personas", "points": per_pts, "max": 25.0},
+            {"criterion": "Signal Intelligence & Activity", "points": sig_pts, "max": 20.0},
+        ]
+
+        prev_reuse_count = (
+            session.query(ShareEvent)
+            .join(Snapshot, Snapshot.id == ShareEvent.snapshot_id)
+            .filter(
+                Snapshot.company_id == comp.id,
+                ShareEvent.status.in_(["done", "approved"]),
+            )
+            .count()
+        )
+
+        quality_report = {
+            "score": score,
+            "grade": grade,
+            "freshness": freshness,
+            "breakdown": rubric_breakdown,
+            "counts_by_entity": counts,
+            "identifier_coverage": identifier_coverage,
+            "policy_gaps": getattr(snap, "policy_gaps", []) or [],
+            "merge_candidate": bool(getattr(comp, "merge_candidate", False)),
+            "previous_reuse_count": prev_reuse_count,
+        }
+
+        balance_info = CreditService.get_balance(cl.slug)
+        remaining_credits = balance_info.get("remaining", 0)
+        max_accounts = cl.max_accounts or 0
+
+        target_schema = schema_for(cl.slug)
+        curr_accts = session.execute(text(f'SELECT COUNT(*) FROM "{target_schema}"."accounts"')).scalar() or 0
+        quota_exceeded = (max_accounts > 0 and curr_accts >= max_accounts)
+        insufficient_credits = (remaining_credits < (event.fee_credits or 0))
+
+        client_credit_status = {
+            "balance": remaining_credits,
+            "max_accounts": max_accounts,
+            "usage": curr_accts,
+            "allowed": not (quota_exceeded or insufficient_credits),
+            "quota_exceeded": quota_exceeded,
+            "insufficient_credits": insufficient_credits,
+        }
+
+        existing = AccountMatcher.find_existing(session, cl.slug, comp)
+        duplicate_warning = {
+            "exists": bool(existing),
+            "account_id": existing.account_id if existing else None,
+            "matching_reason": existing.match_reason if existing else None,
+        }
+
+        risk_flags = []
+        if age_days > 60:
+            risk_flags.append("stale")
+        if not has_domain and not has_cik:
+            risk_flags.append("weak_identifier")
+        if quota_exceeded:
+            risk_flags.append("client_quota_exceeded")
+        elif max_accounts > 0 and (max_accounts - curr_accts) <= 2:
+            risk_flags.append("client_near_quota")
+        if insufficient_credits:
+            risk_flags.append("insufficient_credits")
+        if existing:
+            risk_flags.append("duplicate_in_target")
+        if getattr(comp, "status", None) == "quarantined":
+            risk_flags.append("quarantined")
+
+        inbox_items.append({
+            "id": event.id,
+            "status": event.status,
+            "mode": event.mode,
+            "created_at": event.created_at.isoformat() if event.created_at else None,
+            "business_reason": event.reason,
+            "decision_note": event.decision_note,
+            "decided_at": event.decided_at.isoformat() if getattr(event, "decided_at", None) else None,
+            "requester": {
+                "id": req_user.id if req_user else None,
+                "name": req_user.full_name if req_user else "Unknown User",
+                "email": req_user.email if req_user else "",
+            },
+            "client": {
+                "id": cl.id,
+                "slug": cl.slug,
+                "name": cl.name,
+            },
+            "company": {
+                "id": comp.id,
+                "display_name": comp.display_name,
+                "legal_name": comp.legal_name,
+                "domain": comp.canonical_key,
+            },
+            "snapshot": {
+                "id": snap.id,
+                "version": snap.version,
+                "taken_at": t_at.isoformat(),
+                "age_days": age_days,
+                "is_latest_ready": is_latest_ready,
+                "ready_version": ready_version,
+            },
+            "quality_report": quality_report,
+            "client_credit_status": client_credit_status,
+            "estimated_fee": event.fee_credits or 0,
+            "estimated_savings": max(0, 50 - (event.fee_credits or 0)),
+            "duplicate_warning": duplicate_warning,
+            "risk_flags": risk_flags,
+        })
+
+    return {
+        "items": inbox_items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@catalog_router.post("/inbox/{request_id}/decision")
+def decide_approval_inbox(
+    request_id: int,
+    req: DecisionRequest,
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:approve")),
+    session: Session = Depends(get_platform_db),
+):
+    """Super Admin decision on a single reuse request (C3)."""
+    return apply_request_decision(
+        session=session,
+        request_id=request_id,
+        decision=req.decision,
+        actor_user_id=ctx.user_id,
+        correlation_id=ctx.correlation_id,
+        note=req.note,
+        fee_override=req.fee_override,
+        use_latest_version=req.use_latest_version,
+    )
+
+
+@catalog_router.post("/inbox/bulk-decision")
+def bulk_decision_approval_inbox(
+    req: BulkDecisionRequest,
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:approve")),
+):
+    """Super Admin batch decision (up to 50 items) with per-item transaction isolation (C3)."""
+    if len(req.decisions) > 50:
+        raise HTTPException(status_code=400, detail="Cannot process more than 50 decisions at once.")
+
+    results = []
+    succeeded = 0
+    failed = 0
+
+    for item in req.decisions:
+        with SessionLocal() as item_session:
+            try:
+                res = apply_request_decision(
+                    session=item_session,
+                    request_id=item.id,
+                    decision=item.decision,
+                    actor_user_id=ctx.user_id,
+                    correlation_id=ctx.correlation_id,
+                    note=item.note,
+                    fee_override=item.fee_override,
+                    use_latest_version=req.use_latest_version,
+                )
+                results.append({"id": item.id, "ok": True, **res})
+                succeeded += 1
+            except Exception as e:
+                item_session.rollback()
+                err_msg = _sanitize_error_message(str(e))
+                results.append({"id": item.id, "ok": False, "error": err_msg})
+                failed += 1
+
+    return {
+        "total": len(req.decisions),
+        "succeeded": succeeded,
+        "failed": failed,
+        "results": results,
+    }
+
+
+@catalog_router.post("/requests/{request_id}/approve")
+def approve_reuse_request(
+    request_id: int,
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:approve")),
+    session: Session = Depends(get_platform_db),
+):
+    """Super Admin approves a pending reuse request and triggers hydration."""
+    return apply_request_decision(
+        session=session,
+        request_id=request_id,
+        decision="approve",
+        actor_user_id=ctx.user_id,
+        correlation_id=ctx.correlation_id,
+    )
 
 
 @catalog_router.post("/requests/{request_id}/reject")
@@ -1096,36 +1651,82 @@ def reject_reuse_request(
     session: Session = Depends(get_platform_db),
 ):
     """Super Admin rejects a pending reuse request."""
-    event = session.query(ShareEvent).filter_by(id=request_id).first()
-    if not event:
-        raise HTTPException(status_code=404, detail=f"Request {request_id} not found")
-
-    if event.status != "pending_approval":
-        raise HTTPException(status_code=400, detail=f"Request is in status '{event.status}'")
-
-    event.status = "rejected"
-    event.reason = (req.reason if req else None) or "Rejected by platform administrator"
-    event.completed_at = datetime.now(timezone.utc)
-
-    target_client = session.query(Client).filter_by(id=event.target_client_id).first()
-    log_catalog_audit(
+    return apply_request_decision(
         session=session,
+        request_id=request_id,
+        decision="reject",
         actor_user_id=ctx.user_id,
-        action="catalog.request_rejected",
-        client_id=event.target_client_id,
-        target_user_id=event.requested_by,
-        details={
-            "share_event_id": event.id,
-            "snapshot_id": event.snapshot_id,
-            "target_client_slug": target_client.slug if target_client else None,
-            "reason": event.reason,
-            "correlation_id": ctx.correlation_id,
-        },
-        is_actor_super_admin=True,
+        correlation_id=ctx.correlation_id,
+        note=req.reason if req else None,
+    )
+
+
+# ── In-App Notifications Endpoints ───────────────────────────────────────────
+
+@catalog_notifications_router.get("")
+def list_catalog_notifications(
+    unread_only: bool = Query(False, description="Filter for unread notifications only"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    ctx: TenantRequestContext = Depends(tenant_context("account:read", allow_optional_client_for_super_admin=True)),
+    session: Session = Depends(get_platform_db),
+):
+    """Lists in-app notifications for the caller, anti-oracle sanitized (C3)."""
+    items = NotificationService.list_in_app_notifications(
+        session,
+        user_id=ctx.user_id,
+        client_id=ctx.client_id,
+        is_super_admin=ctx.is_super_admin,
+        limit=limit,
+        offset=offset,
+        unread_only=unread_only,
+    )
+    return {"notifications": items, "count": len(items)}
+
+
+@catalog_notifications_router.get("/unread-count")
+def get_unread_catalog_notification_count(
+    ctx: TenantRequestContext = Depends(tenant_context("account:read", allow_optional_client_for_super_admin=True)),
+    session: Session = Depends(get_platform_db),
+):
+    """Returns the unread count of catalog notifications for the bell badge (C3)."""
+    count = NotificationService.count_unread(
+        session,
+        user_id=ctx.user_id,
+        client_id=ctx.client_id,
+        is_super_admin=ctx.is_super_admin,
+    )
+    return {"unread_count": count}
+
+
+@catalog_notifications_router.post("/{notification_id}/read")
+def mark_catalog_notification_read(
+    notification_id: int,
+    ctx: TenantRequestContext = Depends(tenant_context("account:read", allow_optional_client_for_super_admin=True)),
+    session: Session = Depends(get_platform_db),
+):
+    """Marks a single notification as read (C3)."""
+    ok = NotificationService.mark_read(session, notification_id=notification_id, user_id=ctx.user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    session.commit()
+    return {"ok": True, "id": notification_id, "status": "read"}
+
+
+@catalog_notifications_router.post("/read-all")
+def mark_all_catalog_notifications_read(
+    ctx: TenantRequestContext = Depends(tenant_context("account:read", allow_optional_client_for_super_admin=True)),
+    session: Session = Depends(get_platform_db),
+):
+    """Marks all catalog notifications for the caller as read (C3)."""
+    marked = NotificationService.mark_all_read(
+        session,
+        user_id=ctx.user_id,
+        client_id=ctx.client_id,
+        is_super_admin=ctx.is_super_admin,
     )
     session.commit()
-
-    return {"ok": True, "request_id": event.id, "status": "rejected"}
+    return {"ok": True, "marked_read": marked}
 
 
 @catalog_router.post("/share-events/{share_event_id}/rollback")

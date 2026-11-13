@@ -34,6 +34,7 @@ CATALOG_ACTIONS = {
     "catalog.request_created",
     "catalog.request_approved",
     "catalog.request_rejected",
+    "catalog.request_cancelled",
     "catalog.rollback",
     "catalog.rollback_blocked",
     "catalog.consume_bypassed_by_admin",

@@ -3779,7 +3779,7 @@ $(function () {
 
       if (isApprovalRequired && !isSuper) {
         $startBtn.prop("disabled", false);
-        $btnText.text("Submit Reuse Request");
+        $btnText.text("Request Access");
         $btnBadge.text("Approval Required").show();
       } else {
         $startBtn.prop("disabled", false);
@@ -3807,7 +3807,7 @@ $(function () {
       const originalBtnText = $btn.html();
 
       if (isApprovalRequired && !isSuper) {
-        $btn.html('<i class="bi bi-hourglass-split me-1"></i> Submitting Reuse Request...').prop("disabled", true);
+        $btn.html('<i class="bi bi-hourglass-split me-1"></i> Submitting Request...').prop("disabled", true);
         const reason = ($("#catalogRequestReasonInput").val() || "").trim();
         try {
           const res = await fetch(`${API_BASE}/api/catalog/requests`, {
@@ -3826,17 +3826,22 @@ $(function () {
             throw new Error(err.detail || `HTTP ${res.status}: Request failed`);
           }
 
+          const reqData = await res.json();
+
           const modalEl = document.getElementById("addAccountModal");
           if (modalEl) {
             const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
             bsModal.hide();
           }
 
-          showNotification(
-            `✅ Account reuse request submitted for <strong>${esc(companyName)}</strong>. Awaiting platform administrator approval.`,
-            "info",
-            7000
-          );
+          if (typeof CatalogNotificationManager !== "undefined") {
+            CatalogNotificationManager.fetchUnreadCount();
+          }
+
+          const msg = reqData.already_pending
+            ? `ℹ️ Request for <strong>${esc(companyName)}</strong> is already pending administrator review.`
+            : `✅ Request submitted for <strong>${esc(companyName)}</strong>. ${reqData.sla_hint || 'Reviewed within 1 business day.'}`;
+          showNotification(msg, "info", 7000);
         } catch (err) {
           console.error("Reuse request error:", err);
           $btn.html(originalBtnText).prop("disabled", false);
@@ -4204,13 +4209,507 @@ $(function () {
     CatalogRefreshManager.executeRefresh();
   });
 
+  // ── Catalog In-App Notifications Manager (C3) ──────────────────────────────
+  const CatalogNotificationManager = {
+    notifications: [],
+    unreadCount: 0,
+
+    async init() {
+      await this.fetchUnreadCount();
+      // Poll every 30s
+      setInterval(() => this.fetchUnreadCount(), 30000);
+    },
+
+    async fetchUnreadCount() {
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const slug = (typeof ClientWorkspaceManager !== "undefined" && ClientWorkspaceManager.activeClientSlug) ? ClientWorkspaceManager.activeClientSlug : "";
+      if (slug) headers['X-Client-Slug'] = slug;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/notifications/catalog/unread-count`, { headers });
+        if (!res.ok) return;
+        const data = await res.json();
+        this.unreadCount = data.unread_count || 0;
+        const $badge = $("#topbarNotificationBadge");
+        if (this.unreadCount > 0) {
+          $badge.text(this.unreadCount > 99 ? '99+' : this.unreadCount).removeClass("d-none");
+        } else {
+          $badge.addClass("d-none");
+        }
+      } catch (e) {
+        // silent
+      }
+    },
+
+    async loadNotifications() {
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const slug = (typeof ClientWorkspaceManager !== "undefined" && ClientWorkspaceManager.activeClientSlug) ? ClientWorkspaceManager.activeClientSlug : "";
+      if (slug) headers['X-Client-Slug'] = slug;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/notifications/catalog?limit=25`, { headers });
+        if (!res.ok) return;
+        const data = await res.json();
+        this.notifications = data.notifications || [];
+        this.renderList();
+      } catch (e) {
+        console.warn("Failed to load notifications:", e);
+      }
+    },
+
+    renderList() {
+      const $container = $("#topbarNotificationListContainer");
+      if (this.notifications.length === 0) {
+        $container.html('<div class="p-3 text-center text-muted"><small>No notifications</small></div>');
+        return;
+      }
+
+      const html = this.notifications.map(n => {
+        const bg = n.read ? '#ffffff' : '#f8fafc';
+        const unreadDot = n.read ? '' : '<span class="pulse-dot-green me-1" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#10b981;"></span>';
+        const created = n.created_at ? n.created_at.slice(0, 16).replace('T', ' ') : '';
+        return `
+          <div class="p-2 border-bottom notif-item" data-notif-id="${n.id}" data-account-id="${n.metadata?.account_id || ''}" style="background:${bg};cursor:pointer;transition:background 0.15s;">
+            <div class="d-flex justify-content-between align-items-center">
+              <strong style="font-size:0.78rem;color:#1e293b;">${unreadDot}${esc(n.title)}</strong>
+              <small class="text-muted" style="font-size:0.68rem;">${created}</small>
+            </div>
+            <div style="font-size:0.72rem;color:#475569;margin-top:2px;">${esc(n.message).slice(0, 120)}</div>
+          </div>
+        `;
+      }).join("");
+      $container.html(html);
+    },
+
+    async markRead(id) {
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const slug = (typeof ClientWorkspaceManager !== "undefined" && ClientWorkspaceManager.activeClientSlug) ? ClientWorkspaceManager.activeClientSlug : "";
+      if (slug) headers['X-Client-Slug'] = slug;
+
+      await fetch(`${API_BASE}/api/notifications/catalog/${id}/read`, { method: "POST", headers });
+      await this.fetchUnreadCount();
+    },
+
+    async markAllRead() {
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const slug = (typeof ClientWorkspaceManager !== "undefined" && ClientWorkspaceManager.activeClientSlug) ? ClientWorkspaceManager.activeClientSlug : "";
+      if (slug) headers['X-Client-Slug'] = slug;
+
+      await fetch(`${API_BASE}/api/notifications/catalog/read-all`, { method: "POST", headers });
+      await this.fetchUnreadCount();
+      await this.loadNotifications();
+    }
+  };
+
+  // ── Super-Admin Approval Inbox Manager (C3) ────────────────────────────────
+  const CatalogApprovalInbox = {
+    items: [],
+    selectedItem: null,
+    selectedIndex: -1,
+    selectedIds: new Set(),
+
+    async openModal() {
+      $("#approvalInboxModal").modal("show");
+      await this.loadInbox();
+    },
+
+    async loadInbox() {
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const status = $("#inboxStatusFilter").val() || "pending_approval";
+      const q = ($("#inboxSearchInput").val() || "").trim();
+      let url = `${API_BASE}/api/catalog/inbox?status=${encodeURIComponent(status)}`;
+      if (q) url += `&q=${encodeURIComponent(q)}`;
+
+      try {
+        $("#inboxTableBody").html('<tr><td colspan="6" class="text-center py-4 text-muted"><i class="bi bi-hourglass-split me-1"></i> Loading requests...</td></tr>');
+        const res = await fetch(url, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        this.items = data.items || [];
+        this.selectedIds.clear();
+        this.updateBulkBar();
+
+        const pendingCount = this.items.filter(i => i.status === "pending_approval").length;
+        $("#inboxModalCountBadge").text(`${pendingCount} Pending`);
+        $("#topbarInboxBadge, #sidebarInboxBadge").text(pendingCount).toggle(pendingCount > 0);
+        $("#inboxTotalSummary").text(`${this.items.length} of ${data.total || this.items.length} requests`);
+
+        this.renderTable();
+        if (this.items.length > 0) {
+          this.selectItem(0);
+        } else {
+          this.clearDetail();
+        }
+      } catch (err) {
+        console.error("Failed to load approval inbox:", err);
+        $("#inboxTableBody").html(`<tr><td colspan="6" class="text-center py-4 text-danger"><i class="bi bi-exclamation-triangle me-1"></i> ${esc(err.message)}</td></tr>`);
+      }
+    },
+
+    renderTable() {
+      if (this.items.length === 0) {
+        $("#inboxTableBody").html(`
+          <tr><td colspan="6" class="text-center py-4 text-muted"><i class="bi bi-inbox me-1"></i> No requests match the filter criteria</td></tr>
+        `);
+        return;
+      }
+
+      const rows = this.items.map((item, idx) => {
+        const isSelected = (idx === this.selectedIndex);
+        const isChecked = this.selectedIds.has(item.id);
+
+        let gradeBadge = '<span class="badge bg-secondary">B</span>';
+        const grade = item.quality_report?.grade || 'B';
+        if (grade === 'A') gradeBadge = '<span class="badge bg-success">A</span>';
+        else if (grade === 'B') gradeBadge = '<span class="badge bg-primary">B</span>';
+        else if (grade === 'C') gradeBadge = '<span class="badge bg-warning text-dark">C</span>';
+        else if (grade === 'D') gradeBadge = '<span class="badge bg-danger">D</span>';
+
+        const riskBadges = (item.risk_flags || []).map(f => {
+          let color = "bg-warning-subtle text-warning border-warning";
+          if (f.includes("quota") || f.includes("credits") || f.includes("quarantine")) {
+            color = "bg-danger-subtle text-danger border-danger";
+          }
+          return `<span class="badge ${color} border me-1" style="font-size:0.62rem;">${esc(f.replace('_', ' '))}</span>`;
+        }).join("");
+
+        let statusPill = `<span class="badge bg-secondary">${esc(item.status)}</span>`;
+        if (item.status === "pending_approval") statusPill = `<span class="badge bg-warning text-dark">Pending</span>`;
+        else if (item.status === "done" || item.status === "approved") statusPill = `<span class="badge bg-success">Approved</span>`;
+        else if (item.status === "rejected") statusPill = `<span class="badge bg-danger">Rejected</span>`;
+        else if (item.status === "cancelled") statusPill = `<span class="badge bg-dark">Cancelled</span>`;
+
+        return `
+          <tr class="inbox-row ${isSelected ? 'table-active' : ''}" data-idx="${idx}" style="cursor:pointer;">
+            <td style="padding-left:14px;" onclick="event.stopPropagation();">
+              <input type="checkbox" class="form-check-input inbox-item-check" data-id="${item.id}" ${isChecked ? 'checked' : ''}>
+            </td>
+            <td style="font-family:monospace;font-weight:700;">#${item.id}</td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                <strong style="color:#1e293b;">${esc(item.company?.display_name || 'Account')}</strong>
+                ${gradeBadge}
+              </div>
+              <div style="font-size:0.70rem;color:#64748b;">v${item.snapshot?.version || 1} &bull; ${item.snapshot?.age_days || 0}d old &bull; req by ${esc(item.requester?.name || item.requester?.email || 'User')}</div>
+            </td>
+            <td>
+              <div style="font-weight:600;color:#334155;">${esc(item.client?.name || item.client?.slug)}</div>
+              <div style="font-size:0.68rem;color:#64748b;font-family:monospace;">${esc(item.client?.slug)} &bull; ${item.estimated_fee} cr</div>
+            </td>
+            <td>
+              ${riskBadges || '<span class="text-muted" style="font-size:0.68rem;">None</span>'}
+            </td>
+            <td style="text-align:right;padding-right:14px;">
+              ${statusPill}
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      $("#inboxTableBody").html(rows);
+    },
+
+    selectItem(idx) {
+      if (idx < 0 || idx >= this.items.length) return;
+      this.selectedIndex = idx;
+      this.selectedItem = this.items[idx];
+
+      $("#inboxTableBody tr").removeClass("table-active");
+      $(`#inboxTableBody tr[data-idx="${idx}"]`).addClass("table-active");
+
+      this.renderDetail();
+    },
+
+    renderDetail() {
+      const item = this.selectedItem;
+      if (!item) {
+        this.clearDetail();
+        return;
+      }
+
+      $("#inboxDetailEmpty").hide();
+      const $content = $("#inboxDetailContent").show();
+
+      const qr = item.quality_report || {};
+      const score = qr.score || 85;
+      const grade = qr.grade || 'B';
+      const breakdown = qr.breakdown || [];
+      const coverage = qr.identifier_coverage || {};
+      const counts = qr.counts_by_entity || {};
+      const credit = item.client_credit_status || {};
+      const dup = item.duplicate_warning || {};
+
+      const canApprove = credit.allowed && !dup.exists && item.status === "pending_approval";
+      let blockReason = "";
+      if (item.status !== "pending_approval") blockReason = `Request is already ${item.status}.`;
+      else if (credit.insufficient_credits) blockReason = `Client balance (${credit.balance} cr) is insufficient for ${item.estimated_fee} cr fee.`;
+      else if (credit.quota_exceeded) blockReason = `Client reached account quota limit (${credit.usage}/${credit.max_accounts}).`;
+      else if (dup.exists) blockReason = `Target workspace already contains this account (${dup.matching_reason || 'Match found'}).`;
+
+      const breakdownBars = breakdown.map(b => {
+        const pct = b.max > 0 ? Math.round((b.points / b.max) * 100) : 0;
+        return `
+          <div class="mb-2">
+            <div class="d-flex justify-content-between" style="font-size:0.72rem;">
+              <span>${esc(b.criterion)}</span>
+              <strong>${b.points} / ${b.max} pts</strong>
+            </div>
+            <div class="progress" style="height:5px;">
+              <div class="progress-bar bg-primary" role="progressbar" style="width:${pct}%"></div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      $content.html(`
+        <div class="d-flex justify-content-between align-items-start border-bottom pb-2 mb-3">
+          <div>
+            <h6 class="fw-bold mb-1" style="color:#1e293b;">${esc(item.company?.display_name || 'Account')}</h6>
+            <div style="font-size:0.72rem;color:#64748b;">
+              Target: <strong>${esc(item.client?.name)}</strong> (${esc(item.client?.slug)})
+            </div>
+            <div style="font-size:0.72rem;color:#64748b;">
+              Requested by <strong>${esc(item.requester?.name)}</strong> &bull; Reason: <em>"${esc(item.business_reason || 'None')}"</em>
+            </div>
+          </div>
+          <div class="text-end">
+            <span class="badge bg-success fs-6">${score}% (${grade})</span>
+            <div style="font-size:0.68rem;color:#64748b;margin-top:2px;">Snap v${item.snapshot?.version} &bull; ${qr.freshness}</div>
+          </div>
+        </div>
+
+        <!-- Quality Report & Rubric -->
+        <div class="mb-3">
+          <div class="fw-bold mb-1" style="font-size:0.75rem;color:#475569;text-transform:uppercase;">Quality Report Breakdown</div>
+          ${breakdownBars}
+          <div class="d-flex justify-content-between pt-1" style="font-size:0.70rem;color:#64748b;">
+            <span>LOBs: <strong>${counts.lobs || 0}</strong> &bull; Personas: <strong>${counts.personas || 0}</strong> &bull; Posts: <strong>${counts.posts || 0}</strong></span>
+            <span>CIK: ${coverage.cik ? '✅' : '❌'} &bull; Domain: ${coverage.domain ? '✅' : '❌'} &bull; LEI: ${coverage.lei ? '✅' : '❌'}</span>
+          </div>
+        </div>
+
+        <!-- Target Client Status & Quota -->
+        <div class="card p-2 bg-light border mb-3" style="font-size:0.74rem;">
+          <div class="d-flex justify-content-between">
+            <span>Client Credit Balance:</span>
+            <strong>${credit.balance || 0} cr (Fee: ${item.estimated_fee} cr)</strong>
+          </div>
+          <div class="d-flex justify-content-between mt-1">
+            <span>Workspace Account Quota:</span>
+            <strong>${credit.usage || 0} / ${credit.max_accounts || 'Unlimited'}</strong>
+          </div>
+          ${dup.exists ? `<div class="text-danger fw-bold mt-1"><i class="bi bi-exclamation-octagon me-1"></i> Duplicate detected in workspace: ${esc(dup.matching_reason || 'Already enrolled')}</div>` : ''}
+          ${blockReason && item.status === 'pending_approval' ? `<div class="text-danger small mt-1">⚠️ Approval Blocked: ${esc(blockReason)}</div>` : ''}
+        </div>
+
+        <!-- Decision Controls -->
+        ${item.status === 'pending_approval' ? `
+          <div class="mb-3">
+            <label class="form-label mb-1" style="font-size:0.72rem;font-weight:700;">Decision Note (optional):</label>
+            <input type="text" id="inboxDecisionNote" class="form-control form-control-sm" placeholder="e.g. Approved per sales manager request..." style="font-size:0.75rem;">
+            ${item.snapshot?.is_latest_ready === false ? `
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="inboxUseLatestVersion" checked>
+                <label class="form-check-label" for="inboxUseLatestVersion" style="font-size:0.72rem;">
+                  Use latest ready version (v${item.snapshot?.ready_version}) instead of requested v${item.snapshot?.version}
+                </label>
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-success flex-grow-1" id="btnInboxApprove" ${canApprove ? '' : 'disabled'} title="${blockReason}">
+              <i class="bi bi-check-lg me-1"></i> Approve &amp; Hydrate
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-danger flex-grow-1" id="btnInboxReject">
+              <i class="bi bi-x-lg me-1"></i> Reject
+            </button>
+          </div>
+        ` : `
+          <div class="alert alert-secondary py-2 mb-0" style="font-size:0.75rem;">
+            This request was completed as <strong>${item.status}</strong> on ${item.decided_at || item.created_at}.
+            ${item.decision_note ? `<br/><em>Note: "${esc(item.decision_note)}"</em>` : ''}
+          </div>
+        `}
+      `);
+    },
+
+    clearDetail() {
+      this.selectedItem = null;
+      this.selectedIndex = -1;
+      $("#inboxDetailContent").hide();
+      $("#inboxDetailEmpty").show();
+    },
+
+    updateBulkBar() {
+      const count = this.selectedIds.size;
+      $("#inboxSelectedCount").text(count);
+      $("#inboxBulkActionBar").toggle(count > 0);
+      $("#inboxSelectAllCheckbox").prop("checked", count > 0 && count === this.items.length);
+    },
+
+    async decideSingle(decision) {
+      if (!this.selectedItem) return;
+      const id = this.selectedItem.id;
+      const note = ($("#inboxDecisionNote").val() || "").trim();
+      const useLatest = $("#inboxUseLatestVersion").is(":checked");
+
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/catalog/inbox/${id}/decision`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            decision: decision,
+            note: note || undefined,
+            use_latest_version: useLatest,
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail?.message || err.detail || `HTTP ${res.status}`);
+        }
+
+        showNotification(`✅ Request #${id} ${decision}d successfully!`, "success", 4000);
+        await this.loadInbox();
+      } catch (err) {
+        console.error("Decision error:", err);
+        showNotification(`❌ Decision failed: ${esc(err.message)}`, "error");
+      }
+    },
+
+    async decideBulk(decision) {
+      if (this.selectedIds.size === 0) return;
+      const ids = Array.from(this.selectedIds);
+      if (!confirm(`Are you sure you want to ${decision} ${ids.length} selected request(s)?`)) return;
+
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const decisions = ids.map(id => ({ id, decision }));
+
+      try {
+        const res = await fetch(`${API_BASE}/api/catalog/inbox/bulk-decision`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ decisions, use_latest_version: true }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        showNotification(`✅ Processed ${data.succeeded} of ${data.total} requests (${data.failed} failed)`, data.failed > 0 ? "warning" : "success", 5000);
+        await this.loadInbox();
+      } catch (err) {
+        console.error("Bulk decision error:", err);
+        showNotification(`❌ Bulk decision failed: ${esc(err.message)}`, "error");
+      }
+    }
+  };
+
+  // Event handlers for Notifications & Approval Inbox (C3)
+  $(document).on("click", "#topbarNotificationBellBtn", () => CatalogNotificationManager.loadNotifications());
+  $(document).on("click", "#btnMarkAllNotifsRead", () => CatalogNotificationManager.markAllRead());
+  $(document).on("click", ".notif-item", function () {
+    const notifId = $(this).data("notif-id");
+    const acctId = $(this).data("account-id");
+    if (notifId) CatalogNotificationManager.markRead(notifId);
+    if (acctId) {
+      const $sidebarItem = $(`#accountList .account-item[data-id="${acctId}"]`);
+      if ($sidebarItem.length) $sidebarItem.trigger("click");
+    }
+  });
+
+  $(document).on("click", "#topbarApprovalInboxBtn, #sidebarApprovalInboxBtn", () => CatalogApprovalInbox.openModal());
+  $(document).on("change", "#inboxStatusFilter", () => CatalogApprovalInbox.loadInbox());
+  $(document).on("input", "#inboxSearchInput", () => CatalogApprovalInbox.loadInbox());
+  $(document).on("click", "#btnRefreshInbox", () => CatalogApprovalInbox.loadInbox());
+
+  $(document).on("click", "#inboxTableBody tr.inbox-row", function () {
+    const idx = parseInt($(this).data("idx"), 10);
+    CatalogApprovalInbox.selectItem(idx);
+  });
+
+  $(document).on("change", ".inbox-item-check", function (e) {
+    e.stopPropagation();
+    const id = parseInt($(this).data("id"), 10);
+    if ($(this).is(":checked")) {
+      CatalogApprovalInbox.selectedIds.add(id);
+    } else {
+      CatalogApprovalInbox.selectedIds.delete(id);
+    }
+    CatalogApprovalInbox.updateBulkBar();
+  });
+
+  $(document).on("change", "#inboxSelectAllCheckbox", function () {
+    const checked = $(this).is(":checked");
+    if (checked) {
+      CatalogApprovalInbox.items.forEach(i => CatalogApprovalInbox.selectedIds.add(i.id));
+    } else {
+      CatalogApprovalInbox.selectedIds.clear();
+    }
+    $(".inbox-item-check").prop("checked", checked);
+    CatalogApprovalInbox.updateBulkBar();
+  });
+
+  $(document).on("click", "#btnInboxApprove", () => CatalogApprovalInbox.decideSingle("approve"));
+  $(document).on("click", "#btnInboxReject", () => CatalogApprovalInbox.decideSingle("reject"));
+  $(document).on("click", "#btnBulkApprove", () => CatalogApprovalInbox.decideBulk("approve"));
+  $(document).on("click", "#btnBulkReject", () => CatalogApprovalInbox.decideBulk("reject"));
+
+  // Keyboard Shortcuts for Approval Inbox [J/K/A/R]
+  $(document).on("keydown", function (e) {
+    if (!$("#approvalInboxModal").hasClass("show")) return;
+    if ($(e.target).is("input, textarea, select")) return;
+
+    if (e.key === "j" || e.key === "J") {
+      e.preventDefault();
+      if (CatalogApprovalInbox.selectedIndex < CatalogApprovalInbox.items.length - 1) {
+        CatalogApprovalInbox.selectItem(CatalogApprovalInbox.selectedIndex + 1);
+      }
+    } else if (e.key === "k" || e.key === "K") {
+      e.preventDefault();
+      if (CatalogApprovalInbox.selectedIndex > 0) {
+        CatalogApprovalInbox.selectItem(CatalogApprovalInbox.selectedIndex - 1);
+      }
+    } else if (e.key === "a" || e.key === "A") {
+      e.preventDefault();
+      CatalogApprovalInbox.decideSingle("approve");
+    } else if (e.key === "r" || e.key === "R") {
+      e.preventDefault();
+      CatalogApprovalInbox.decideSingle("reject");
+    }
+  });
+
   window.PlatformCatalogManager = PlatformCatalogManager;
   window.CatalogReuseManager = CatalogReuseManager;
   window.CatalogRefreshManager = CatalogRefreshManager;
+  window.CatalogNotificationManager = CatalogNotificationManager;
+  window.CatalogApprovalInbox = CatalogApprovalInbox;
 
   // Initial load
   ClientWorkspaceManager.init();
   PlatformCatalogManager.init();
+  CatalogNotificationManager.init();
   loadData();
   initSpotlight();
 

@@ -5299,9 +5299,10 @@ if FASTAPI_AVAILABLE:
     app.include_router(client_router)
 
     # Verified Intelligence Catalog Router
-    from routes.catalog_router import catalog_router, accounts_reuse_router
+    from routes.catalog_router import catalog_router, accounts_reuse_router, catalog_notifications_router
     app.include_router(catalog_router)
     app.include_router(accounts_reuse_router)
+    app.include_router(catalog_notifications_router)
 
     # Sales Copilot (RAG chat) — own module, own tables; see apps/sales_copilot/README.md
     from apps.sales_copilot.api import install as install_copilot

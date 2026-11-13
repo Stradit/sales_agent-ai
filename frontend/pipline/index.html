@@ -142,6 +142,25 @@
         </div>
 
         <div class="pipeline-top-right">
+          <!-- Notification Bell Dropdown (C3) -->
+          <div class="dropdown me-2" id="topbarNotificationDropdownWrap">
+            <button class="btn btn-sm position-relative d-flex align-items-center justify-content-center" type="button" id="topbarNotificationBellBtn" data-bs-toggle="dropdown" aria-expanded="false" style="border-radius:8px;padding:6px 10px;background:#FAF7F4;border:1px solid #D3C2B1;color:#2B241F;" title="Catalog Notifications">
+              <i class="bi bi-bell-fill" style="font-size:0.95rem;color:#4A3528;"></i>
+              <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="topbarNotificationBadge" style="font-size:0.62rem;padding:3px 5px;">
+                0
+              </span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end shadow p-0" id="topbarNotificationMenu" style="width:360px;max-height:450px;overflow-y:auto;border-radius:10px;font-size:0.82rem;">
+              <li class="p-2 border-bottom d-flex justify-content-between align-items-center bg-light">
+                <span class="fw-bold" style="color:#2B241F;"><i class="bi bi-bell me-1"></i> Notifications</span>
+                <button type="button" class="btn btn-sm btn-link text-decoration-none p-0" id="btnMarkAllNotifsRead" style="font-size:0.75rem;color:#8A6248;font-weight:600;">Mark all read</button>
+              </li>
+              <div id="topbarNotificationListContainer" class="p-0">
+                <div class="p-3 text-center text-muted"><small>No new notifications</small></div>
+              </div>
+            </ul>
+          </div>
+
           <!-- Top Bar Client Switcher -->
           <div class="dropdown me-2">
             <button class="btn btn-sm dropdown-toggle d-flex align-items-center gap-2" type="button" id="topbarClientDropdown" data-bs-toggle="dropdown" aria-expanded="false" style="border-radius:8px;font-weight:600;font-size:0.8rem;padding:6px 12px;background:#4A3528;border:1px solid #8A6248;color:#F3E7DA;box-shadow:0 2px 6px rgba(43, 36, 31,0.18);">
@@ -166,6 +185,12 @@
               <li>
                 <a class="dropdown-item py-2 text-secondary" href="#" id="topbarAccountLibraryBtn">
                   <i class="bi bi-collection-fill me-2" style="color:#8A6248;"></i>Platform Account Library...
+                </a>
+              </li>
+              <li id="topbarApprovalInboxItem">
+                <a class="dropdown-item py-2 text-warning fw-semibold" href="#" id="topbarApprovalInboxBtn">
+                  <i class="bi bi-inbox-fill me-2 text-warning"></i>Approval Inbox...
+                  <span class="badge bg-danger rounded-pill ms-1 d-none" id="topbarInboxBadge" style="font-size:0.65rem;">0</span>
                 </a>
               </li>
             </ul>
@@ -2847,6 +2872,116 @@
                   <!-- Populated dynamically -->
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:12px 24px;">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal" style="border-radius:8px;font-weight:600;padding:7px 18px;">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Super-Admin Catalog Approval Inbox (C3) -->
+<div class="modal fade" id="approvalInboxModal" tabindex="-1" aria-labelledby="approvalInboxModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width:1320px;width:96vw;">
+    <div class="modal-content" style="border-radius:16px;border:1px solid rgba(184,138,100,0.3);box-shadow:0 25px 60px -15px rgba(43,36,31,0.35);overflow:hidden;">
+      <div class="modal-header" style="background:linear-gradient(135deg,#2B241F 0%, #4A3528 60%, #8A6248 100%);color:#F3E7DA;border-bottom:1px solid #B88A64;padding:16px 24px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:44px;height:44px;border-radius:12px;background:rgba(243,231,218,0.12);border:1px solid rgba(243,231,218,0.25);display:flex;align-items:center;justify-content:center;font-size:1.35rem;">
+            <i class="bi bi-inbox-fill text-warning"></i>
+          </div>
+          <div>
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="modal-title mb-0" id="approvalInboxModalLabel" style="font-weight:700;font-size:1.15rem;">Catalog Approval Inbox</h5>
+              <span class="badge bg-warning text-dark" id="inboxModalCountBadge" style="font-size:0.7rem;font-weight:700;">0 Pending</span>
+            </div>
+            <div style="font-size:0.75rem;color:#D3C2B1;margin-top:2px;">
+              Review tenant requests &bull; Quality report audit &bull; Risk detection &bull; Bulk decisioning
+            </div>
+          </div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body" style="padding:20px 24px;background:#f8fafc;max-height:80vh;overflow-y:auto;">
+        <!-- Filters & Bulk Action Bar -->
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+          <div class="d-flex gap-2 flex-wrap align-items-center">
+            <select id="inboxStatusFilter" class="form-select form-select-sm" style="font-size:0.8rem;border-radius:8px;max-width:180px;">
+              <option value="pending_approval" selected>Pending Approval</option>
+              <option value="done">Approved &amp; Hydrated</option>
+              <option value="rejected">Rejected</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="all">All Requests</option>
+            </select>
+            <div class="input-group input-group-sm" style="max-width:280px;">
+              <span class="input-group-text bg-white border-end-0 text-muted"><i class="bi bi-search"></i></span>
+              <input type="text" id="inboxSearchInput" class="form-control border-start-0 bg-white" placeholder="Search company, client, requester...">
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnRefreshInbox" style="border-radius:8px;font-size:0.8rem;">
+              <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+            </button>
+          </div>
+
+          <!-- Bulk Actions (visible when items selected) -->
+          <div id="inboxBulkActionBar" class="d-flex gap-2 align-items-center" style="display:none !important;">
+            <span class="text-muted" style="font-size:0.75rem;"><strong id="inboxSelectedCount">0</strong> selected</span>
+            <button type="button" class="btn btn-sm btn-success" id="btnBulkApprove" style="border-radius:8px;font-size:0.78rem;font-weight:700;">
+              <i class="bi bi-check2-all me-1"></i> Approve Selected
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-danger" id="btnBulkReject" style="border-radius:8px;font-size:0.78rem;font-weight:700;">
+              <i class="bi bi-x-circle me-1"></i> Reject Selected
+            </button>
+          </div>
+        </div>
+
+        <!-- Two Column Layout: Inbox Table (Left) + Detail Panel (Right) -->
+        <div class="row g-3">
+          <div class="col-lg-7">
+            <div class="card border-0 shadow-sm overflow-hidden" style="border-radius:12px;background:#fff;border:1px solid #e2e8f0;">
+              <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="inboxRequestsTable" style="font-size:0.82rem;">
+                  <thead class="table-light">
+                    <tr>
+                      <th style="width:5%;padding-left:14px;">
+                        <input type="checkbox" id="inboxSelectAllCheckbox" class="form-check-input" style="cursor:pointer;">
+                      </th>
+                      <th style="width:10%;">ID</th>
+                      <th style="width:30%;">Company &amp; Quality</th>
+                      <th style="width:25%;">Target Client</th>
+                      <th style="width:15%;">Risk Flags</th>
+                      <th style="width:15%;text-align:right;padding-right:14px;">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="inboxTableBody">
+                    <tr><td colspan="6" class="text-center py-4 text-muted"><i class="bi bi-hourglass-split me-1"></i> Loading inbox requests...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mt-2 px-1 text-muted" style="font-size:0.72rem;">
+              <span><i class="bi bi-keyboard me-1"></i> Shortcuts: <strong>[J]</strong> Next &bull; <strong>[K]</strong> Previous &bull; <strong>[A]</strong> Approve &bull; <strong>[R]</strong> Reject</span>
+              <span id="inboxTotalSummary">0 items</span>
+            </div>
+          </div>
+
+          <!-- Right Detail Panel -->
+          <div class="col-lg-5">
+            <div class="card border-0 shadow-sm p-3" id="inboxDetailPanel" style="border-radius:12px;background:#fff;border:1px solid #e2e8f0;min-height:420px;">
+              <div class="text-center py-5 text-muted" id="inboxDetailEmpty">
+                <i class="bi bi-cursor text-secondary" style="font-size:2.5rem;"></i>
+                <div class="mt-2 fw-semibold">Select a request to inspect details</div>
+                <small class="text-muted">Quality rubric, risk flags, quota status &amp; decision controls</small>
+              </div>
+
+              <div id="inboxDetailContent" style="display:none;">
+                <!-- Populated dynamically via JS -->
+              </div>
             </div>
           </div>
         </div>

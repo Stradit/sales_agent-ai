@@ -29,6 +29,7 @@ for _prefix in ("postgresql://", "postgres://"):
 # Multi-Tenant Architecture Configuration (Phase 6 Cutover §11.4 & §14)
 MULTITENANT_ENABLED = os.getenv("MULTITENANT_ENABLED", "true").lower() in ("true", "1", "yes")
 DEFAULT_CLIENT_SLUG = os.getenv("DEFAULT_CLIENT_SLUG", "stradit_india")
+CATALOG_APPROVAL_SLA_HOURS = int(os.getenv("CATALOG_APPROVAL_SLA_HOURS", "24"))
 
 # Celery & Redis Task Queue Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
