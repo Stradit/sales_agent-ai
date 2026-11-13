@@ -390,6 +390,10 @@ function bindCardActions(container, accounts) {
   const goSignalsBtn = document.getElementById('ccAccountsGoSignals');
   if (goSignalsBtn) {
     goSignalsBtn.addEventListener('click', () => {
+      if (typeof window.openSignalFeedWorkspace === 'function') {
+        window.openSignalFeedWorkspace();
+        return;
+      }
       // Switch to Day view and scroll to reasons/signals
       const dayTab = document.getElementById('ccTabDay');
       if (dayTab) dayTab.click();

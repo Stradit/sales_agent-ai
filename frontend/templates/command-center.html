@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="css/action-items.css?v=1.0">
   <link rel="stylesheet" href="css/profile-page.css?v=3.1">
   <link rel="stylesheet" href="css/responsive.css?v=3.0">
-  <link rel="stylesheet" href="css/command-center.css?v=4.1">
+  <link rel="stylesheet" href="css/command-center.css?v=4.2">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body class="cc-wide">
@@ -562,9 +562,33 @@
   <div class="cc-entity-sheet-content" id="ccEntitySheetContent"></div>
 </aside>
 
+<!-- Step 5: Mobile Bottom Navigation Shell (MorePhone.dc.html) -->
+<nav class="cc-mobile-bottom-nav" id="ccMobileBottomNav" aria-label="Mobile Navigation">
+  <button type="button" class="cc-mob-tab is-active" data-mob-view="day">
+    <i class="fa-solid fa-bolt"></i>
+    <span>Home</span>
+  </button>
+  <button type="button" class="cc-mob-tab" data-mob-view="accounts">
+    <i class="fa-solid fa-building"></i>
+    <span>Accounts</span>
+  </button>
+  <button type="button" class="cc-mob-tab" data-mob-view="pipeline">
+    <i class="fa-solid fa-chart-column"></i>
+    <span>Deals</span>
+  </button>
+  <button type="button" class="cc-mob-tab" data-mob-view="copilot">
+    <i class="fa-solid fa-wand-magic-sparkles"></i>
+    <span>Copilot</span>
+  </button>
+  <button type="button" class="cc-mob-tab" data-mob-view="more">
+    <i class="fa-solid fa-ellipsis"></i>
+    <span>More</span>
+  </button>
+</nav>
+
 {% include "partials/drawer.html" %}
 {% include "partials/copilot-dock.html" %}
 
-<script type="module" src="js/modules/command-center/main.js?v=8.7"></script>
+<script type="module" src="js/modules/command-center/main.js?v=8.8"></script>
 </body>
 </html>

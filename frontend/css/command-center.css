@@ -7932,3 +7932,488 @@ body.cc-sheet-open {
     padding: 16px;
   }
 }
+
+/* =========================================================================
+   STEP 5: WORKSPACES & MOBILE SHELL
+   DealsList, Introductions, Playbook, SignalFeed, MorePhone
+   ========================================================================= */
+
+/* 1. DealsList Workspace (DealsList.dc.html) */
+.cc-deals-stage-filter-group {
+  display: flex;
+  border: 1px solid var(--border-color, #DCE1E9);
+  background: #FFFFFF;
+}
+.cc-dl-stage-btn {
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-left: 1px solid var(--border-color, #DCE1E9);
+  background: #FFFFFF;
+  color: #4C5671;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+.cc-dl-stage-btn:first-child {
+  border-left: 0;
+}
+.cc-dl-stage-btn.is-active {
+  background: #001233;
+  color: #FFFFFF;
+}
+.cc-dl-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.cc-dl-kpi-card {
+  padding: 12px 16px;
+  background: #FFFFFF;
+  border: 1px solid #EEF0F5;
+  box-shadow: 0 1px 3px rgba(0, 18, 51, 0.03);
+}
+.cc-dl-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4C5671;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cc-dl-kpi-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: #001233;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.cc-dl-tr {
+  transition: background 0.15s ease;
+}
+.cc-dl-tr:hover {
+  background: #F8FAFC;
+}
+
+/* 2. Introductions Workspace (Introductions.dc.html) */
+.cc-intros-split-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.cc-intros-left-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.cc-intros-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #EEF0F5;
+}
+.cc-intros-tabs {
+  display: flex;
+  border: 1px solid #DCE1E9;
+}
+.cc-intros-tab {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-left: 1px solid #DCE1E9;
+  background: #FFFFFF;
+  color: #4C5671;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cc-intros-tab:first-child {
+  border-left: 0;
+}
+.cc-intros-tab.is-active {
+  background: #001233;
+  color: #FFFFFF;
+}
+.cc-intro-card-stale {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px 18px 16px 0;
+  border-bottom: 1px solid #EEF0F5;
+}
+.cc-intro-stale-line {
+  background: #D89B1B;
+}
+.cc-intro-subject {
+  font-size: 15px;
+  font-weight: 600;
+  color: #001233;
+}
+.cc-intro-meta {
+  font-size: 13px;
+  color: #4C5671;
+  margin-top: 2px;
+}
+.cc-intro-linked {
+  font-size: 13px;
+  margin-top: 8px;
+  color: #001233;
+}
+.cc-intro-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.cc-intros-footer-note {
+  margin-top: auto;
+  padding: 14px 18px;
+  border-top: 1px solid #EEF0F5;
+  font-size: 13px;
+  color: #4C5671;
+}
+.cc-intros-right-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.cc-no-eb-card {
+  padding: 14px 16px;
+}
+.cc-no-eb-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 14px;
+}
+.cc-no-eb-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.cc-eb-deal-sub {
+  display: block;
+  color: #4C5671;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.cc-suggested-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cc-suggested-list li {
+  padding: 12px 16px;
+  border-bottom: 1px solid #EEF0F5;
+  font-size: 14px;
+}
+.cc-suggested-list li:last-child {
+  border-bottom: 0;
+}
+.cc-sugg-name {
+  font-weight: 700;
+  color: #001233;
+}
+.cc-sugg-sub {
+  color: #4C5671;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+/* 3. Playbook Workspace (Playbook.dc.html) */
+.cc-playbook-2x2-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.cc-pb-plays-list {
+  display: flex;
+  flex-direction: column;
+}
+.cc-pb-play-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid #EEF0F5;
+}
+.cc-pb-play-item:last-child {
+  border-bottom: 0;
+}
+.cc-pb-play-num {
+  font-weight: 800;
+  color: var(--accent, #C9541A);
+  font-size: 16px;
+}
+.cc-pb-play-info strong {
+  display: block;
+  font-size: 14px;
+  color: #001233;
+}
+.cc-pb-play-meta {
+  font-size: 12px;
+  color: #4C5671;
+  margin-top: 2px;
+}
+.cc-pb-tracks-list,
+.cc-pb-pain-list {
+  display: flex;
+  flex-direction: column;
+}
+.cc-pb-track-item,
+.cc-pb-pain-item {
+  padding: 14px 18px;
+  border-bottom: 1px solid #EEF0F5;
+}
+.cc-pb-track-item:last-child,
+.cc-pb-pain-item:last-child {
+  border-bottom: 0;
+}
+.cc-pb-track-item strong,
+.cc-pb-pain-item strong {
+  font-size: 14px;
+  color: #001233;
+}
+.cc-pb-track-meta,
+.cc-pb-pain-meta {
+  font-size: 13px;
+  color: #4C5671;
+  margin-top: 3px;
+}
+.cc-pb-objections-list {
+  display: flex;
+  flex-direction: column;
+}
+.cc-pb-objection-details {
+  border-bottom: 1px solid #EEF0F5;
+}
+.cc-pb-objection-details:last-child {
+  border-bottom: 0;
+}
+.cc-pb-objection-details summary {
+  padding: 14px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #001233;
+}
+.cc-pb-obj-answer {
+  padding: 0 18px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #001233;
+}
+.cc-pb-obj-source {
+  font-size: 12px;
+  color: #4C5671;
+  margin-top: 4px;
+}
+
+/* 4. SignalFeed Workspace (SignalFeed.dc.html) */
+.cc-signals-filter-group {
+  display: flex;
+  border: 1px solid #DCE1E9;
+  flex-wrap: wrap;
+  background: #FFFFFF;
+}
+.cc-sig-filter-btn {
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-left: 1px solid #DCE1E9;
+  background: #FFFFFF;
+  color: #4C5671;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cc-sig-filter-btn:first-child {
+  border-left: 0;
+}
+.cc-sig-filter-btn.is-active {
+  background: #001233;
+  color: #FFFFFF;
+}
+.cc-signals-split-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.cc-signals-stream {
+  display: flex;
+  flex-direction: column;
+}
+.cc-signal-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid #EEF0F5;
+  transition: background 0.15s ease;
+}
+.cc-signal-row:last-child {
+  border-bottom: 0;
+}
+.cc-signal-row:hover {
+  background: #F8FAFC;
+}
+.cc-sig-type-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cc-sig-tag {
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-block;
+  width: fit-content;
+}
+.cc-sig-tag.tag-exec {
+  background: #E8EEFB;
+  color: #24448F;
+}
+.cc-sig-tag.tag-hiring,
+.cc-sig-tag.tag-news,
+.cc-sig-tag.tag-capital {
+  background: #F1F3F7;
+  color: #4C5671;
+}
+.cc-sig-date {
+  font-size: 12px;
+  color: #4C5671;
+}
+.cc-sig-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #001233;
+}
+.cc-sig-meta {
+  font-size: 13px;
+  color: #4C5671;
+  margin-top: 2px;
+}
+.cc-signals-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 5. MorePhone Workspace & Mobile Shell (MorePhone.dc.html) */
+.cc-more-phone-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.cc-more-group {
+  background: #FFFFFF;
+  border: 1px solid #EEF0F5;
+  box-shadow: 0 1px 3px rgba(0, 18, 51, 0.03);
+}
+.cc-more-group-title {
+  padding: 12px 14px;
+  border-bottom: 1px solid #EEF0F5;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4C5671;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cc-more-row {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-bottom: 1px solid #EEF0F5;
+  color: #001233;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background 0.15s ease;
+}
+.cc-more-row:last-child {
+  border-bottom: 0;
+}
+.cc-more-row:hover {
+  background: #F8FAFC;
+}
+
+/* Mobile Fixed Bottom Navigation Bar */
+.cc-mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .cc-dl-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cc-intros-split-grid,
+  .cc-playbook-2x2-grid,
+  .cc-signals-split-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  body.cc-wide {
+    padding-bottom: 64px;
+  }
+  .cc-mobile-bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: #FFFFFF;
+    border-top: 1px solid #DCE1E9;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    z-index: 1040;
+    box-shadow: 0 -2px 8px rgba(0, 18, 51, 0.08);
+  }
+  .cc-mob-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: transparent;
+    border: 0;
+    color: #4C5671;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    padding: 4px 0;
+    transition: all 0.15s ease;
+  }
+  .cc-mob-tab i {
+    font-size: 16px;
+  }
+  .cc-mob-tab.is-active {
+    color: var(--accent, #E46521);
+    font-weight: 700;
+    box-shadow: inset 0 3px 0 var(--accent, #E46521);
+  }
+  .cc-signal-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .cc-deals-stage-filter-group {
+    overflow-x: auto;
+    width: 100%;
+  }
+}
