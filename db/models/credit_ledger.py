@@ -12,7 +12,10 @@ class CreditLedger(Base):
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True)
     account_id = Column(Integer, nullable=True)
     run_id = Column(String(128), nullable=True, index=True)
+    ref_type = Column(String(64), nullable=True)
+    ref_id = Column(BigInteger, nullable=True)
     delta = Column(Integer, nullable=False)
+    balance_after = Column(Integer, nullable=True)
     reason = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 

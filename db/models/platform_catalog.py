@@ -38,6 +38,12 @@ class Company(Base):
     legal_name = Column(String(500), nullable=True)
     display_name = Column(String(500), nullable=True)
     country = Column(String(100), nullable=True)
+    merged_into_id = Column(
+        BigInteger,
+        ForeignKey("platform_catalog.companies.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    needs_review = Column(Boolean, default=False, nullable=False)
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -115,6 +121,8 @@ class Snapshot(Base):
     )
     counts = Column(JSONB, default=dict, nullable=False)
     checksum = Column(String(128), nullable=False)
+    checksum_version = Column(Integer, default=1, nullable=False)
+    policy_hash = Column(String(64), nullable=True)
 
     company = relationship("Company", back_populates="snapshots")
     blob = relationship("SnapshotBlob", back_populates="snapshot", uselist=False, cascade="all, delete-orphan")
@@ -182,6 +190,38 @@ class ShareEvent(Base):
 
     def __repr__(self):
         return f"<ShareEvent(id={self.id}, target_client_id={self.target_client_id}, status='{self.status}')>"
+
+
+class MergeCandidate(Base):
+    __tablename__ = "merge_candidates"
+    __table_args__ = {"schema": "platform_catalog"}
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    company_a_id = Column(
+        BigInteger,
+        ForeignKey("platform_catalog.companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    company_b_id = Column(
+        BigInteger,
+        ForeignKey("platform_catalog.companies.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    reason = Column(String(255), nullable=False)
+    evidence = Column(JSONB, default=dict, nullable=False)
+    status = Column(String(32), default="pending", nullable=False)  # pending | merged | dismissed
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    resolved_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self):
+        return f"<MergeCandidate(id={self.id}, a={self.company_a_id}, b={self.company_b_id}, status='{self.status}')>"
 
 
 class AccountOrigin(Base):

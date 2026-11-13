@@ -15,9 +15,10 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
+import uuid
 
 import yaml
-from sqlalchemy import desc, func, text
+from sqlalchemy import desc, func, or_, text
 from sqlalchemy.orm import Session
 
 from db.models.client import Client
@@ -25,6 +26,7 @@ from db.models.user import User
 from db.models.platform_catalog import (
     Company,
     CompanyIdentifier,
+    MergeCandidate,
     Snapshot,
     SnapshotBlob,
 )
@@ -514,13 +516,39 @@ class CatalogService:
         identifiers = resolution.identifiers
         is_weak = resolution.weak
 
-        # 3. Find or create canonical Company in platform_catalog
-        company = session.query(Company).filter_by(canonical_key=canonical_key).first()
+        # 3. Look up ALL identifiers of incoming account in company_identifiers and canonical_key
         display_name = account.get("display_name") or account.get("legal_name") or "Unknown Enterprise"
         legal_name = account.get("legal_name") or display_name
         country = account.get("country")
 
-        if not company:
+        matching_companies_dict: Dict[int, Company] = {}
+
+        if canonical_key:
+            c_by_key = session.query(Company).filter_by(canonical_key=canonical_key).first()
+            if c_by_key:
+                surv = cls._follow_merged(session, c_by_key)
+                if surv:
+                    matching_companies_dict[surv.id] = surv
+
+        for id_type, id_val in identifiers:
+            existing_idents = (
+                session.query(CompanyIdentifier)
+                .filter_by(id_type=id_type, id_value=id_val)
+                .all()
+            )
+            for ident in existing_idents:
+                if ident.company:
+                    surv = cls._follow_merged(session, ident.company)
+                    if surv:
+                        matching_companies_dict[surv.id] = surv
+
+        matched_companies = list(matching_companies_dict.values())
+
+        company: Optional[Company] = None
+        force_quarantine = False
+
+        if len(matched_companies) == 0:
+            # Case 1: No match -> create company + identifiers
             company = Company(
                 canonical_key=canonical_key,
                 legal_name=legal_name,
@@ -530,18 +558,138 @@ class CatalogService:
             session.add(company)
             session.flush()
 
-        # Update company identifiers
-        for id_type, id_val in identifiers:
-            existing_id = session.query(CompanyIdentifier).filter_by(
-                id_type=id_type, id_value=id_val
-            ).first()
-            if not existing_id:
+            for id_type, id_val in identifiers:
                 session.add(CompanyIdentifier(
                     company_id=company.id,
                     id_type=id_type,
                     id_value=id_val,
                 ))
-        session.flush()
+            session.flush()
+
+        elif len(matched_companies) == 1:
+            # Case 2: Exactly one matching company
+            c = matched_companies[0]
+
+            # Check if strong identifier conflicts with existing strong identifier of c
+            has_conflict = False
+            conflict_reason = ""
+            c_idents = session.query(CompanyIdentifier).filter_by(company_id=c.id).all()
+            for in_type, in_val in identifiers:
+                if in_type in ("cik", "lei"):
+                    for ex in c_idents:
+                        if ex.id_type == in_type and ex.id_value != in_val:
+                            has_conflict = True
+                            conflict_reason = f"Conflicting {in_type}: incoming '{in_val}' vs existing company {c.id} '{ex.id_value}'"
+                            break
+                if has_conflict:
+                    break
+
+            if has_conflict:
+                # Conflict on strong identifier -> treat as Case 3
+                force_quarantine = True
+                new_comp = Company(
+                    canonical_key=f"needs_review:{canonical_key}:{uuid.uuid4().hex[:6]}",
+                    legal_name=legal_name,
+                    display_name=display_name,
+                    country=country,
+                    needs_review=True,
+                )
+                session.add(new_comp)
+                session.flush()
+
+                # Add non-conflicting identifiers
+                for in_type, in_val in identifiers:
+                    conflict_ident = session.query(CompanyIdentifier).filter_by(
+                        id_type=in_type, id_value=in_val
+                    ).first()
+                    if not conflict_ident:
+                        session.add(CompanyIdentifier(
+                            company_id=new_comp.id,
+                            id_type=in_type,
+                            id_value=in_val,
+                        ))
+
+                candidate = MergeCandidate(
+                    company_a_id=c.id,
+                    company_b_id=new_comp.id,
+                    reason=conflict_reason,
+                    evidence={
+                        "incoming_identifiers": identifiers,
+                        "company_a_identifiers": [(ci.id_type, ci.id_value) for ci in c_idents],
+                        "source_client_slug": source_client_slug,
+                    },
+                    status="pending",
+                )
+                session.add(candidate)
+                c.needs_review = True
+                session.flush()
+                company = new_comp
+
+            else:
+                company = c
+                # Add any new identifiers
+                for id_type, id_val in identifiers:
+                    existing_id = session.query(CompanyIdentifier).filter_by(
+                        id_type=id_type, id_value=id_val
+                    ).first()
+                    if not existing_id:
+                        session.add(CompanyIdentifier(
+                            company_id=company.id,
+                            id_type=id_type,
+                            id_value=id_val,
+                        ))
+                    elif existing_id.company_id != company.id:
+                        existing_surv = cls._follow_merged(session, existing_id.company)
+                        if existing_surv and existing_surv.id == company.id:
+                            existing_id.company_id = company.id
+
+                # Upgrade canonical_key if incoming outranks current key (CIK > LEI > domain)
+                if cls._key_rank(canonical_key) > cls._key_rank(company.canonical_key):
+                    other = (
+                        session.query(Company)
+                        .filter(Company.canonical_key == canonical_key, Company.id != company.id)
+                        .first()
+                    )
+                    if not other:
+                        old_key = company.canonical_key
+                        company.canonical_key = canonical_key
+                        if old_key:
+                            ex_old = session.query(CompanyIdentifier).filter_by(
+                                id_type="key", id_value=old_key
+                            ).first()
+                            if not ex_old:
+                                session.add(CompanyIdentifier(
+                                    company_id=company.id,
+                                    id_type="key",
+                                    id_value=old_key,
+                                ))
+                session.flush()
+
+        else:
+            # Case 3: Matches two or more companies
+            force_quarantine = True
+            comp_a = matched_companies[0]
+            comp_b = matched_companies[1]
+            comp_a.needs_review = True
+            comp_b.needs_review = True
+
+            candidate = MergeCandidate(
+                company_a_id=comp_a.id,
+                company_b_id=comp_b.id,
+                reason=f"Incoming account matched multiple existing companies: {[c.id for c in matched_companies]}",
+                evidence={
+                    "incoming_identifiers": identifiers,
+                    "matched_company_ids": [c.id for c in matched_companies],
+                    "matched_canonical_keys": [c.canonical_key for c in matched_companies],
+                    "source_client_slug": source_client_slug,
+                },
+                status="pending",
+            )
+            session.add(candidate)
+            session.flush()
+
+            # Publish snapshot against the best match (comp_a)
+            company = comp_a
 
         # 4. Deterministic checksum of payload
         payload_str = json.dumps(payload, sort_keys=True, default=str)
@@ -566,7 +714,7 @@ class CatalogService:
             jobs=jobs,
         )
 
-        status = "ready" if ((quality_score >= 80.0 and not is_weak) or force) else "quarantined"
+        status = "ready" if ((quality_score >= 80.0 and not is_weak and not force_quarantine) or force) else "quarantined"
 
         # 6. Version calculation
         max_ver = session.query(func.max(Snapshot.version)).filter_by(company_id=company.id).scalar() or 0
@@ -644,13 +792,43 @@ class CatalogService:
         session.commit()
         return snapshot
 
-    # ── Lookup Helpers ────────────────────────────────────────────────────────
+    # ── Lookup & Merge Helpers ────────────────────────────────────────────────
+
+    @classmethod
+    def _key_rank(cls, k: Optional[str]) -> int:
+        if not k:
+            return 0
+        if k.startswith("cik:"):
+            return 3
+        if k.startswith("lei:"):
+            return 2
+        if k.startswith("dom:"):
+            return 1
+        return 0
+
+    @classmethod
+    def _follow_merged(cls, session: Session, company: Optional[Company]) -> Optional[Company]:
+        """Follows company.merged_into_id chain until surviving company is reached."""
+        if not company:
+            return None
+        visited = set()
+        current = company
+        while current.merged_into_id is not None:
+            if current.id in visited:
+                break
+            visited.add(current.id)
+            parent = session.query(Company).filter_by(id=current.merged_into_id).first()
+            if not parent:
+                break
+            current = parent
+        return current
 
     @classmethod
     def get_company_by_identifier(cls, session: Session, identifier: str) -> Optional[Company]:
         """Resolves a company by querying ONLY the classified identifier type.
         
-        If multiple companies match, raises AmbiguousIdentifierError.
+        Follows merged_into_id chains to surviving companies.
+        If multiple surviving companies match, raises AmbiguousIdentifierError.
         """
         if not identifier:
             return None
@@ -659,7 +837,17 @@ class CatalogService:
             return None
 
         if kind == "canonical_key":
-            companies = session.query(Company).filter_by(canonical_key=val).all()
+            companies = session.query(Company).filter(
+                or_(
+                    Company.canonical_key == val,
+                    Company.id.in_(
+                        session.query(CompanyIdentifier.company_id).filter(
+                            CompanyIdentifier.id_type == "key",
+                            CompanyIdentifier.id_value == val,
+                        )
+                    ),
+                )
+            ).all()
         else:
             companies = (
                 session.query(Company)
@@ -674,17 +862,199 @@ class CatalogService:
 
         if not companies:
             return None
-        if len(companies) > 1:
+
+        # S-7: Follow merged_into_id chains
+        survivors_dict: Dict[int, Company] = {}
+        for c in companies:
+            surv = cls._follow_merged(session, c)
+            if surv:
+                survivors_dict[surv.id] = surv
+
+        surviving = list(survivors_dict.values())
+        if not surviving:
+            return None
+        if len(surviving) > 1:
             raise AmbiguousIdentifierError(
-                f"Identifier '{identifier}' ({kind}='{val}') matches multiple companies: {[c.id for c in companies]}",
-                candidate_company_ids=[c.id for c in companies],
+                f"Identifier '{identifier}' ({kind}='{val}') matches multiple companies: {[c.id for c in surviving]}",
+                candidate_company_ids=[c.id for c in surviving],
             )
-        return companies[0]
+        return surviving[0]
 
     @classmethod
     def get_latest_snapshot(cls, session: Session, company_id: int, status: str = "ready") -> Optional[Snapshot]:
-        """Retrieves the latest snapshot for a company."""
+        """Retrieves the latest snapshot for a company, following merged_into_id."""
+        comp = session.query(Company).filter_by(id=company_id).first()
+        if comp:
+            surv = cls._follow_merged(session, comp)
+            if surv:
+                company_id = surv.id
         return session.query(Snapshot).filter_by(
             company_id=company_id,
             status=status,
         ).order_by(desc(Snapshot.version)).first()
+
+    @classmethod
+    def resolve_merge_candidate(
+        cls,
+        session: Session,
+        candidate_id: int,
+        action: str,  # "merge" | "dismiss"
+        keep_company_id: Optional[int] = None,
+        admin_user_id: Optional[int] = None,
+    ) -> MergeCandidate:
+        """Resolves a merge candidate by merging two companies or dismissing."""
+        candidate = session.query(MergeCandidate).filter_by(id=candidate_id).first()
+        if not candidate:
+            raise ValueError(f"MergeCandidate {candidate_id} not found.")
+
+        if candidate.status != "pending":
+            raise ValueError(f"MergeCandidate {candidate_id} is already '{candidate.status}'.")
+
+        if action == "dismiss":
+            candidate.status = "dismissed"
+            candidate.resolved_by = admin_user_id
+            candidate.resolved_at = datetime.now(timezone.utc)
+
+            # Clear needs_review if no other pending candidates
+            for cid in (candidate.company_a_id, candidate.company_b_id):
+                if cid:
+                    pending = session.query(MergeCandidate).filter(
+                        or_(MergeCandidate.company_a_id == cid, MergeCandidate.company_b_id == cid),
+                        MergeCandidate.status == "pending",
+                        MergeCandidate.id != candidate.id,
+                    ).first()
+                    if not pending:
+                        comp = session.query(Company).filter_by(id=cid).first()
+                        if comp:
+                            comp.needs_review = False
+            session.flush()
+            log_catalog_audit(
+                session=session,
+                actor_user_id=admin_user_id,
+                action="catalog.merge_candidate_dismissed",
+                client_id=None,
+                details={"candidate_id": candidate.id, "action": "dismiss"},
+                is_actor_super_admin=True,
+            )
+            session.commit()
+            return candidate
+
+        elif action == "merge":
+            if not keep_company_id:
+                raise ValueError("keep_company_id is required when action='merge'.")
+            if keep_company_id not in (candidate.company_a_id, candidate.company_b_id):
+                raise ValueError(
+                    f"keep_company_id {keep_company_id} must be one of the candidate companies "
+                    f"({candidate.company_a_id}, {candidate.company_b_id})."
+                )
+
+            survivor_id = keep_company_id
+            loser_id = (
+                candidate.company_b_id
+                if survivor_id == candidate.company_a_id
+                else candidate.company_a_id
+            )
+            if not loser_id:
+                raise ValueError("Cannot merge candidate with null company_b_id.")
+
+            # Advisory lock both companies in ordered fashion
+            lock_ids = sorted([survivor_id, loser_id])
+            for lid in lock_ids:
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext('catalog:company:' || :id))"),
+                    {"id": str(lid)},
+                )
+
+            survivor = session.query(Company).filter_by(id=survivor_id).first()
+            loser = session.query(Company).filter_by(id=loser_id).first()
+            if not survivor or not loser:
+                raise ValueError("One or both companies in merge candidate could not be found.")
+
+            # Re-point loser company to survivor
+            loser.merged_into_id = survivor.id
+
+            # Move identifiers from loser to survivor
+            loser_idents = session.query(CompanyIdentifier).filter_by(company_id=loser.id).all()
+            for l_ident in loser_idents:
+                existing = session.query(CompanyIdentifier).filter_by(
+                    id_type=l_ident.id_type, id_value=l_ident.id_value
+                ).first()
+                if existing and existing.company_id != loser.id:
+                    session.delete(l_ident)
+                else:
+                    l_ident.company_id = survivor.id
+
+            # Keep loser canonical_key as an identifier on survivor
+            if loser.canonical_key and not loser.canonical_key.startswith("needs_review:"):
+                existing_key = session.query(CompanyIdentifier).filter_by(
+                    id_type="key", id_value=loser.canonical_key
+                ).first()
+                if not existing_key:
+                    session.add(CompanyIdentifier(
+                        company_id=survivor.id,
+                        id_type="key",
+                        id_value=loser.canonical_key,
+                    ))
+
+            # Move snapshots
+            # Offset versions on BOTH companies first to avoid unique constraint collision on (company_id, version)
+            session.execute(
+                text("UPDATE platform_catalog.snapshots SET version = -(id + 1000000) WHERE company_id IN (:sid, :lid)"),
+                {"sid": survivor.id, "lid": loser.id},
+            )
+            session.execute(
+                text("UPDATE platform_catalog.snapshots SET company_id = :sid WHERE company_id = :lid"),
+                {"sid": survivor.id, "lid": loser.id},
+            )
+
+            # Renumber versions monotonically by COALESCE(source_extracted_at, taken_at)
+            session.execute(
+                text("""
+                    WITH ordered AS (
+                        SELECT id, ROW_NUMBER() OVER (
+                            ORDER BY COALESCE(source_extracted_at, taken_at) ASC, id ASC
+                        ) as rn
+                        FROM platform_catalog.snapshots
+                        WHERE company_id = :cid
+                    )
+                    UPDATE platform_catalog.snapshots s
+                    SET version = o.rn
+                    FROM ordered o
+                    WHERE s.id = o.id
+                """),
+                {"cid": survivor.id},
+            )
+
+            candidate.status = "merged"
+            candidate.resolved_by = admin_user_id
+            candidate.resolved_at = datetime.now(timezone.utc)
+
+            # Clear needs_review if no remaining pending candidates
+            for cid, comp in [(survivor.id, survivor), (loser.id, loser)]:
+                pending = session.query(MergeCandidate).filter(
+                    or_(MergeCandidate.company_a_id == cid, MergeCandidate.company_b_id == cid),
+                    MergeCandidate.status == "pending",
+                    MergeCandidate.id != candidate.id,
+                ).first()
+                if not pending:
+                    comp.needs_review = False
+
+            session.flush()
+
+            log_catalog_audit(
+                session=session,
+                actor_user_id=admin_user_id,
+                action="catalog.companies_merged",
+                client_id=None,
+                details={
+                    "candidate_id": candidate.id,
+                    "survivor_company_id": survivor.id,
+                    "loser_company_id": loser.id,
+                    "action": "merge",
+                },
+                is_actor_super_admin=True,
+            )
+            session.commit()
+            return candidate
+        else:
+            raise ValueError(f"Unknown merge candidate action: '{action}'")

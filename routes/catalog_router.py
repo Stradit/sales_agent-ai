@@ -688,3 +688,43 @@ def rollback_share_event(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise _handle_unexpected_exception("Rollback", e, ctx.correlation_id)
+
+
+class ResolveMergeCandidateRequest(BaseModel):
+    action: str  # "merge" | "dismiss"
+    keep_company_id: Optional[int] = None
+
+
+@catalog_router.post("/merge-candidates/{candidate_id}/resolve")
+def resolve_merge_candidate(
+    candidate_id: int,
+    request: ResolveMergeCandidateRequest,
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:assign")),
+    session: Session = Depends(get_platform_db),
+):
+    """Super-admin resolution of duplicate company merge candidates."""
+    try:
+        candidate = CatalogService.resolve_merge_candidate(
+            session=session,
+            candidate_id=candidate_id,
+            action=request.action,
+            keep_company_id=request.keep_company_id,
+            admin_user_id=ctx.user_id,
+        )
+        return {
+            "success": True,
+            "candidate_id": candidate.id,
+            "status": candidate.status,
+            "resolved_at": candidate.resolved_at.isoformat() if candidate.resolved_at else None,
+        }
+    except ValueError as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+    except Exception as e:
+        session.rollback()
+        raise _handle_unexpected_exception("ResolveMergeCandidate", e, ctx.correlation_id)
+

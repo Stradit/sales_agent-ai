@@ -32,6 +32,9 @@ CATALOG_ACTIONS = {
     "catalog.rollback",
     "catalog.rollback_blocked",
     "catalog.consume_bypassed_by_admin",
+    "catalog.identifier_ambiguous",
+    "catalog.companies_merged",
+    "catalog.merge_candidate_dismissed",
 }
 
 FORBIDDEN_DETAIL_KEYS = {
