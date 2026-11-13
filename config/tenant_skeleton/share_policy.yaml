@@ -109,7 +109,6 @@ tables:
     - api_credits_used
     - id
     - is_manually_verified
-    - local_edited_at
     - manually_verified_at
     - osint_feed_manifest
     - owner_user_id

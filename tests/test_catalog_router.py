@@ -820,6 +820,8 @@ def test_failure_handling_and_atomic_credits(setup_catalog_router_environment, m
 
         # 3. Approval failure handling:
         cb.reuse_requires_approval = True
+        session.execute(text("DELETE FROM platform_catalog.snapshots WHERE company_id = (SELECT company_id FROM platform_catalog.snapshots WHERE id = :sid) AND id != :sid"), {"sid": env["snapshot_id"]})
+        session.execute(text("UPDATE platform_catalog.snapshots SET status = 'ready' WHERE id = :sid"), {"sid": env["snapshot_id"]})
         session.commit()
 
         preview_tok3 = AccountReuseService.generate_preview_token(env["snapshot_id"], CLIENT_B_SLUG, env["admin_b_id"])

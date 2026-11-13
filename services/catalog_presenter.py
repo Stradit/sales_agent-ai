@@ -360,6 +360,7 @@ def build_request_view(
             account_id = accts[0]
 
     view = {
+        "ok": True,
         "request_id": getattr(event, "id", None),
         "status": getattr(event, "status", "pending_approval"),
         "created_at": created_at_str,
