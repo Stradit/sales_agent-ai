@@ -48,6 +48,7 @@ from db.models.platform_catalog import (
 from db.tenant import schema_for, validate_slug
 from services.catalog_audit import log_catalog_audit
 from services.catalog_pricing import CatalogPricing
+from services.account_matcher import AccountMatcher, ExistingAccount
 from services.catalog_service import CatalogService, get_share_policy
 from services.credit_service import (
     AccountQuotaExceededError,
@@ -286,25 +287,14 @@ class AccountReuseService:
         if not snapshot:
             return None
 
-        # Check if target client already has this account
-        target_schema = ctx.schema
-        clean_slug = ctx.client_slug
-        already_exists = False
-        existing_acct = session.execute(
-            text(f"""
-                SELECT id, key FROM "{target_schema}"."accounts"
-                WHERE domain = :dom OR key = :k OR sec_cik = :cik
-                LIMIT 1
-            """),
-            {
-                "dom": CatalogService.normalize_domain(identifier) or "",
-                "k": company.canonical_key.split(":", 1)[-1],
-                "cik": CatalogService.normalize_cik(identifier) or "",
-            },
-        ).fetchone()
-
-        if existing_acct:
-            already_exists = True
+        # Check if target client already has this account via unified AccountMatcher (B8)
+        existing = AccountMatcher.find_existing(session, ctx, company)
+        already_exists = existing is not None
+        existing_account_id = existing.account_id if existing else None
+        refresh_available = False
+        if existing and existing.origin_type == "catalog" and existing.snapshot_version is not None:
+            if existing.snapshot_version < snapshot.version:
+                refresh_available = True
 
         # Freshness calculation
         now = datetime.now(timezone.utc)
@@ -332,6 +322,8 @@ class AccountReuseService:
         return {
             "available": True,
             "already_exists": already_exists,
+            "existing_account_id": existing_account_id,
+            "refresh_available": refresh_available,
             "canonical_key": company.canonical_key,
             "display_name": company.display_name,
             "snapshot_id": snapshot.id,
@@ -555,25 +547,13 @@ class AccountReuseService:
             max_accounts=target_client.max_accounts,
         )
 
-        # 5. Check for duplicate account in target tenant
+        # 5. Check for duplicate account in target tenant using unified AccountMatcher (B8)
         account_payload = blob.payload.get("account", {})
-        acct_domain = account_payload.get("domain") or account_payload.get("primary_domain")
-        acct_key = account_payload.get("key")
-        acct_cik = account_payload.get("sec_cik")
-
-        dup_check = session.execute(
-            text(f"""
-                SELECT id FROM "{target_schema}"."accounts"
-                WHERE (domain = :dom AND :dom != '')
-                   OR (key = :k AND :k != '')
-                   OR (sec_cik = :cik AND :cik IS NOT NULL AND :cik != '')
-                LIMIT 1
-            """),
-            {"dom": acct_domain or "", "k": acct_key or "", "cik": acct_cik or ""},
-        ).fetchone()
-
-        if dup_check:
-            raise DuplicateAccountError(f"Account '{acct_key or acct_domain}' already exists in tenant workspace.")
+        existing = AccountMatcher.find_existing(session, ctx, company or account_payload)
+        if existing:
+            raise DuplicateAccountError(
+                f"Account '{existing.display_name or existing.key}' (ID: {existing.account_id}) already exists in tenant workspace."
+            )
 
         # S-13: Skeleton version compatibility check before any writes or reservations
         target_skeleton_version = getattr(target_client, "skeleton_version", None) or "T0002"
@@ -686,15 +666,15 @@ class AccountReuseService:
             clean_acct["api_credits_total"] = 0
             clean_acct["api_credits_used"] = 0
     
-            # Ensure unique target key
-            target_acct_key = clean_acct.get("key") or f"acct_{int(datetime.now().timestamp())}"
-            key_exists = session.execute(
-                text(f'SELECT 1 FROM "{target_schema}"."accounts" WHERE key = :k'),
-                {"k": target_acct_key},
-            ).scalar()
-            if key_exists:
-                target_acct_key = f"{target_acct_key}_{target_client.id}"
-                clean_acct["key"] = target_acct_key
+            # Ensure unique target key via AccountMatcher collision resolver (B8)
+            desired_acct_key = clean_acct.get("key") or f"acct_{int(datetime.now().timestamp())}"
+            target_acct_key = AccountMatcher.resolve_key_collision(
+                session=session,
+                target_schema=target_schema,
+                desired_key=desired_acct_key,
+                canonical_key=canonical_key,
+            )
+            clean_acct["key"] = target_acct_key
     
             acct_kinds = get_column_kinds(session, target_schema, "accounts")
             new_account_id = _insert_row(
