@@ -8,10 +8,13 @@ Manages the platform intelligence catalog (platform_catalog schema):
 5. Zero-Knowledge Source Anonymity (source tenant details stay platform-internal).
 """
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger("catalog_service")
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
@@ -33,6 +36,15 @@ from db.models.platform_catalog import (
 )
 from db.tenant import schema_for, validate_slug
 from services.catalog_audit import log_catalog_audit
+from services.share_policy_enforcer import (
+    compute_policy_hash,
+    get_manifest_skeleton_version,
+    get_table_columns_in_db,
+    sanitize_contact_email,
+    sanitize_phone_number,
+    scrub_json_pii,
+    scrub_record_json_fields,
+)
 
 SHARE_POLICY_PATH = Path(__file__).resolve().parent.parent / "config" / "tenant_skeleton" / "share_policy.yaml"
 
@@ -419,9 +431,26 @@ class CatalogService:
         schema = schema_for(clean_slug)
         policy = get_share_policy()
         tables_policy = policy.get("tables", {})
+        rules = policy.get("rules", {})
+        posts_max_age_days = int(rules.get("posts_max_age_days", 90))
+        posts_max_rows = int(rules.get("posts_max_rows", 100))
+        cxo_max_age_days = int(rules.get("cxo_max_age_days", 180))
+        jobs_max_age_days = int(rules.get("jobs_max_age_days", 90))
+
+        def _get_copy_columns_and_log_unapproved(table_name: str, primary_foreign_keys: Set[str]) -> List[str]:
+            db_cols = get_table_columns_in_db(session, schema, table_name)
+            allowed_cols = tables_policy.get(table_name, {}).get("copy", [])
+            allowed_set = set(allowed_cols)
+            for col in db_cols:
+                if col not in allowed_set and col not in primary_foreign_keys:
+                    logger.warning(
+                        "Share policy deny-by-default: dropped unapproved column '%s' from table '%s' in schema '%s'",
+                        col, table_name, schema,
+                    )
+            return [c for c in allowed_cols if c in db_cols]
 
         # 1. Accounts
-        acc_cols = tables_policy.get("accounts", {}).get("copy", [])
+        acc_cols = _get_copy_columns_and_log_unapproved("accounts", {"id"})
         if not acc_cols:
             raise ValueError("Share policy has no copy columns defined for accounts")
 
@@ -438,102 +467,143 @@ class CatalogService:
         account_dict = dict(zip(col_names, acc_row))
         account_key = account_dict.get("key")
 
+        # Sanitize contact fields (B6.5)
+        account_dict["contact_email"] = sanitize_contact_email(
+            account_dict.get("contact_email"),
+            account_dict.get("domain") or account_dict.get("primary_domain"),
+        )
+        account_dict["phone_number"] = sanitize_phone_number(
+            account_dict.get("phone_number")
+        )
+
         # 2. LOBs
-        lob_cols = tables_policy.get("lobs", {}).get("copy", [])
-        lob_cols_sql = ", ".join(f'"{c}"' for c in lob_cols)
-        lob_rows = session.execute(
-            text(f'SELECT id, account_id, {lob_cols_sql} FROM "{schema}"."lobs" WHERE account_id = :aid ORDER BY id'),
-            {"aid": account_id},
-        ).fetchall()
-        lob_col_names = ["_old_id", "_old_account_id"] + lob_cols
-        lobs_list = [dict(zip(lob_col_names, r)) for r in lob_rows]
-        old_lob_ids = [l["_old_id"] for l in lobs_list]
+        lob_cols = _get_copy_columns_and_log_unapproved("lobs", {"id", "account_id"})
+        lobs_list = []
+        old_lob_ids = []
+        if lob_cols:
+            lob_cols_sql = ", ".join(f'"{c}"' for c in lob_cols)
+            lob_rows = session.execute(
+                text(f'SELECT id, account_id, {lob_cols_sql} FROM "{schema}"."lobs" WHERE account_id = :aid ORDER BY id'),
+                {"aid": account_id},
+            ).fetchall()
+            lob_col_names = ["_old_id", "_old_account_id"] + lob_cols
+            lobs_list = [dict(zip(lob_col_names, r)) for r in lob_rows]
+            old_lob_ids = [l["_old_id"] for l in lobs_list]
 
         # 3. Sub-LOBs (no account_id column; linked via lob_id)
         sub_lobs_list = []
         if old_lob_ids:
-            sub_cols = tables_policy.get("sub_lobs", {}).get("copy", [])
-            sub_cols_sql = ", ".join(f'"{c}"' for c in sub_cols)
-            sub_rows = session.execute(
-                text(f'SELECT id, lob_id, {sub_cols_sql} FROM "{schema}"."sub_lobs" WHERE lob_id = ANY(:lids) ORDER BY id'),
-                {"lids": old_lob_ids},
-            ).fetchall()
-            sub_col_names = ["_old_id", "lob_id"] + sub_cols
-            sub_lobs_list = [dict(zip(sub_col_names, r)) for r in sub_rows]
+            sub_cols = _get_copy_columns_and_log_unapproved("sub_lobs", {"id", "lob_id"})
+            if sub_cols:
+                sub_cols_sql = ", ".join(f'"{c}"' for c in sub_cols)
+                sub_rows = session.execute(
+                    text(f'SELECT id, lob_id, {sub_cols_sql} FROM "{schema}"."sub_lobs" WHERE lob_id = ANY(:lids) ORDER BY id'),
+                    {"lids": old_lob_ids},
+                ).fetchall()
+                sub_col_names = ["_old_id", "lob_id"] + sub_cols
+                sub_lobs_list = [dict(zip(sub_col_names, r)) for r in sub_rows]
 
         # 4. Personas (filter out sensitive, omit regenerate)
-        per_cols = tables_policy.get("personas", {}).get("copy", [])
-        per_cols_sql = ", ".join(f'"{c}"' for c in per_cols)
-        per_rows = session.execute(
-            text(f'SELECT id, account_id, lob_id, {per_cols_sql} FROM "{schema}"."personas" WHERE account_id = :aid ORDER BY id'),
-            {"aid": account_id},
-        ).fetchall()
-        per_col_names = ["_old_id", "_old_account_id", "_old_lob_id"] + per_cols
-        personas_list = [dict(zip(per_col_names, r)) for r in per_rows]
+        per_cols = _get_copy_columns_and_log_unapproved("personas", {"id", "account_id", "lob_id"})
+        personas_list = []
+        if per_cols:
+            per_cols_sql = ", ".join(f'"{c}"' for c in per_cols)
+            per_rows = session.execute(
+                text(f'SELECT id, account_id, lob_id, {per_cols_sql} FROM "{schema}"."personas" WHERE account_id = :aid ORDER BY id'),
+                {"aid": account_id},
+            ).fetchall()
+            per_col_names = ["_old_id", "_old_account_id", "_old_lob_id"] + per_cols
+            personas_list = [dict(zip(per_col_names, r)) for r in per_rows]
 
-        # 5. Social Posts (bounded by policy rules: max 90 days, max 100 rows)
+        # 5. Social Posts (bounded by policy rules: max age days, max rows)
         posts_list = []
         if account_key:
-            post_cols = tables_policy.get("posts", {}).get("copy", [])
-            post_cols_sql = ", ".join(f'"{c}"' for c in post_cols)
-            post_rows = session.execute(
-                text(f"""
-                    SELECT id, {post_cols_sql} FROM "{schema}"."posts"
-                    WHERE target_key = :k
-                    ORDER BY published_at DESC NULLS LAST
-                    LIMIT 100
-                """),
-                {"k": account_key},
-            ).fetchall()
-            post_col_names = ["_old_id"] + post_cols
-            posts_list = [dict(zip(post_col_names, r)) for r in post_rows]
+            post_cols = _get_copy_columns_and_log_unapproved("posts", {"id", "target_key"})
+            if post_cols:
+                post_cols_sql = ", ".join(f'"{c}"' for c in post_cols)
+                posts_cutoff = datetime.now(timezone.utc) - timedelta(days=posts_max_age_days)
+                cutoff_str = posts_cutoff.strftime("%Y-%m-%d")
+                post_rows = session.execute(
+                    text(f"""
+                        SELECT id, {post_cols_sql} FROM "{schema}"."posts"
+                        WHERE target_key = :k
+                          AND (published_at >= :cutoff OR published_at IS NULL)
+                        ORDER BY published_at DESC NULLS LAST
+                        LIMIT :max_rows
+                    """),
+                    {"k": account_key, "cutoff": cutoff_str, "max_rows": posts_max_rows},
+                ).fetchall()
+                post_col_names = ["_old_id"] + post_cols
+                posts_list = [dict(zip(post_col_names, r)) for r in post_rows]
 
-        # 6. CXO Movements
+        # 6. CXO Movements (bounded by max age days)
         cxo_list = []
         if account_key:
-            cxo_cols = tables_policy.get("cxo_movements", {}).get("copy", [])
-            cxo_cols_sql = ", ".join(f'"{c}"' for c in cxo_cols)
-            cxo_rows = session.execute(
-                text(f'SELECT id, {cxo_cols_sql} FROM "{schema}"."cxo_movements" WHERE target_key = :k ORDER BY id'),
-                {"k": account_key},
-            ).fetchall()
-            cxo_col_names = ["_old_id"] + cxo_cols
-            cxo_list = [dict(zip(cxo_col_names, r)) for r in cxo_rows]
+            cxo_cols = _get_copy_columns_and_log_unapproved("cxo_movements", {"id", "target_key"})
+            if cxo_cols:
+                cxo_cols_sql = ", ".join(f'"{c}"' for c in cxo_cols)
+                cxo_cutoff = datetime.now(timezone.utc) - timedelta(days=cxo_max_age_days)
+                cxo_cutoff_str = cxo_cutoff.strftime("%Y-%m-%d")
+                cxo_rows = session.execute(
+                    text(f"""
+                        SELECT id, {cxo_cols_sql} FROM "{schema}"."cxo_movements"
+                        WHERE target_key = :k
+                          AND (
+                            (effective_date >= :cutoff OR effective_date IS NULL)
+                            OR (published_at >= :cutoff OR published_at IS NULL)
+                          )
+                        ORDER BY id
+                    """),
+                    {"k": account_key, "cutoff": cxo_cutoff_str},
+                ).fetchall()
+                cxo_col_names = ["_old_id"] + cxo_cols
+                cxo_list = [dict(zip(cxo_col_names, r)) for r in cxo_rows]
 
-        # 7. LinkedIn Jobs
+        # 7. LinkedIn Jobs (bounded by max age days)
         jobs_list = []
         if account_key:
-            job_cols = tables_policy.get("linkedin_jobs", {}).get("copy", [])
-            job_cols_sql = ", ".join(f'"{c}"' for c in job_cols)
-            job_rows = session.execute(
-                text(f'SELECT id, {job_cols_sql} FROM "{schema}"."linkedin_jobs" WHERE target_key = :k ORDER BY id'),
-                {"k": account_key},
-            ).fetchall()
-            job_col_names = ["_old_id"] + job_cols
-            jobs_list = [dict(zip(job_col_names, r)) for r in job_rows]
+            job_cols = _get_copy_columns_and_log_unapproved("linkedin_jobs", {"id", "target_key"})
+            if job_cols:
+                job_cols_sql = ", ".join(f'"{c}"' for c in job_cols)
+                jobs_cutoff = datetime.now(timezone.utc) - timedelta(days=jobs_max_age_days)
+                jobs_cutoff_str = jobs_cutoff.strftime("%Y-%m-%d")
+                job_rows = session.execute(
+                    text(f"""
+                        SELECT id, {job_cols_sql} FROM "{schema}"."linkedin_jobs"
+                        WHERE target_key = :k
+                          AND (posted_date >= :cutoff OR posted_date IS NULL)
+                        ORDER BY id
+                    """),
+                    {"k": account_key, "cutoff": jobs_cutoff_str},
+                ).fetchall()
+                job_col_names = ["_old_id"] + job_cols
+                jobs_list = [dict(zip(job_col_names, r)) for r in job_rows]
 
         # 8. Targets registration
         target_dict = None
         if account_key:
-            tgt_cols = tables_policy.get("targets", {}).get("copy", [])
-            tgt_cols_sql = ", ".join(f'"{c}"' for c in tgt_cols)
-            tgt_row = session.execute(
-                text(f'SELECT {tgt_cols_sql} FROM "{schema}"."targets" WHERE key = :k'),
-                {"k": account_key},
-            ).fetchone()
-            if tgt_row:
-                target_dict = dict(zip(tgt_cols, tgt_row))
+            tgt_cols = _get_copy_columns_and_log_unapproved("targets", {"key"})
+            if tgt_cols:
+                tgt_cols_sql = ", ".join(f'"{c}"' for c in tgt_cols)
+                tgt_row = session.execute(
+                    text(f'SELECT {tgt_cols_sql} FROM "{schema}"."targets" WHERE key = :k'),
+                    {"k": account_key},
+                ).fetchone()
+                if tgt_row:
+                    target_dict = dict(zip(tgt_cols, tgt_row))
 
-        return _json_safe({
-            "account": account_dict,
-            "lobs": lobs_list,
-            "sub_lobs": sub_lobs_list,
-            "personas": personas_list,
-            "posts": posts_list,
-            "cxo_movements": cxo_list,
-            "linkedin_jobs": jobs_list,
-            "targets": target_dict,
-        })
+        # S-12: Recursively scrub JSON/JSONB fields across records
+        sanitized_payload = {
+            "account": scrub_record_json_fields(account_dict),
+            "lobs": [scrub_record_json_fields(r) for r in lobs_list],
+            "sub_lobs": [scrub_record_json_fields(r) for r in sub_lobs_list],
+            "personas": [scrub_record_json_fields(r) for r in personas_list],
+            "posts": [scrub_record_json_fields(r) for r in posts_list],
+            "cxo_movements": [scrub_record_json_fields(r) for r in cxo_list],
+            "linkedin_jobs": [scrub_record_json_fields(r) for r in jobs_list],
+            "targets": scrub_record_json_fields(target_dict) if target_dict else None,
+        }
+        return _json_safe(sanitized_payload)
 
     # ── Platform Publishing ───────────────────────────────────────────────────
 
@@ -821,8 +891,9 @@ class CatalogService:
                     status=status,
                     source_client_id=client.id,
                     source_account_id=account_id,
-                    policy_version="1.0.0",
-                    skeleton_version="T0002",
+                    policy_version=str(get_share_policy().get("policy_version", "1.0.0")),
+                    skeleton_version=get_manifest_skeleton_version(),
+                    policy_hash=compute_policy_hash(),
                     quality_score=quality_score,
                     quality_grade=quality_grade,
                     source_extracted_at=account.get("extracted_at") or datetime.now(timezone.utc),
