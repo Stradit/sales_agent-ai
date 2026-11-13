@@ -45,7 +45,7 @@ from services.account_reuse_service import (
     RollbackBlockedError,
 )
 from services.catalog_audit import log_catalog_audit, reuse_check_limiter
-from services.catalog_service import CatalogService
+from services.catalog_service import AmbiguousIdentifierError, CatalogService
 from services.credit_service import AccountQuotaExceededError, InsufficientCreditsError
 
 logger = logging.getLogger(__name__)
@@ -162,6 +162,24 @@ def reuse_check(
         result["preview_token"] = token
         return result
 
+    except AmbiguousIdentifierError as e:
+        logger.warning(f"[reuse_check] Ambiguous identifier '{identifier}': {e}")
+        ident_hash = hashlib.sha256(identifier.strip().lower().encode("utf-8")).hexdigest()
+        log_catalog_audit(
+            session=session,
+            actor_user_id=ctx.user_id,
+            action="catalog.identifier_ambiguous",
+            client_id=ctx.client_id,
+            details={
+                "identifier_hash": ident_hash,
+                "target_client_slug": ctx.client_slug,
+                "target_client_id": ctx.client_id,
+                "correlation_id": ctx.correlation_id,
+            },
+            is_actor_super_admin=ctx.is_super_admin,
+        )
+        session.commit()
+        return {"available": False}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

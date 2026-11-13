@@ -36,6 +36,26 @@ SHARE_POLICY_PATH = Path(__file__).resolve().parent.parent / "config" / "tenant_
 _CACHED_SHARE_POLICY: Optional[Dict[str, Any]] = None
 
 
+class AmbiguousIdentifierError(ValueError):
+    """Raised when an identifier matches more than one canonical company."""
+    def __init__(self, message: str, candidate_company_ids: Optional[List[int]] = None):
+        super().__init__(message)
+        self.candidate_company_ids = candidate_company_ids or []
+
+
+class CanonicalResolution(tuple):
+    canonical_key: str
+    identifiers: List[Tuple[str, str]]
+    weak: bool
+
+    def __new__(cls, canonical_key: str, identifiers: List[Tuple[str, str]], weak: bool = False):
+        obj = super().__new__(cls, (canonical_key, identifiers))
+        obj.canonical_key = canonical_key
+        obj.identifiers = identifiers
+        obj.weak = weak
+        return obj
+
+
 def get_share_policy() -> Dict[str, Any]:
     """Loads and caches share_policy.yaml."""
     global _CACHED_SHARE_POLICY
@@ -63,43 +83,111 @@ class CatalogService:
     # ── Normalization & Entity Resolution ─────────────────────────────────────
 
     @classmethod
+    def classify_identifier(cls, raw: Any) -> Tuple[str, str]:
+        """Classifies raw identifier string into (kind, normalized_value).
+        
+        Kinds:
+        - "canonical_key": starts with cik:, lei:, dom:, or key:
+        - "cik": 1-10 digits (rejects all zeros or >10 digits), optional cik: prefix
+        - "lei": exactly 20 alphanum characters with >=1 digit and >=1 letter
+        - "domain": host with public-suffix style TLD (never strips subdomains other than www.)
+        - "unknown": everything else
+        """
+        if not raw or not isinstance(raw, str):
+            return ("unknown", "")
+        s = raw.strip()
+        if not s:
+            return ("unknown", "")
+
+        # 1. Canonical key prefix
+        for prefix in ("cik:", "lei:", "dom:", "key:"):
+            if s.lower().startswith(prefix):
+                return ("canonical_key", s)
+
+        # 2. CIK
+        cik = cls.normalize_cik(s)
+        if cik:
+            return ("cik", cik)
+
+        # 3. LEI
+        lei = cls.normalize_lei(s)
+        if lei:
+            return ("lei", lei)
+
+        # 4. Domain
+        dom = cls.normalize_domain(s)
+        if dom:
+            return ("domain", dom)
+
+        return ("unknown", s)
+
+    @classmethod
     def normalize_domain(cls, val: Optional[str]) -> Optional[str]:
-        """Extracts lowercase registrable domain (e.g. 'blackrock.com')."""
+        """Extracts lowercase domain or subdomain host (e.g. 'blackrock.com', 'us.fidelity.com').
+        
+        Decision:
+        - Never strips subdomains other than 'www.' (e.g. 'us.fidelity.com' stays 'us.fidelity.com').
+          Stripping non-www subdomains causes false merges between different business units/divisions.
+        - Strips scheme, path, query, and port.
+        - Encodes via IDNA for internationalized domain names.
+        - Rejects pure IP addresses.
+        """
         if not val or not isinstance(val, str):
             return None
         raw = val.strip().lower()
+        if not raw:
+            return None
         if "://" not in raw:
             raw = "https://" + raw
         try:
             parsed = urlparse(raw)
             host = parsed.netloc or parsed.path
-            host = host.split(":")[0]  # strip port
+            host = host.split(":")[0].strip()
             if host.startswith("www."):
                 host = host[4:]
-            return host.strip() if "." in host else None
+            if not host:
+                return None
+            if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", host):
+                return None
+            try:
+                host = host.encode("idna").decode("ascii")
+            except Exception:
+                pass
+            if re.match(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$", host):
+                tld = host.split(".")[-1]
+                if len(tld) >= 2 and not tld.isdigit():
+                    return host
+            return None
         except Exception:
             return None
 
     @classmethod
     def normalize_cik(cls, val: Any) -> Optional[str]:
-        """Zero-pads SEC CIK to 10 digits (e.g. '0001364742')."""
-        if val is None:
+        """Zero-pads SEC CIK to 10 digits (rejects values longer than 10 digits or all zeros)."""
+        if val is None or not isinstance(val, (str, int)):
             return None
-        s = re.sub(r"\D", "", str(val).strip())
-        if not s:
+        s = str(val).strip()
+        m = re.match(r"^(?:cik[:\s-]*)?(\d{1,10})$", s, re.IGNORECASE)
+        if not m:
             return None
-        return s.zfill(10)
+        digits = m.group(1)
+        if not any(c != "0" for c in digits):
+            return None
+        return digits.zfill(10)
 
     @classmethod
     def normalize_lei(cls, val: Any) -> Optional[str]:
-        """Normalizes Legal Entity Identifier (20-character uppercase alphanumeric)."""
-        if val is None:
+        """Normalizes Legal Entity Identifier (exactly 20-character uppercase alphanumeric with >=1 letter and >=1 digit)."""
+        if val is None or not isinstance(val, str):
             return None
-        s = re.sub(r"[^A-Za-z0-9]", "", str(val).strip()).upper()
-        return s if len(s) == 20 else None
+        s = val.strip()
+        if len(s) == 20 and re.match(r"^[A-Za-z0-9]{20}$", s):
+            if re.search(r"\d", s) and re.search(r"[A-Za-z]", s):
+                return s.upper()
+        return None
 
     @classmethod
-    def resolve_canonical_key(cls, account_data: Dict[str, Any]) -> Tuple[str, List[Tuple[str, str]]]:
+    def resolve_canonical_key(cls, account_data: Dict[str, Any]) -> CanonicalResolution:
         """Resolves the canonical primary key and all alternate global identifiers.
         
         Priority hierarchy:
@@ -107,8 +195,10 @@ class CatalogService:
         2. LEI:      lei:549300V5XZ12H6G20E62
         3. Domain:   dom:blackrock.com
         
-        Returns:
-            (primary_canonical_key, [(id_type, id_value), ...])
+        Weak Fallback:
+        When no strong global identifier exists, returns:
+        CanonicalResolution("key:<tenant-neutral hash>", [("key", hash)], weak=True)
+        where hash = sha256(normalized legal_name + country)[:16].
         """
         identifiers: List[Tuple[str, str]] = []
 
@@ -135,22 +225,25 @@ class CatalogService:
             identifiers.append(("domain", norm_dom))
 
         if not identifiers:
-            # Fallback to key if no standard global identifier exists
-            fallback_key = account_data.get("key") or "unknown"
-            return f"key:{fallback_key}", [("key", fallback_key)]
+            # S-6: Weak company resolution with tenant-neutral hash
+            name = (account_data.get("legal_name") or account_data.get("display_name") or "unknown").strip().lower()
+            country = (account_data.get("country") or "").strip().lower()
+            neutral_hash = hashlib.sha256(f"{name}|{country}".encode("utf-8")).hexdigest()[:16]
+            canonical_key = f"key:{neutral_hash}"
+            return CanonicalResolution(canonical_key, [("key", neutral_hash)], weak=True)
 
         # Determine primary canonical key following the strict hierarchy
         for id_type, id_val in identifiers:
             if id_type == "cik":
-                return f"cik:{id_val}", identifiers
+                return CanonicalResolution(f"cik:{id_val}", identifiers, weak=False)
         for id_type, id_val in identifiers:
             if id_type == "lei":
-                return f"lei:{id_val}", identifiers
+                return CanonicalResolution(f"lei:{id_val}", identifiers, weak=False)
         for id_type, id_val in identifiers:
             if id_type == "domain":
-                return f"dom:{id_val}", identifiers
+                return CanonicalResolution(f"dom:{id_val}", identifiers, weak=False)
 
-        return f"{identifiers[0][0]}:{identifiers[0][1]}", identifiers
+        return CanonicalResolution(f"{identifiers[0][0]}:{identifiers[0][1]}", identifiers, weak=False)
 
     # ── Quality Gate Rubric ───────────────────────────────────────────────────
 
@@ -416,7 +509,10 @@ class CatalogService:
         jobs = payload["linkedin_jobs"]
 
         # 2. Entity resolution
-        canonical_key, identifiers = cls.resolve_canonical_key(account)
+        resolution = cls.resolve_canonical_key(account)
+        canonical_key = resolution.canonical_key
+        identifiers = resolution.identifiers
+        is_weak = resolution.weak
 
         # 3. Find or create canonical Company in platform_catalog
         company = session.query(Company).filter_by(canonical_key=canonical_key).first()
@@ -470,7 +566,7 @@ class CatalogService:
             jobs=jobs,
         )
 
-        status = "ready" if (quality_score >= 80.0 or force) else "quarantined"
+        status = "ready" if ((quality_score >= 80.0 and not is_weak) or force) else "quarantined"
 
         # 6. Version calculation
         max_ver = session.query(func.max(Snapshot.version)).filter_by(company_id=company.id).scalar() or 0
@@ -552,34 +648,38 @@ class CatalogService:
 
     @classmethod
     def get_company_by_identifier(cls, session: Session, identifier: str) -> Optional[Company]:
-        """Resolves a company by any global identifier or canonical key."""
+        """Resolves a company by querying ONLY the classified identifier type.
+        
+        If multiple companies match, raises AmbiguousIdentifierError.
+        """
         if not identifier:
             return None
-        raw = identifier.strip()
+        kind, val = cls.classify_identifier(identifier)
+        if kind == "unknown" or not val:
+            return None
 
-        # Direct canonical key match
-        company = session.query(Company).filter_by(canonical_key=raw).first()
-        if company:
-            return company
+        if kind == "canonical_key":
+            companies = session.query(Company).filter_by(canonical_key=val).all()
+        else:
+            companies = (
+                session.query(Company)
+                .join(CompanyIdentifier, CompanyIdentifier.company_id == Company.id)
+                .filter(
+                    CompanyIdentifier.id_type == kind,
+                    CompanyIdentifier.id_value == val,
+                )
+                .distinct()
+                .all()
+            )
 
-        # Identifier search
-        norm_dom = cls.normalize_domain(raw)
-        norm_cik = cls.normalize_cik(raw)
-        norm_lei = cls.normalize_lei(raw)
-
-        query = session.query(Company).join(CompanyIdentifier)
-        conds = []
-        if norm_dom:
-            conds.append((CompanyIdentifier.id_type == "domain") & (CompanyIdentifier.id_value == norm_dom))
-        if norm_cik:
-            conds.append((CompanyIdentifier.id_type == "cik") & (CompanyIdentifier.id_value == norm_cik))
-        if norm_lei:
-            conds.append((CompanyIdentifier.id_type == "lei") & (CompanyIdentifier.id_value == norm_lei))
-
-        from sqlalchemy import or_
-        if conds:
-            return query.filter(or_(*conds)).first()
-        return None
+        if not companies:
+            return None
+        if len(companies) > 1:
+            raise AmbiguousIdentifierError(
+                f"Identifier '{identifier}' ({kind}='{val}') matches multiple companies: {[c.id for c in companies]}",
+                candidate_company_ids=[c.id for c in companies],
+            )
+        return companies[0]
 
     @classmethod
     def get_latest_snapshot(cls, session: Session, company_id: int, status: str = "ready") -> Optional[Snapshot]:
