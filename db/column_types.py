@@ -63,6 +63,24 @@ def get_real_columns(session: Session, schema: str, table: str) -> Set[str]:
     return _REAL_COLUMNS_CACHE.get(key, set())
 
 
+def get_table_required_columns(session: Session, schema: str, table: str) -> Dict[str, dict]:
+    """Returns mapping of required columns (NOT NULL without default) for schema.table."""
+    rows = session.execute(
+        text("""
+            SELECT column_name, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = :s AND table_name = :t
+        """),
+        {"s": schema, "t": table},
+    ).fetchall()
+
+    required = {}
+    for col_name, is_nullable, col_default in rows:
+        if is_nullable == "NO" and col_default is None:
+            required[col_name] = {"is_nullable": is_nullable, "default": col_default}
+    return required
+
+
 def invalidate_column_kinds_cache(schema: Optional[str] = None, table: Optional[str] = None) -> None:
     """Invalidates the column kinds cache.
     

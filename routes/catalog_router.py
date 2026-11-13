@@ -44,6 +44,7 @@ from services.account_reuse_service import (
     DuplicateAccountError,
     IdempotencyConflictError,
     RollbackBlockedError,
+    SkeletonIncompatibleError,
 )
 from services.catalog_audit import log_catalog_audit, reuse_check_limiter
 from services.catalog_pricing import CatalogPricing
@@ -242,6 +243,12 @@ def hydrate_account(
         raise HTTPException(
             status_code=409,
             detail={"error": "idempotency_key_reuse", "message": str(e)},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+    except SkeletonIncompatibleError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "skeleton_incompatible", "message": str(e)},
             headers={"X-Correlation-ID": ctx.correlation_id},
         )
     except DuplicateAccountError as e:
@@ -516,6 +523,12 @@ def assign_account(
         raise HTTPException(status_code=402, detail=str(e))
     except IdempotencyConflictError as e:
         raise HTTPException(status_code=409, detail={"error": "idempotency_key_reuse", "message": str(e)})
+    except SkeletonIncompatibleError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "skeleton_incompatible", "message": str(e)},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
     except DuplicateAccountError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except AccountReuseError as e:
@@ -573,6 +586,12 @@ def approve_reuse_request(
         }
     except InsufficientCreditsError as e:
         raise HTTPException(status_code=402, detail=str(e))
+    except SkeletonIncompatibleError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "skeleton_incompatible", "message": str(e)},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
     except DuplicateAccountError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except AccountQuotaExceededError as e:

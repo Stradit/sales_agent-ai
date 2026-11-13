@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 import auth
 import config
-from db.column_types import get_column_kinds, get_real_columns
+from db.column_types import get_column_kinds, get_real_columns, get_table_required_columns
 from db.models.client import Client
 from db.models.credit_ledger import CreditLedger
 from db.models.user import User
@@ -81,6 +81,11 @@ class DuplicateAccountError(AccountReuseError):
 
 class IdempotencyConflictError(AccountReuseError):
     """Raised when an idempotency key conflict occurs."""
+    pass
+
+
+class SkeletonIncompatibleError(AccountReuseError):
+    """Raised when target tenant schema has required columns that snapshot lacks (S-13)."""
     pass
 
 
@@ -192,6 +197,7 @@ def _filter_payload_for_table(
     table: str,
     payload: dict,
     policy: dict,
+    dropped_tracker: Optional[Dict[str, int]] = None,
 ) -> dict:
     """Intersects payload keys with target table real columns and policy copy list."""
     real_cols = get_real_columns(session, schema, table)
@@ -208,6 +214,9 @@ def _filter_payload_for_table(
         if k.startswith("_") or k in skip_keys:
             continue
         if k not in allowed_keys:
+            if k not in real_cols and dropped_tracker is not None:
+                tracker_key = f"{table}.{k}"
+                dropped_tracker[tracker_key] = dropped_tracker.get(tracker_key, 0) + 1
             logger.warning(
                 "Dropping unknown or disallowed column '%s' for table '%s.%s'",
                 k, schema, table,
@@ -251,13 +260,13 @@ class AccountReuseService:
             norm_a = auth.normalize_client_slug(arg1)
             client_a = session.query(Client).filter_by(slug=norm_a).first() if norm_a else None
             if client_a:
-                ctx = TenantRequestContext.for_client(session, client_a)
+                ctx = TenantRequestContext.for_client(session, client_a, user_role="user", effective_role="client_admin")
                 identifier = arg2
             else:
                 norm_b = auth.normalize_client_slug(arg2)
                 client_b = session.query(Client).filter_by(slug=norm_b).first() if norm_b else None
                 if client_b:
-                    ctx = TenantRequestContext.for_client(session, client_b)
+                    ctx = TenantRequestContext.for_client(session, client_b, user_role="user", effective_role="client_admin")
                     identifier = arg1
                 else:
                     clean_slug = validate_slug(arg2)
@@ -566,6 +575,48 @@ class AccountReuseService:
         if dup_check:
             raise DuplicateAccountError(f"Account '{acct_key or acct_domain}' already exists in tenant workspace.")
 
+        # S-13: Skeleton version compatibility check before any writes or reservations
+        target_skeleton_version = getattr(target_client, "skeleton_version", None) or "T0002"
+        snapshot_skeleton_version = getattr(snapshot, "skeleton_version", None) or "T0002"
+
+        tables_to_check = [
+            ("accounts", [account_payload], {"id", "owner_user_id", "primary_business_line_id", "is_manually_verified", "manually_verified_at", "api_credits_total", "api_credits_used", "created_at", "updated_at"}),
+            ("lobs", blob.payload.get("lobs", []), {"id", "account_id", "is_manually_verified", "manually_verified_at", "created_at", "updated_at"}),
+            ("sub_lobs", blob.payload.get("sub_lobs", []), {"id", "lob_id", "is_manually_verified", "manually_verified_at", "created_at", "updated_at"}),
+            ("personas", blob.payload.get("personas", []), {"id", "account_id", "lob_id", "created_by_user_id", "is_manually_verified", "manually_verified_at", "created_at", "updated_at"}),
+            ("posts", blob.payload.get("posts", []), {"id", "target_key", "new_in_last_run", "created_at", "updated_at"}),
+            ("cxo_movements", blob.payload.get("cxo_movements", []), {"id", "target_key", "new_in_last_run", "created_at", "updated_at"}),
+            ("linkedin_jobs", blob.payload.get("linkedin_jobs", []), {"id", "target_key", "new_in_last_run", "created_at", "updated_at"}),
+        ]
+        if blob.payload.get("targets"):
+            tables_to_check.append(("targets", [blob.payload["targets"]], {"key", "created_at", "updated_at"}))
+
+        missing_not_null_cols = []
+        for tbl, rows_data, injected_cols in tables_to_check:
+            if not rows_data:
+                continue
+            req_cols = get_table_required_columns(session, target_schema, tbl)
+            for req_col in req_cols:
+                if req_col in injected_cols:
+                    continue
+                for r in rows_data:
+                    if r.get(req_col) is None:
+                        missing_not_null_cols.append(f"{tbl}.{req_col}")
+                        break
+
+        if missing_not_null_cols:
+            raise SkeletonIncompatibleError(
+                f"Target tenant requires column(s) without default which snapshot lacks: {', '.join(sorted(set(missing_not_null_cols)))}"
+            )
+
+        if target_skeleton_version > snapshot_skeleton_version:
+            logger.info(
+                "Target client '%s' skeleton version (%s) is newer than snapshot (%s). Using schema defaults for missing columns.",
+                clean_slug, target_skeleton_version, snapshot_skeleton_version,
+            )
+
+        dropped_columns: Dict[str, int] = {}
+
         try:
             # S-8: Compute fee via CatalogPricing if not provided
             if fee_credits is None:
@@ -624,7 +675,9 @@ class AccountReuseService:
             share_policy = get_share_policy()
     
             # 8a. Insert Account
-            clean_acct = _filter_payload_for_table(session, target_schema, "accounts", account_payload, share_policy)
+            clean_acct = _filter_payload_for_table(
+                session, target_schema, "accounts", account_payload, share_policy, dropped_tracker=dropped_columns
+            )
             # Reset tenant-specific CRM/verification flags
             clean_acct["owner_user_id"] = user_id
             clean_acct["primary_business_line_id"] = None
@@ -659,7 +712,9 @@ class AccountReuseService:
             lob_id_map: Dict[int, int] = {}
             for lob_data in blob.payload.get("lobs", []):
                 old_lob_id = lob_data.get("_old_id")
-                clean_lob = _filter_payload_for_table(session, target_schema, "lobs", lob_data, share_policy)
+                clean_lob = _filter_payload_for_table(
+                    session, target_schema, "lobs", lob_data, share_policy, dropped_tracker=dropped_columns
+                )
                 clean_lob["account_id"] = new_account_id
                 clean_lob["is_manually_verified"] = False
                 clean_lob["manually_verified_at"] = None
@@ -684,7 +739,9 @@ class AccountReuseService:
                 if not new_lob_ref:
                     continue
     
-                clean_sub = _filter_payload_for_table(session, target_schema, "sub_lobs", sub_data, share_policy)
+                clean_sub = _filter_payload_for_table(
+                    session, target_schema, "sub_lobs", sub_data, share_policy, dropped_tracker=dropped_columns
+                )
                 clean_sub["lob_id"] = new_lob_ref
                 clean_sub["is_manually_verified"] = False
                 clean_sub["manually_verified_at"] = None
@@ -705,7 +762,9 @@ class AccountReuseService:
             for per_data in blob.payload.get("personas", []):
                 old_per_id = per_data.get("_old_id")
                 old_lob_id = per_data.get("_old_lob_id")
-                clean_per = _filter_payload_for_table(session, target_schema, "personas", per_data, share_policy)
+                clean_per = _filter_payload_for_table(
+                    session, target_schema, "personas", per_data, share_policy, dropped_tracker=dropped_columns
+                )
                 clean_per["account_id"] = new_account_id
                 clean_per["lob_id"] = lob_id_map.get(old_lob_id) if old_lob_id else None
                 clean_per["created_by_user_id"] = user_id
@@ -743,7 +802,9 @@ class AccountReuseService:
             # 8g. Insert Social Posts, CXO movements, Jobs
             post_kinds = get_column_kinds(session, target_schema, "posts")
             for post_data in blob.payload.get("posts", []):
-                clean_post = _filter_payload_for_table(session, target_schema, "posts", post_data, share_policy)
+                clean_post = _filter_payload_for_table(
+                    session, target_schema, "posts", post_data, share_policy, dropped_tracker=dropped_columns
+                )
                 clean_post["target_key"] = target_acct_key
                 clean_post["new_in_last_run"] = False
                 pid = _insert_row(
@@ -760,7 +821,9 @@ class AccountReuseService:
     
             cxo_kinds = get_column_kinds(session, target_schema, "cxo_movements")
             for cxo_data in blob.payload.get("cxo_movements", []):
-                clean_cxo = _filter_payload_for_table(session, target_schema, "cxo_movements", cxo_data, share_policy)
+                clean_cxo = _filter_payload_for_table(
+                    session, target_schema, "cxo_movements", cxo_data, share_policy, dropped_tracker=dropped_columns
+                )
                 clean_cxo["target_key"] = target_acct_key
                 clean_cxo["new_in_last_run"] = False
                 cid = _insert_row(
@@ -777,7 +840,9 @@ class AccountReuseService:
     
             job_kinds = get_column_kinds(session, target_schema, "linkedin_jobs")
             for job_data in blob.payload.get("linkedin_jobs", []):
-                clean_job = _filter_payload_for_table(session, target_schema, "linkedin_jobs", job_data, share_policy)
+                clean_job = _filter_payload_for_table(
+                    session, target_schema, "linkedin_jobs", job_data, share_policy, dropped_tracker=dropped_columns
+                )
                 clean_job["target_key"] = target_acct_key
                 clean_job["new_in_last_run"] = False
                 jid = _insert_row(
@@ -795,7 +860,9 @@ class AccountReuseService:
             # 8h. Register Target for Continuous Monitoring (Spike S2)
             tgt_data = blob.payload.get("targets")
             if tgt_data:
-                clean_tgt = _filter_payload_for_table(session, target_schema, "targets", tgt_data, share_policy)
+                clean_tgt = _filter_payload_for_table(
+                    session, target_schema, "targets", tgt_data, share_policy, dropped_tracker=dropped_columns
+                )
                 clean_tgt["key"] = target_acct_key
                 target_kinds = get_column_kinds(session, target_schema, "targets")
                 _insert_row(
@@ -834,6 +901,7 @@ class AccountReuseService:
                 "posts": len(created_ids["posts"]),
                 "cxo_movements": len(created_ids["cxo_movements"]),
                 "jobs": len(created_ids["linkedin_jobs"]),
+                "dropped_columns": dropped_columns,
             }
             share_event.status = "done"
             share_event.completed_at = datetime.now(timezone.utc)
@@ -880,6 +948,8 @@ class AccountReuseService:
                     "fee_credits": fee_credits,
                     "counts": counts_summary,
                     "reason": reason,
+                    "dropped_columns": dropped_columns,
+                    "skeleton_version": target_skeleton_version,
                 },
                 is_actor_super_admin=is_actor_super,
             )
@@ -914,6 +984,8 @@ class AccountReuseService:
             "counts": counts_summary,
             "fee_credits": fee_credits,
             "mode": mode,
+            "dropped_columns": dropped_columns,
+            "skeleton_version": target_skeleton_version,
         }
 
     # ── 5. Safe Rollback Execution ────────────────────────────────────────────
