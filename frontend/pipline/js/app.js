@@ -4784,11 +4784,262 @@ $(function () {
     }
   });
 
+  // ── Credit Transparency Manager (Phase C C5) ──────────────────────────
+  const CreditTransparencyManager = {
+    _state: {
+      page: 1,
+      pageSize: 50,
+      total: 0,
+      period: "month",
+      type: "",
+      isLoading: false,
+    },
+
+    async load() {
+      await Promise.all([this.loadSummary(), this.loadLedger(1)]);
+    },
+
+    async loadSummary() {
+      const period = $("#creditsPeriodFilter").val() || this._state.period;
+      try {
+        const token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+        const headers = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const activeSlug = (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : null) || (window._currentClientSlug || null);
+        if (activeSlug) headers["X-Client-Slug"] = activeSlug;
+
+        const res = await fetch(`${API_BASE}/api/credits/summary?period=${encodeURIComponent(period)}`, {
+          headers,
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // 1. Available Balance KPI & Bar
+        const bal = data.balance || 0;
+        const total = data.total || 0;
+        const used = data.used || 0;
+        const pctUsed = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+        $("#creditSummaryBalance").text(`${bal.toLocaleString()} cr`);
+        $("#creditSummaryBalanceSub").text(`Allocated: ${total.toLocaleString()} cr • ${pctUsed}% used`);
+        $("#creditSummaryBalanceBar").css("width", `${pctUsed}%`);
+
+        // Low balance banner (e.g. bal < 5000 or bal < 0.1 * total)
+        if (bal < 5000 || (total > 0 && bal / total < 0.1)) {
+          $("#creditsLowBalanceVal").text(bal.toLocaleString());
+          $("#creditsLowBalanceBanner").removeClass("d-none");
+        } else {
+          $("#creditsLowBalanceBanner").addClass("d-none");
+        }
+
+        // 2. Verified Reuse Savings
+        const saved = (data.reuse && data.reuse.estimated_saved) ? data.reuse.estimated_saved : 0;
+        $("#creditSummarySaved").text(`+${saved.toLocaleString()} cr`);
+
+        // 3. Fees Paid
+        const fees = (data.reuse && data.reuse.fees_paid) ? data.reuse.fees_paid : 0;
+        const cnt = (data.reuse && data.reuse.count) ? data.reuse.count : 0;
+        $("#creditSummaryFees").text(`${fees.toLocaleString()} cr`);
+        $("#creditSummaryFeesSub").text(`${cnt} catalog reuse / refresh events`);
+
+        // 4. Net Savings
+        const net = (data.reuse && data.reuse.net_savings !== undefined) ? data.reuse.net_savings : Math.max(0, saved - fees);
+        $("#creditSummaryNet").text(`+${net.toLocaleString()} cr`);
+
+        // 5. Spend by category breakdown
+        const spentByType = data.spent_by_type || [];
+        const refunds = data.refunds || 0;
+        $("#creditsRefundsStat").html(`Refunds / Rollbacks: <strong class="text-success">${refunds.toLocaleString()} cr</strong>`);
+
+        const $catContainer = $("#creditsSpendByTypeContainer");
+        if (spentByType.length === 0) {
+          $catContainer.html('<span class="text-muted" style="font-size:0.78rem;">No billable usage recorded for this period.</span>');
+        } else {
+          let html = "";
+          const badgeColors = {
+            reuse_fee: "bg-primary-subtle text-primary border-primary",
+            refresh_fee: "bg-info-subtle text-info border-info",
+            pipeline_run: "bg-secondary-subtle text-secondary border-secondary",
+            adjustment: "bg-warning-subtle text-warning border-warning",
+            top_up: "bg-success-subtle text-success border-success",
+          };
+          const labels = {
+            reuse_fee: "Catalog Reuse",
+            refresh_fee: "Catalog Refresh",
+            pipeline_run: "Pipeline Enrich",
+            adjustment: "Adjustments",
+            top_up: "Credit Top-up",
+          };
+          spentByType.forEach(item => {
+            const cls = badgeColors[item.type] || "bg-light text-dark";
+            const lbl = labels[item.type] || item.type;
+            html += `
+              <div class="badge ${cls} border py-2 px-3" style="font-size:0.78rem;font-weight:600;border-radius:8px;">
+                <span>${lbl}: <strong>${(item.total_spent || 0).toLocaleString()} cr</strong></span>
+                <span class="ms-1 opacity-75">(${item.count} tx)</span>
+              </div>
+            `;
+          });
+          $catContainer.html(html);
+        }
+      } catch (err) {
+        console.error("Failed to load credit summary:", err);
+      }
+    },
+
+    async loadLedger(page = 1) {
+      this._state.page = page;
+      const type = $("#creditsTypeFilter").val() || "";
+      const $tbody = $("#creditsLedgerTableBody");
+      $tbody.html('<tr><td colspan="8" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading credit transactions...</td></tr>');
+
+      try {
+        const token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+        const headers = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+        const activeSlug = (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : null) || (window._currentClientSlug || null);
+        if (activeSlug) headers["X-Client-Slug"] = activeSlug;
+
+        let url = `${API_BASE}/api/credits/ledger?page=${this._state.page}&page_size=${this._state.pageSize}`;
+        if (type) url += `&type=${encodeURIComponent(type)}`;
+
+        const res = await fetch(url, { headers, credentials: "include" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const items = data.items || [];
+        this._state.total = data.total || 0;
+
+        if (items.length === 0) {
+          $tbody.html('<tr><td colspan="8" class="text-center py-4 text-muted">No credit transactions found for this filter.</td></tr>');
+        } else {
+          let rowsHtml = "";
+          items.forEach(item => {
+            const atFormatted = item.at ? new Date(item.at).toLocaleString() : "--";
+            const deltaVal = item.delta || 0;
+            const deltaClass = deltaVal < 0 ? "text-danger fw-bold" : "text-success fw-bold";
+            const deltaSign = deltaVal > 0 ? `+${deltaVal.toLocaleString()}` : `${deltaVal.toLocaleString()}`;
+            const balAfter = (item.balance_after !== undefined && item.balance_after !== null) ? `${item.balance_after.toLocaleString()} cr` : "--";
+
+            const typeBadges = {
+              reuse_fee: '<span class="badge bg-primary-subtle text-primary border border-primary-subtle">Reuse Fee</span>',
+              refresh_fee: '<span class="badge bg-info-subtle text-info border border-info-subtle">Refresh Fee</span>',
+              pipeline_run: '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Pipeline</span>',
+              refund: '<span class="badge bg-success-subtle text-success border border-success-subtle">Refund</span>',
+              top_up: '<span class="badge bg-success-subtle text-success border border-success-subtle">Top-up</span>',
+              adjustment: '<span class="badge bg-warning-subtle text-warning border border-warning-subtle">Adjustment</span>',
+            };
+            const typeBadge = typeBadges[item.type] || `<span class="badge bg-light text-dark">${esc(item.type)}</span>`;
+            const acctName = item.account ? esc(item.account.name || `Account #${item.account.id}`) : '<span class="text-muted">—</span>';
+            const userName = item.user ? esc(item.user.name) : '<span class="text-muted">—</span>';
+            const desc = esc(item.description || "Credit transaction");
+
+            // Formula detail / savings badge
+            let formulaHtml = '<span class="text-muted">—</span>';
+            if (item.estimated_credits_saved) {
+              const freshEst = item.estimated_credits_saved;
+              const fee = Math.abs(deltaVal);
+              const savedVsFresh = item.saved_vs_fresh !== undefined ? item.saved_vs_fresh : Math.max(0, freshEst - fee);
+              formulaHtml = `
+                <span class="badge bg-success-subtle text-success border border-success-subtle" title="Fresh Fetch: ${freshEst} cr - Fee: ${fee} cr = Saved: ${savedVsFresh} cr">
+                  <i class="bi bi-shield-check me-1"></i>Saved ${savedVsFresh} cr
+                </span>
+              `;
+            } else if (item.ref) {
+              formulaHtml = `<span class="badge bg-light text-muted border">${esc(item.ref)}</span>`;
+            }
+
+            rowsHtml += `
+              <tr>
+                <td style="padding:10px 14px;white-space:nowrap;font-size:0.75rem;color:#64748b;">${esc(atFormatted)}</td>
+                <td style="padding:10px 12px;">${typeBadge}</td>
+                <td style="padding:10px 12px;font-weight:600;color:#1e293b;">${desc}</td>
+                <td style="padding:10px 12px;">${acctName}</td>
+                <td style="padding:10px 12px;">${userName}</td>
+                <td style="padding:10px 12px;text-align:right;" class="${deltaClass}">${deltaSign} cr</td>
+                <td style="padding:10px 12px;text-align:right;font-weight:600;color:#334155;">${balAfter}</td>
+                <td style="padding:10px 14px;text-align:center;">${formulaHtml}</td>
+              </tr>
+            `;
+          });
+          $tbody.html(rowsHtml);
+        }
+
+        // Pagination controls
+        const startIdx = this._state.total > 0 ? (this._state.page - 1) * this._state.pageSize + 1 : 0;
+        const endIdx = Math.min(this._state.page * this._state.pageSize, this._state.total);
+        $("#creditsPaginationInfo").text(`Showing ${startIdx} to ${endIdx} of ${this._state.total.toLocaleString()} transactions`);
+
+        $("#creditsPrevBtn").prop("disabled", this._state.page <= 1);
+        $("#creditsNextBtn").prop("disabled", endIdx >= this._state.total);
+      } catch (err) {
+        console.error("Failed to load credit ledger:", err);
+        $tbody.html(`<tr><td colspan="8" class="text-center py-4 text-danger">Failed to load transactions: ${esc(err.message)}</td></tr>`);
+      }
+    },
+
+    onPeriodChange() {
+      this.loadSummary();
+    },
+
+    onFilterChange() {
+      this.loadLedger(1);
+    },
+
+    refresh() {
+      this.load();
+    },
+
+    changePage(direction) {
+      const newPage = this._state.page + direction;
+      if (newPage >= 1) {
+        this.loadLedger(newPage);
+      }
+    },
+
+    async exportCsv() {
+      const type = $("#creditsTypeFilter").val() || "";
+      const token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+      const headers = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const activeSlug = (typeof getActiveClientSlug === "function" ? getActiveClientSlug() : null) || (window._currentClientSlug || null);
+      if (activeSlug) headers["X-Client-Slug"] = activeSlug;
+
+      let url = `${API_BASE}/api/credits/ledger/export.csv`;
+      if (type) url += `?type=${encodeURIComponent(type)}`;
+
+      try {
+        const res = await fetch(url, { headers, credentials: "include" });
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}));
+          throw new Error(errJson.detail || `Export failed: HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get("Content-Disposition") || "";
+        let filename = "credits-ledger.csv";
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) filename = match[1];
+
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(downloadUrl);
+      } catch (err) {
+        alert(err.message || "Failed to export CSV");
+      }
+    },
+  };
+
   window.PlatformCatalogManager = PlatformCatalogManager;
   window.CatalogReuseManager = CatalogReuseManager;
   window.CatalogRefreshManager = CatalogRefreshManager;
   window.CatalogNotificationManager = CatalogNotificationManager;
   window.CatalogApprovalInbox = CatalogApprovalInbox;
+  window.CreditTransparencyManager = CreditTransparencyManager;
 
   // Initial load
   ClientWorkspaceManager.init();
@@ -8830,19 +9081,31 @@ $(function () {
       $("#hubViewOverview").show();
       $("#hubViewCrm").hide();
       $("#hubViewPeople").hide();
+      $("#hubViewCredits").hide();
       renderEmptyStateHub();
     } else if (_currentHubView === "crm") {
       $("#hubTabCrmBtn").addClass("active").css({ background: "#F3E7DA", color: "#2B241F", borderColor: "#D3C2B1", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
       $("#hubViewOverview").hide();
       $("#hubViewCrm").show();
       $("#hubViewPeople").hide();
+      $("#hubViewCredits").hide();
       loadHubCrmView();
     } else if (_currentHubView === "people") {
       $("#hubTabPeopleBtn").addClass("active").css({ background: "#F3E7DA", color: "#2B241F", borderColor: "#D3C2B1", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
       $("#hubViewOverview").hide();
       $("#hubViewCrm").hide();
       $("#hubViewPeople").show();
+      $("#hubViewCredits").hide();
       loadHubPeopleView();
+    } else if (_currentHubView === "credits") {
+      $("#hubTabCreditsBtn").addClass("active").css({ background: "#F3E7DA", color: "#2B241F", borderColor: "#D3C2B1", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" });
+      $("#hubViewOverview").hide();
+      $("#hubViewCrm").hide();
+      $("#hubViewPeople").hide();
+      $("#hubViewCredits").show();
+      if (window.CreditTransparencyManager) {
+        window.CreditTransparencyManager.load();
+      }
     }
   }
   window.switchHubView = switchHubView;

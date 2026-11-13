@@ -575,3 +575,17 @@ def build_ledger_entry_view(
         "estimated_credits_saved": estimated_credits_saved,
         "saved_vs_fresh": saved_vs_fresh,
     }
+
+
+def sanitize_csv_cell(val: Any) -> str:
+    """Neutralizes CSV formula injection attacks by escaping unsafe leading characters.
+    
+    If cell text starts with '=', '+', '-', '@', '\\t', or '\\r', a leading single quote is prepended.
+    """
+    if val is None:
+        return ""
+    s = str(val)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{s}"
+    return s
+

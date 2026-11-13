@@ -5336,6 +5336,10 @@ if FASTAPI_AVAILABLE:
     app.include_router(accounts_reuse_router)
     app.include_router(catalog_notifications_router)
 
+    # Multi-Tenant Credit Transparency & Billing Router (Phase C C5)
+    from routes.credit_router import credit_router
+    app.include_router(credit_router)
+
     # Sales Copilot (RAG chat) — own module, own tables; see apps/sales_copilot/README.md
     from apps.sales_copilot.api import install as install_copilot
     install_copilot(app)

@@ -272,6 +272,9 @@
             <i class="bi bi-people-fill me-1"></i> People
             <span class="badge bg-primary-subtle text-primary ms-1" id="hubPeopleBadgeCount">2,240</span>
           </button>
+          <button type="button" class="btn btn-sm hub-subnav-btn btn-light" id="hubTabCreditsBtn" onclick="switchHubView('credits')" style="font-weight:700;border-radius:8px;padding:7px 16px;border:1px solid #e2e8f0;color:#475569;">
+            <i class="bi bi-wallet2 me-1"></i> Credits &amp; Ledger
+          </button>
         </div>
 
         <!-- VIEW 1: Overview Tab Container -->
@@ -600,6 +603,136 @@
             </div>
           </div>
         </div>
+
+        <!-- VIEW 4: Credits Transparency & Ledger (Phase C C5) -->
+        <div id="hubViewCredits" style="display:none;margin-top:16px;">
+          <!-- Low Balance Banner -->
+          <div id="creditsLowBalanceBanner" class="alert alert-warning d-none fade-in mb-3 shadow-sm" style="border-radius:10px;font-size:0.84rem;border-left:4px solid #f59e0b;background:#fffbeb;">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <div>
+                <i class="bi bi-exclamation-triangle-fill me-2 text-warning"></i>
+                <strong>Low Credit Balance Notice:</strong> Remaining credits (<span id="creditsLowBalanceVal" class="fw-bold">0</span> cr) have dropped below the safety threshold.
+              </div>
+              <span class="badge bg-warning text-dark">Action Recommended</span>
+            </div>
+          </div>
+
+          <!-- Credits KPI Cards Grid -->
+          <div class="hub-kpi-grid mb-3" style="grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;">
+            <div class="hub-kpi-card" style="border-top:3px solid #3b82f6;">
+              <div class="hub-kpi-label"><i class="bi bi-wallet2 text-primary"></i> Available Balance</div>
+              <div class="hub-kpi-val" id="creditSummaryBalance">--</div>
+              <div class="hub-kpi-sub" id="creditSummaryBalanceSub">Allocated: -- cr &bull; --% used</div>
+              <!-- Mini balance progress meter -->
+              <div style="margin-top:8px;background:#e2e8f0;border-radius:6px;height:5px;overflow:hidden;">
+                <div id="creditSummaryBalanceBar" style="background:linear-gradient(90deg,#3b82f6,#60a5fa);height:100%;width:0%;border-radius:6px;transition:width 0.4s ease;"></div>
+              </div>
+            </div>
+
+            <div class="hub-kpi-card" style="border-top:3px solid #10b981;">
+              <div class="hub-kpi-label">
+                <i class="bi bi-shield-check text-success"></i> Verified Reuse Savings
+                <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;" title="Estimated credits saved by hydrating or refreshing verified platform catalog intelligence instead of triggering fresh multi-vendor pipeline fetches."></i>
+              </div>
+              <div class="hub-kpi-val text-success" id="creditSummarySaved">--</div>
+              <div class="hub-kpi-sub" id="creditSummarySavedSub">Based on stored snapshot rate cards</div>
+            </div>
+
+            <div class="hub-kpi-card" style="border-top:3px solid #8b5cf6;">
+              <div class="hub-kpi-label"><i class="bi bi-receipt text-purple"></i> Reuse Fees Paid</div>
+              <div class="hub-kpi-val" id="creditSummaryFees">--</div>
+              <div class="hub-kpi-sub" id="creditSummaryFeesSub">-- catalog reuse / refresh events</div>
+            </div>
+
+            <div class="hub-kpi-card" style="border-top:3px solid #06b6d4;">
+              <div class="hub-kpi-label"><i class="bi bi-piggy-bank text-info"></i> Net Credit Savings</div>
+              <div class="hub-kpi-val text-info" id="creditSummaryNet">--</div>
+              <div class="hub-kpi-sub">Total savings minus reuse fees paid</div>
+            </div>
+          </div>
+
+          <!-- Spend Breakdown & Quick Stats Card -->
+          <div class="pipeline-section-card fade-in mb-3" style="margin-top:0;padding:16px 20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+              <div style="font-size:0.86rem;font-weight:700;color:#0f172a;">
+                <i class="bi bi-pie-chart-fill me-1 text-secondary"></i> Spend by Category
+              </div>
+              <div style="font-size:0.75rem;color:#64748b;" id="creditsRefundsStat">
+                Refunds: <strong>0 cr</strong>
+              </div>
+            </div>
+            <div id="creditsSpendByTypeContainer" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+              <span class="text-muted" style="font-size:0.78rem;">Loading spend breakdown...</span>
+            </div>
+          </div>
+
+          <!-- Filterable Ledger Section Card -->
+          <div class="pipeline-section-card fade-in" style="margin-top:0;padding:20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+              <div>
+                <div style="font-size:1rem;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:8px;">
+                  <i class="bi bi-journal-text text-primary"></i> Credit Transaction Audit Ledger
+                </div>
+                <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">
+                  Immutable record of credit deductions, verified catalog reuse fees, and refunds.
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <select id="creditsPeriodFilter" class="form-select form-select-sm" style="width:130px;border-radius:8px;font-size:0.78rem;" onchange="CreditTransparencyManager.onPeriodChange()">
+                  <option value="month" selected>Past 30 Days</option>
+                  <option value="quarter">Past 90 Days</option>
+                  <option value="all">All Time</option>
+                </select>
+                <select id="creditsTypeFilter" class="form-select form-select-sm" style="width:150px;border-radius:8px;font-size:0.78rem;" onchange="CreditTransparencyManager.onFilterChange()">
+                  <option value="">All Types</option>
+                  <option value="reuse_fee">Reuse Fees</option>
+                  <option value="refresh_fee">Refresh Fees</option>
+                  <option value="pipeline_run">Pipeline Runs</option>
+                  <option value="refund">Refunds</option>
+                  <option value="top_up">Top-ups</option>
+                  <option value="adjustment">Adjustments</option>
+                </select>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="CreditTransparencyManager.refresh()" title="Refresh Ledger" style="border-radius:8px;">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="creditsExportCsvBtn" onclick="CreditTransparencyManager.exportCsv()" style="font-weight:600;border-radius:8px;font-size:0.78rem;">
+                  <i class="bi bi-download me-1"></i> Export CSV
+                </button>
+              </div>
+            </div>
+
+            <!-- Ledger Table -->
+            <div class="table-responsive" style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-height:550px;overflow-y:auto;">
+              <table class="table table-hover align-middle mb-0" style="font-size:0.8rem;">
+                <thead style="background:#f8fafc;color:#64748b;font-weight:700;text-transform:uppercase;font-size:0.68rem;position:sticky;top:0;z-index:2;">
+                  <tr>
+                    <th style="padding:12px 14px;">Date / Time</th>
+                    <th style="padding:12px 12px;">Type</th>
+                    <th style="padding:12px 12px;">Description</th>
+                    <th style="padding:12px 12px;">Account</th>
+                    <th style="padding:12px 12px;">User</th>
+                    <th style="padding:12px 12px;text-align:right;">Delta</th>
+                    <th style="padding:12px 12px;text-align:right;">Balance</th>
+                    <th style="padding:12px 14px;text-align:center;">Formula / Ref</th>
+                  </tr>
+                </thead>
+                <tbody id="creditsLedgerTableBody">
+                  <tr><td colspan="8" class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading credit transactions...</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Pagination bar -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-size:0.76rem;color:#64748b;">
+              <span id="creditsPaginationInfo">Showing 0 transactions</span>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-secondary" id="creditsPrevBtn" onclick="CreditTransparencyManager.changePage(-1)" disabled>Previous</button>
+                <button type="button" class="btn btn-outline-secondary" id="creditsNextBtn" onclick="CreditTransparencyManager.changePage(1)" disabled>Next</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <!-- Main Dashboard Container (Visible when account is clicked) -->
