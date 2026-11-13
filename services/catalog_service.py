@@ -19,6 +19,7 @@ import uuid
 
 import yaml
 from sqlalchemy import desc, func, or_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.models.client import Client
@@ -246,6 +247,70 @@ class CatalogService:
                 return CanonicalResolution(f"dom:{id_val}", identifiers, weak=False)
 
         return CanonicalResolution(f"{identifiers[0][0]}:{identifiers[0][1]}", identifiers, weak=False)
+
+    # ── Checksum Normalization (S-21) ──────────────────────────────────────────
+
+    DROP_CHECKSUM_KEYS = {
+        "updated_at",
+        "created_at",
+        "extracted_at",
+        "first_seen",
+        "last_seen",
+        "new_in_last_run",
+        "rank",
+        "engagement",
+        "views",
+        "applicants",
+    }
+
+    @classmethod
+    def _natural_sort_key(cls, item: Any) -> str:
+        if not isinstance(item, dict):
+            return str(item)
+        if item.get("key"):
+            return f"key:{item['key']}"
+        if item.get("post_key"):
+            return f"post_key:{item['post_key']}"
+        if item.get("job_key"):
+            return f"job_key:{item['job_key']}"
+        if item.get("lob_name"):
+            return f"lob_name:{item['lob_name']}"
+        if item.get("name"):
+            return f"name:{item['name']}"
+        fn = item.get("full_name") or ""
+        t = item.get("title") or ""
+        if fn or t:
+            return f"person:{fn}:{t}"
+        return json.dumps(item, sort_keys=True, default=str)
+
+    @classmethod
+    def normalize_payload_for_checksum(cls, data: Any) -> Any:
+        """Recursively normalizes snapshot payload for deterministic hashing (S-21).
+        
+        - Drops keys starting with '_'
+        - Drops volatile timestamps and analytics keys (updated_at, created_at, engagement, etc.)
+        - Rounds floating-point numbers to 6 decimal places
+        - Sorts lists of dictionary records by their natural keys
+        """
+        if isinstance(data, dict):
+            clean = {}
+            for k, v in data.items():
+                if str(k).startswith("_") or str(k).lower() in cls.DROP_CHECKSUM_KEYS:
+                    continue
+                clean[k] = cls.normalize_payload_for_checksum(v)
+            return clean
+        elif isinstance(data, list):
+            items = [cls.normalize_payload_for_checksum(x) for x in data]
+            try:
+                items.sort(key=cls._natural_sort_key)
+            except Exception:
+                pass
+            return items
+        elif isinstance(data, float):
+            return round(data, 6)
+        elif isinstance(data, (datetime, date)):
+            return data.isoformat()
+        return data
 
     # ── Quality Gate Rubric ───────────────────────────────────────────────────
 
@@ -516,281 +581,307 @@ class CatalogService:
         identifiers = resolution.identifiers
         is_weak = resolution.weak
 
-        # 3. Look up ALL identifiers of incoming account in company_identifiers and canonical_key
-        display_name = account.get("display_name") or account.get("legal_name") or "Unknown Enterprise"
-        legal_name = account.get("legal_name") or display_name
-        country = account.get("country")
+        # S-20: Retry loop catching uq_snapshot_company_version
+        for attempt in range(2):
+            try:
+                # S-20: Resolve under coarse advisory lock held during lookup + create
+                session.execute(text("SELECT pg_advisory_xact_lock(hashtext('catalog:publish:resolve'))"))
 
-        matching_companies_dict: Dict[int, Company] = {}
+                # 3. Look up ALL identifiers of incoming account in company_identifiers and canonical_key
+                display_name = account.get("display_name") or account.get("legal_name") or "Unknown Enterprise"
+                legal_name = account.get("legal_name") or display_name
+                country = account.get("country")
 
-        if canonical_key:
-            c_by_key = session.query(Company).filter_by(canonical_key=canonical_key).first()
-            if c_by_key:
-                surv = cls._follow_merged(session, c_by_key)
-                if surv:
-                    matching_companies_dict[surv.id] = surv
+                matching_companies_dict: Dict[int, Company] = {}
 
-        for id_type, id_val in identifiers:
-            existing_idents = (
-                session.query(CompanyIdentifier)
-                .filter_by(id_type=id_type, id_value=id_val)
-                .all()
-            )
-            for ident in existing_idents:
-                if ident.company:
-                    surv = cls._follow_merged(session, ident.company)
-                    if surv:
-                        matching_companies_dict[surv.id] = surv
+                if canonical_key:
+                    c_by_key = session.query(Company).filter_by(canonical_key=canonical_key).first()
+                    if c_by_key:
+                        surv = cls._follow_merged(session, c_by_key)
+                        if surv:
+                            matching_companies_dict[surv.id] = surv
 
-        matched_companies = list(matching_companies_dict.values())
-
-        company: Optional[Company] = None
-        force_quarantine = False
-
-        if len(matched_companies) == 0:
-            # Case 1: No match -> create company + identifiers
-            company = Company(
-                canonical_key=canonical_key,
-                legal_name=legal_name,
-                display_name=display_name,
-                country=country,
-            )
-            session.add(company)
-            session.flush()
-
-            for id_type, id_val in identifiers:
-                session.add(CompanyIdentifier(
-                    company_id=company.id,
-                    id_type=id_type,
-                    id_value=id_val,
-                ))
-            session.flush()
-
-        elif len(matched_companies) == 1:
-            # Case 2: Exactly one matching company
-            c = matched_companies[0]
-
-            # Check if strong identifier conflicts with existing strong identifier of c
-            has_conflict = False
-            conflict_reason = ""
-            c_idents = session.query(CompanyIdentifier).filter_by(company_id=c.id).all()
-            for in_type, in_val in identifiers:
-                if in_type in ("cik", "lei"):
-                    for ex in c_idents:
-                        if ex.id_type == in_type and ex.id_value != in_val:
-                            has_conflict = True
-                            conflict_reason = f"Conflicting {in_type}: incoming '{in_val}' vs existing company {c.id} '{ex.id_value}'"
-                            break
-                if has_conflict:
-                    break
-
-            if has_conflict:
-                # Conflict on strong identifier -> treat as Case 3
-                force_quarantine = True
-                new_comp = Company(
-                    canonical_key=f"needs_review:{canonical_key}:{uuid.uuid4().hex[:6]}",
-                    legal_name=legal_name,
-                    display_name=display_name,
-                    country=country,
-                    needs_review=True,
-                )
-                session.add(new_comp)
-                session.flush()
-
-                # Add non-conflicting identifiers
-                for in_type, in_val in identifiers:
-                    conflict_ident = session.query(CompanyIdentifier).filter_by(
-                        id_type=in_type, id_value=in_val
-                    ).first()
-                    if not conflict_ident:
-                        session.add(CompanyIdentifier(
-                            company_id=new_comp.id,
-                            id_type=in_type,
-                            id_value=in_val,
-                        ))
-
-                candidate = MergeCandidate(
-                    company_a_id=c.id,
-                    company_b_id=new_comp.id,
-                    reason=conflict_reason,
-                    evidence={
-                        "incoming_identifiers": identifiers,
-                        "company_a_identifiers": [(ci.id_type, ci.id_value) for ci in c_idents],
-                        "source_client_slug": source_client_slug,
-                    },
-                    status="pending",
-                )
-                session.add(candidate)
-                c.needs_review = True
-                session.flush()
-                company = new_comp
-
-            else:
-                company = c
-                # Add any new identifiers
                 for id_type, id_val in identifiers:
-                    existing_id = session.query(CompanyIdentifier).filter_by(
-                        id_type=id_type, id_value=id_val
-                    ).first()
-                    if not existing_id:
+                    existing_idents = (
+                        session.query(CompanyIdentifier)
+                        .filter_by(id_type=id_type, id_value=id_val)
+                        .all()
+                    )
+                    for ident in existing_idents:
+                        if ident.company:
+                            surv = cls._follow_merged(session, ident.company)
+                            if surv:
+                                matching_companies_dict[surv.id] = surv
+
+                matched_companies = list(matching_companies_dict.values())
+
+                company: Optional[Company] = None
+                force_quarantine = False
+
+                if len(matched_companies) == 0:
+                    # Case 1: No match -> create company + identifiers
+                    company = Company(
+                        canonical_key=canonical_key,
+                        legal_name=legal_name,
+                        display_name=display_name,
+                        country=country,
+                    )
+                    session.add(company)
+                    session.flush()
+
+                    for id_type, id_val in identifiers:
                         session.add(CompanyIdentifier(
                             company_id=company.id,
                             id_type=id_type,
                             id_value=id_val,
                         ))
-                    elif existing_id.company_id != company.id:
-                        existing_surv = cls._follow_merged(session, existing_id.company)
-                        if existing_surv and existing_surv.id == company.id:
-                            existing_id.company_id = company.id
+                    session.flush()
 
-                # Upgrade canonical_key if incoming outranks current key (CIK > LEI > domain)
-                if cls._key_rank(canonical_key) > cls._key_rank(company.canonical_key):
-                    other = (
-                        session.query(Company)
-                        .filter(Company.canonical_key == canonical_key, Company.id != company.id)
-                        .first()
-                    )
-                    if not other:
-                        old_key = company.canonical_key
-                        company.canonical_key = canonical_key
-                        if old_key:
-                            ex_old = session.query(CompanyIdentifier).filter_by(
-                                id_type="key", id_value=old_key
+                elif len(matched_companies) == 1:
+                    # Case 2: Exactly one matching company
+                    c = matched_companies[0]
+
+                    # Check if strong identifier conflicts with existing strong identifier of c
+                    has_conflict = False
+                    conflict_reason = ""
+                    c_idents = session.query(CompanyIdentifier).filter_by(company_id=c.id).all()
+                    for in_type, in_val in identifiers:
+                        if in_type in ("cik", "lei"):
+                            for ex in c_idents:
+                                if ex.id_type == in_type and ex.id_value != in_val:
+                                    has_conflict = True
+                                    conflict_reason = f"Conflicting {in_type}: incoming '{in_val}' vs existing company {c.id} '{ex.id_value}'"
+                                    break
+                        if has_conflict:
+                            break
+
+                    if has_conflict:
+                        # Conflict on strong identifier -> treat as Case 3
+                        force_quarantine = True
+                        new_comp = Company(
+                            canonical_key=f"needs_review:{canonical_key}:{uuid.uuid4().hex[:6]}",
+                            legal_name=legal_name,
+                            display_name=display_name,
+                            country=country,
+                            needs_review=True,
+                        )
+                        session.add(new_comp)
+                        session.flush()
+
+                        # Add non-conflicting identifiers
+                        for in_type, in_val in identifiers:
+                            conflict_ident = session.query(CompanyIdentifier).filter_by(
+                                id_type=in_type, id_value=in_val
                             ).first()
-                            if not ex_old:
+                            if not conflict_ident:
+                                session.add(CompanyIdentifier(
+                                    company_id=new_comp.id,
+                                    id_type=in_type,
+                                    id_value=in_val,
+                                ))
+
+                        candidate = MergeCandidate(
+                            company_a_id=c.id,
+                            company_b_id=new_comp.id,
+                            reason=conflict_reason,
+                            evidence={
+                                "incoming_identifiers": identifiers,
+                                "company_a_identifiers": [(ci.id_type, ci.id_value) for ci in c_idents],
+                                "source_client_slug": source_client_slug,
+                            },
+                            status="pending",
+                        )
+                        session.add(candidate)
+                        c.needs_review = True
+                        session.flush()
+                        company = new_comp
+
+                    else:
+                        company = c
+                        # Add any new identifiers
+                        for id_type, id_val in identifiers:
+                            existing_id = session.query(CompanyIdentifier).filter_by(
+                                id_type=id_type, id_value=id_val
+                            ).first()
+                            if not existing_id:
                                 session.add(CompanyIdentifier(
                                     company_id=company.id,
-                                    id_type="key",
-                                    id_value=old_key,
+                                    id_type=id_type,
+                                    id_value=id_val,
                                 ))
+                            elif existing_id.company_id != company.id:
+                                existing_surv = cls._follow_merged(session, existing_id.company)
+                                if existing_surv and existing_surv.id == company.id:
+                                    existing_id.company_id = company.id
+
+                        # Upgrade canonical_key if incoming outranks current key (CIK > LEI > domain)
+                        if cls._key_rank(canonical_key) > cls._key_rank(company.canonical_key):
+                            other = (
+                                session.query(Company)
+                                .filter(Company.canonical_key == canonical_key, Company.id != company.id)
+                                .first()
+                            )
+                            if not other:
+                                old_key = company.canonical_key
+                                company.canonical_key = canonical_key
+                                if old_key:
+                                    ex_old = session.query(CompanyIdentifier).filter_by(
+                                        id_type="key", id_value=old_key
+                                    ).first()
+                                    if not ex_old:
+                                        session.add(CompanyIdentifier(
+                                            company_id=company.id,
+                                            id_type="key",
+                                            id_value=old_key,
+                                        ))
+                        session.flush()
+
+                else:
+                    # Case 3: Matches two or more companies
+                    force_quarantine = True
+                    comp_a = matched_companies[0]
+                    comp_b = matched_companies[1]
+                    comp_a.needs_review = True
+                    comp_b.needs_review = True
+
+                    candidate = MergeCandidate(
+                        company_a_id=comp_a.id,
+                        company_b_id=comp_b.id,
+                        reason=f"Incoming account matched multiple existing companies: {[c.id for c in matched_companies]}",
+                        evidence={
+                            "incoming_identifiers": identifiers,
+                            "matched_company_ids": [c.id for c in matched_companies],
+                            "matched_canonical_keys": [c.canonical_key for c in matched_companies],
+                            "source_client_slug": source_client_slug,
+                        },
+                        status="pending",
+                    )
+                    session.add(candidate)
+                    session.flush()
+
+                    # Publish snapshot against the best match (comp_a)
+                    company = comp_a
+
+                # S-20: Take per-company advisory lock and row lock FOR UPDATE
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext('catalog:publish:' || :k))"),
+                    {"k": company.canonical_key},
+                )
+                session.execute(
+                    text("SELECT id FROM platform_catalog.companies WHERE id = :id FOR UPDATE"),
+                    {"id": company.id},
+                )
+
+                # 4. S-21 Deterministic checksum over normalized payload
+                norm_payload = cls.normalize_payload_for_checksum(payload)
+                payload_str = json.dumps(norm_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+                checksum = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+
+                # Deduplication: check if identical ready snapshot exists with checksum_version=2
+                existing_snapshot = session.query(Snapshot).filter_by(
+                    company_id=company.id,
+                    checksum=checksum,
+                    checksum_version=2,
+                    status="ready",
+                ).first()
+                if existing_snapshot and not force:
+                    session.commit()
+                    return existing_snapshot
+
+                # 5. Quality scoring
+                quality_score, quality_grade = cls.calculate_quality_score(
+                    account=account,
+                    lobs=lobs,
+                    sub_lobs=sub_lobs,
+                    personas=personas,
+                    posts=posts,
+                    jobs=jobs,
+                )
+
+                status = "ready" if ((quality_score >= 80.0 and not is_weak and not force_quarantine) or force) else "quarantined"
+
+                # 6. S-20 Version calculation under row lock
+                max_ver = session.query(func.max(Snapshot.version)).filter_by(company_id=company.id).scalar() or 0
+                next_ver = max_ver + 1
+
+                counts = {
+                    "accounts": 1,
+                    "lobs": len(lobs),
+                    "sub_lobs": len(sub_lobs),
+                    "personas": len(personas),
+                    "posts": len(posts),
+                    "cxo_movements": len(payload["cxo_movements"]),
+                    "jobs": len(jobs),
+                }
+
+                # 7. Create Snapshot record with checksum_version=2
+                snapshot = Snapshot(
+                    company_id=company.id,
+                    version=next_ver,
+                    status=status,
+                    source_client_id=client.id,
+                    source_account_id=account_id,
+                    policy_version="1.0.0",
+                    skeleton_version="T0002",
+                    quality_score=quality_score,
+                    quality_grade=quality_grade,
+                    source_extracted_at=account.get("extracted_at") or datetime.now(timezone.utc),
+                    counts=counts,
+                    checksum=checksum,
+                    checksum_version=2,
+                )
+                session.add(snapshot)
                 session.flush()
 
-        else:
-            # Case 3: Matches two or more companies
-            force_quarantine = True
-            comp_a = matched_companies[0]
-            comp_b = matched_companies[1]
-            comp_a.needs_review = True
-            comp_b.needs_review = True
+                # 8. Create SnapshotBlob
+                blob = SnapshotBlob(
+                    snapshot_id=snapshot.id,
+                    payload=payload,
+                )
+                session.add(blob)
 
-            candidate = MergeCandidate(
-                company_a_id=comp_a.id,
-                company_b_id=comp_b.id,
-                reason=f"Incoming account matched multiple existing companies: {[c.id for c in matched_companies]}",
-                evidence={
-                    "incoming_identifiers": identifiers,
-                    "matched_company_ids": [c.id for c in matched_companies],
-                    "matched_canonical_keys": [c.canonical_key for c in matched_companies],
-                    "source_client_slug": source_client_slug,
-                },
-                status="pending",
-            )
-            session.add(candidate)
-            session.flush()
+                # 9. Mark earlier ready snapshots as superseded if this one is ready
+                if status == "ready":
+                    session.execute(
+                        text("""
+                            UPDATE platform_catalog.snapshots
+                            SET status = 'superseded'
+                            WHERE company_id = :cid AND id != :sid AND status = 'ready'
+                        """),
+                        {"cid": company.id, "sid": snapshot.id},
+                    )
 
-            # Publish snapshot against the best match (comp_a)
-            company = comp_a
+                # 10. Audit Logging (S-14 inside caller transaction)
+                action = "catalog.publish_forced" if force else "catalog.publish"
+                is_super = False
+                if published_by_user_id:
+                    user = session.query(User).filter_by(id=published_by_user_id).first()
+                    if user and getattr(user, "role", None) == "super_admin":
+                        is_super = True
 
-        # 4. Deterministic checksum of payload
-        payload_str = json.dumps(payload, sort_keys=True, default=str)
-        checksum = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+                log_catalog_audit(
+                    session=session,
+                    actor_user_id=published_by_user_id,
+                    action=action,
+                    client_id=client.id,
+                    details={
+                        "snapshot_id": snapshot.id,
+                        "source_client_slug": source_client_slug,
+                        "source_client_id": client.id,
+                        "counts": snapshot.counts,
+                        "quality_score": float(snapshot.quality_score or 0.0),
+                    },
+                    is_actor_super_admin=is_super,
+                )
 
-        # Deduplication: check if identical ready snapshot exists
-        existing_snapshot = session.query(Snapshot).filter_by(
-            company_id=company.id,
-            checksum=checksum,
-            status="ready",
-        ).first()
-        if existing_snapshot and not force:
-            return existing_snapshot
+                session.commit()
+                return snapshot
 
-        # 5. Quality scoring
-        quality_score, quality_grade = cls.calculate_quality_score(
-            account=account,
-            lobs=lobs,
-            sub_lobs=sub_lobs,
-            personas=personas,
-            posts=posts,
-            jobs=jobs,
-        )
-
-        status = "ready" if ((quality_score >= 80.0 and not is_weak and not force_quarantine) or force) else "quarantined"
-
-        # 6. Version calculation
-        max_ver = session.query(func.max(Snapshot.version)).filter_by(company_id=company.id).scalar() or 0
-        next_ver = max_ver + 1
-
-        counts = {
-            "accounts": 1,
-            "lobs": len(lobs),
-            "sub_lobs": len(sub_lobs),
-            "personas": len(personas),
-            "posts": len(posts),
-            "cxo_movements": len(payload["cxo_movements"]),
-            "jobs": len(jobs),
-        }
-
-        # 7. Create Snapshot record (source_client_id is platform-internal only)
-        snapshot = Snapshot(
-            company_id=company.id,
-            version=next_ver,
-            status=status,
-            source_client_id=client.id,
-            source_account_id=account_id,
-            policy_version="1.0.0",
-            skeleton_version="T0002",
-            quality_score=quality_score,
-            quality_grade=quality_grade,
-            source_extracted_at=account.get("extracted_at") or datetime.now(timezone.utc),
-            counts=counts,
-            checksum=checksum,
-        )
-        session.add(snapshot)
-        session.flush()
-
-        # 8. Create SnapshotBlob
-        blob = SnapshotBlob(
-            snapshot_id=snapshot.id,
-            payload=payload,
-        )
-        session.add(blob)
-
-        # 9. Mark earlier ready snapshots as superseded if this one is ready
-        if status == "ready":
-            session.execute(
-                text("""
-                    UPDATE platform_catalog.snapshots
-                    SET status = 'superseded'
-                    WHERE company_id = :cid AND id != :sid AND status = 'ready'
-                """),
-                {"cid": company.id, "sid": snapshot.id},
-            )
-
-        # 10. Audit Logging (S-14 inside caller transaction)
-        action = "catalog.publish_forced" if force else "catalog.publish"
-        is_super = False
-        if published_by_user_id:
-            user = session.query(User).filter_by(id=published_by_user_id).first()
-            if user and getattr(user, "role", None) == "super_admin":
-                is_super = True
-
-        log_catalog_audit(
-            session=session,
-            actor_user_id=published_by_user_id,
-            action=action,
-            client_id=client.id,
-            details={
-                "snapshot_id": snapshot.id,
-                "source_client_slug": source_client_slug,
-                "source_client_id": client.id,
-                "counts": snapshot.counts,
-                "quality_score": float(snapshot.quality_score or 0.0),
-            },
-            is_actor_super_admin=is_super,
-        )
-
-        session.commit()
-        return snapshot
+            except IntegrityError as e:
+                session.rollback()
+                if "uq_snapshot_company_version" in str(e) and attempt == 0:
+                    continue
+                raise
 
     # ── Lookup & Merge Helpers ────────────────────────────────────────────────
 
