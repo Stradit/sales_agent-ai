@@ -268,6 +268,7 @@ PERMISSION_ROLES: Dict[str, Set[str]] = {
     # Account reuse & client management (super_admin and client_admin)
     "account:reuse_check": {"super_admin", "client_admin"},
     "account:reuse_request": {"super_admin", "client_admin"},
+    "account:reuse_execute": {"super_admin", "client_admin"},
     "client:manage": {"super_admin", "client_admin"},
 
     # Pipeline execution and writes (super_admin, client_admin, analyst)

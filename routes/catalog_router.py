@@ -171,7 +171,7 @@ def reuse_check(
 @catalog_router.post("/hydrate")
 def hydrate_account(
     req: HydrateRequest,
-    ctx: TenantRequestContext = Depends(tenant_context("account:write", explicit_slug_from="body")),
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_execute", explicit_slug_from="body")),
     session: Session = Depends(get_platform_db),
 ):
     """Atomically imports verified intelligence into the target client workspace."""
@@ -237,7 +237,7 @@ def hydrate_account(
 @catalog_router.post("/requests")
 def submit_reuse_request(
     req: ReuseRequestCreate,
-    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_request", explicit_slug_from="body")),
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_execute", explicit_slug_from="body")),
     session: Session = Depends(get_platform_db),
 ):
     """Submits a reuse request for super admin approval when reuse_requires_approval is true."""

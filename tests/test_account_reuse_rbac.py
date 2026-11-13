@@ -13,9 +13,11 @@ Validates:
 
 import uuid
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 import auth
+from api import app
 from auth import (
     get_effective_role,
     has_permission,
@@ -152,18 +154,21 @@ def test_rbac_permission_matrix(setup_rbac_reuse_env):
         assert has_permission(get_effective_role(session, u_super, RBAC_TGT_SLUG), "catalog:publish") is True
         assert has_permission(get_effective_role(session, u_super, RBAC_TGT_SLUG), "catalog:rollback") is True
         assert has_permission(get_effective_role(session, u_super, RBAC_TGT_SLUG), "account:reuse_check") is True
+        assert has_permission(get_effective_role(session, u_super, RBAC_TGT_SLUG), "account:reuse_execute") is True
 
         # 2. Client Admin has account reuse permissions, but NOT catalog rollback or global publish
         assert get_effective_role(session, u_admin, RBAC_TGT_SLUG) == "client_admin"
         assert has_permission(get_effective_role(session, u_admin, RBAC_TGT_SLUG), "account:reuse_check") is True
         assert has_permission(get_effective_role(session, u_admin, RBAC_TGT_SLUG), "account:reuse_request") is True
+        assert has_permission(get_effective_role(session, u_admin, RBAC_TGT_SLUG), "account:reuse_execute") is True
         assert has_permission(get_effective_role(session, u_admin, RBAC_TGT_SLUG), "catalog:rollback") is False
         assert has_permission(get_effective_role(session, u_admin, RBAC_TGT_SLUG), "catalog:publish") is False
 
-        # 3. Analyst can write accounts and run auto-pipeline, but cannot approve reuse
+        # 3. Analyst can write accounts and run auto-pipeline, but cannot execute reuse (S-11)
         assert get_effective_role(session, u_analyst, RBAC_TGT_SLUG) == "analyst"
         assert has_permission(get_effective_role(session, u_analyst, RBAC_TGT_SLUG), "account:write") is True
         assert has_permission(get_effective_role(session, u_analyst, RBAC_TGT_SLUG), "auto_pipeline:run") is True
+        assert has_permission(get_effective_role(session, u_analyst, RBAC_TGT_SLUG), "account:reuse_execute") is False
         assert has_permission(get_effective_role(session, u_analyst, RBAC_TGT_SLUG), "catalog:approve") is False
 
         # 4. Viewer has global read-only cap
@@ -171,6 +176,7 @@ def test_rbac_permission_matrix(setup_rbac_reuse_env):
         assert has_permission(get_effective_role(session, u_viewer, RBAC_TGT_SLUG), "account:read") is True
         assert has_permission(get_effective_role(session, u_viewer, RBAC_TGT_SLUG), "account:write") is False
         assert has_permission(get_effective_role(session, u_viewer, RBAC_TGT_SLUG), "account:reuse_check") is False
+        assert has_permission(get_effective_role(session, u_viewer, RBAC_TGT_SLUG), "account:reuse_execute") is False
         assert has_permission(get_effective_role(session, u_viewer, RBAC_TGT_SLUG), "auto_pipeline:run") is False
     finally:
         auth.AUTH_ENFORCED = original_enforced
@@ -275,4 +281,74 @@ def test_quota_overflow_aborts_atomically(setup_rbac_reuse_env):
         cnt_after = session.execute(text(f'SELECT count(*) FROM "{RBAC_TGT_SCHEMA}"."accounts"')).scalar()
         assert cnt_after == cnt_before
     finally:
+        session.close()
+
+
+def test_analyst_and_viewer_permissions_enforced_at_api(setup_rbac_reuse_env):
+    """Verifies S-11: analyst gets 403 on /hydrate and /requests POST; client_admin OK; viewer/partner 403."""
+    api_client = TestClient(app)
+    session = SessionLocal()
+    original_enforced = auth.AUTH_ENFORCED
+    auth.AUTH_ENFORCED = True
+    try:
+        users = setup_rbac_reuse_env
+        u_admin = session.query(User).filter_by(id=users["admin"]).first()
+        u_analyst = session.query(User).filter_by(id=users["analyst"]).first()
+        u_viewer = session.query(User).filter_by(id=users["viewer"]).first()
+
+        token_analyst = auth.create_access_token(u_analyst, client_slug=RBAC_TGT_SLUG)
+        token_admin = auth.create_access_token(u_admin, client_slug=RBAC_TGT_SLUG)
+        token_viewer = auth.create_access_token(u_viewer, client_slug=RBAC_TGT_SLUG)
+
+        analyst_headers = {"Authorization": f"Bearer {token_analyst}", "X-Client-Slug": RBAC_TGT_SLUG}
+        admin_headers = {"Authorization": f"Bearer {token_admin}", "X-Client-Slug": RBAC_TGT_SLUG}
+        viewer_headers = {"Authorization": f"Bearer {token_viewer}", "X-Client-Slug": RBAC_TGT_SLUG}
+
+        snap = session.query(Snapshot).order_by(Snapshot.id.desc()).first()
+        preview_token = AccountReuseService.generate_preview_token(snap.id, RBAC_TGT_SLUG, u_analyst.id)
+
+        # 1. Analyst attempting /hydrate -> 403
+        res = api_client.post(
+            "/api/catalog/hydrate",
+            json={"snapshot_id": snap.id, "preview_token": preview_token},
+            headers=analyst_headers,
+        )
+        assert res.status_code == 403
+        assert "Not authorized for this client" in res.json()["detail"]
+
+        # 2. Analyst attempting POST /requests -> 403
+        res = api_client.post(
+            "/api/catalog/requests",
+            json={"snapshot_id": snap.id, "preview_token": preview_token},
+            headers=analyst_headers,
+        )
+        assert res.status_code == 403
+        assert "Not authorized for this client" in res.json()["detail"]
+
+        # 3. Viewer attempting reuse-check -> 403
+        res = api_client.get(
+            "/api/catalog/reuse-check?identifier=rbacenterprise.com",
+            headers=viewer_headers,
+        )
+        assert res.status_code == 403
+
+        # 4. Viewer attempting POST /requests -> 403
+        res = api_client.post(
+            "/api/catalog/requests",
+            json={"snapshot_id": snap.id, "preview_token": preview_token},
+            headers=viewer_headers,
+        )
+        assert res.status_code == 403
+
+        # 5. Client Admin attempting POST /requests -> succeeds
+        admin_preview_token = AccountReuseService.generate_preview_token(snap.id, RBAC_TGT_SLUG, u_admin.id)
+        res = api_client.post(
+            "/api/catalog/requests",
+            json={"snapshot_id": snap.id, "preview_token": admin_preview_token},
+            headers=admin_headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["ok"] is True
+    finally:
+        auth.AUTH_ENFORCED = original_enforced
         session.close()

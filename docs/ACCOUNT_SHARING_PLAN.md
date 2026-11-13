@@ -88,7 +88,7 @@ Prior to finalizing this plan, seven empirical spikes were executed against the 
   ```
 * **Granular Permission Mapping**:
   - `catalog:view_library`, `catalog:publish`, `catalog:assign`, `catalog:approve`, `catalog:rollback` -> `{"super_admin"}`
-  - `account:reuse_check`, `account:reuse_request`, `client:manage` -> `{"super_admin", "client_admin"}`
+  - `account:reuse_check`, `account:reuse_request`, `account:reuse_execute`, `client:manage` -> `{"super_admin", "client_admin"}`
   - `account:write`, `auto_pipeline:run` -> `{"super_admin", "client_admin", "analyst"}`
 * **Securing Telemetry & Auto-Pipeline**:
   - Guard `/api/system/*` with `auth.get_current_user`.
