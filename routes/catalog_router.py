@@ -13,12 +13,20 @@ import logging
 from typing import Any, Dict, List, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, or_, text
 from sqlalchemy.orm import Session
 
 import auth
+from core.tenant_context import (
+    ClientFlags,
+    PlatformRequestContext,
+    TenantRequestContext,
+    get_platform_db,
+    platform_context,
+    tenant_context,
+)
 from db.connection import SessionLocal
 from db.models.client import Client
 from db.models.platform_catalog import (
@@ -50,82 +58,18 @@ def _sanitize_error_message(msg: str) -> str:
     return msg[:500]
 
 
-def _handle_unexpected_exception(endpoint_name: str, e: Exception) -> HTTPException:
+def _handle_unexpected_exception(endpoint_name: str, e: Exception, correlation_id: Optional[str] = None) -> HTTPException:
     """Logs unexpected exceptions with correlation ID and returns a safe sanitized response."""
-    correlation_id = uuid.uuid4().hex[:12]
-    logger.error(f"[{endpoint_name}] Unexpected error (correlation_id={correlation_id}): {e}", exc_info=True)
+    corr_id = correlation_id or uuid.uuid4().hex[:12]
+    logger.error(f"[{endpoint_name}] Unexpected error (correlation_id={corr_id}): {e}", exc_info=True)
     return HTTPException(
         status_code=500,
-        detail={"detail": f"{endpoint_name} failed", "correlation_id": correlation_id},
+        detail={"detail": f"{endpoint_name} failed", "correlation_id": corr_id},
+        headers={"X-Correlation-ID": corr_id},
     )
 
+
 catalog_router = APIRouter(prefix="/api/catalog", tags=["Verified Intelligence Catalog"])
-
-
-# ── Dependency: Platform Database Session ────────────────────────────────────
-
-def get_platform_db():
-    session = SessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-
-
-def resolve_target_client(
-    request: Request,
-    user: auth.User,
-    session: Session,
-    permission: str,
-    explicit_slug: Optional[str] = None,
-) -> str:
-    """Resolves and re-authorizes target client slug for tenant catalog operations.
-    
-    Rules:
-    1. Compute ctx_slug = auth.resolve_request_client_slug(request, user).
-    2. If user.role == 'super_admin': the explicit body/query slug wins if provided,
-       else ctx_slug; must exist and be 'active'.
-    3. Otherwise: the explicit slug must be absent or equal to ctx_slug after normalize_client_slug;
-       any mismatch -> 403 ('Target client does not match your active client context').
-       ctx_slug is required (400 if missing).
-    4. After resolving, re-authorise against that exact slug:
-       auth.get_effective_role(session, user, target) then auth.has_permission(role, permission);
-       deny -> 403.
-    """
-    ctx_slug = auth.resolve_request_client_slug(request, user)
-
-    if getattr(user, "role", None) == "super_admin":
-        target = auth.normalize_client_slug(explicit_slug) if explicit_slug else ctx_slug
-        if not target:
-            raise HTTPException(status_code=400, detail="Target client slug required")
-        client = session.query(Client).filter_by(slug=target).first()
-        if not client or not client.is_active or client.status != "active":
-            raise HTTPException(status_code=404, detail=f"Target client '{target}' not found or inactive")
-        return target
-
-    # Non-super-admin
-    if not ctx_slug:
-        raise HTTPException(status_code=400, detail="Client context required (pass X-Client-Slug header)")
-
-    if explicit_slug:
-        norm_explicit = auth.normalize_client_slug(explicit_slug)
-        if norm_explicit != ctx_slug:
-            raise HTTPException(
-                status_code=403,
-                detail="Target client does not match your active client context",
-            )
-
-    target = ctx_slug
-    client = session.query(Client).filter_by(slug=target).first()
-    if not client or not client.is_active or client.status != "active":
-        raise HTTPException(status_code=404, detail=f"Target client '{target}' not found or inactive")
-
-    # Re-authorize against that exact slug
-    effective_role = auth.get_effective_role(session, user, target, enforce=True)
-    if not effective_role or not auth.has_permission(effective_role, permission):
-        raise HTTPException(status_code=403, detail="Not authorized for this client")
-
-    return target
 
 
 # ── Pydantic Request & Response Schemas ──────────────────────────────────────
@@ -172,9 +116,7 @@ class RollbackRequest(BaseModel):
 @catalog_router.get("/reuse-check")
 def reuse_check(
     identifier: str = Query(..., min_length=2, description="Domain, CIK, LEI, or company key"),
-    client: Optional[str] = Query(None, description="Client slug context"),
-    request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission_strict("account:reuse_check", require_client_context=True)),
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_check", explicit_slug_from="query")),
     session: Session = Depends(get_platform_db),
 ):
     """Anti-Oracle verified intelligence lookup.
@@ -183,16 +125,7 @@ def reuse_check(
     - NEVER reveals source client identity or presence of other clients.
     - Returns identical 'available: false' for unknown companies or non-ready snapshots.
     """
-    clean_slug = resolve_target_client(
-        request=request,
-        user=current_user,
-        session=session,
-        permission="account:reuse_check",
-        explicit_slug=client,
-    )
-
-    # Rate limiting: 30 calls / 5 min per (user_id, client_slug), counts hits and misses (S-14)
-    rate_limit_key = f"{current_user.id}:{clean_slug}"
+    rate_limit_key = f"{ctx.user_id}:{ctx.client_slug}"
     if not reuse_check_limiter.check_and_record(rate_limit_key):
         raise HTTPException(
             status_code=429,
@@ -200,33 +133,31 @@ def reuse_check(
         )
 
     try:
-        result = AccountReuseService.check_reuse_available(session, identifier, clean_slug)
+        result = AccountReuseService.check_reuse_available(session, ctx, identifier)
         if not result or not result.get("available"):
             return {"available": False}
 
-        # S-14 Audit: Log reuse check hit with hashed identifier (anti-oracle)
-        target_client = session.query(Client).filter_by(slug=clean_slug).first()
         ident_hash = hashlib.sha256(identifier.strip().lower().encode("utf-8")).hexdigest()
         log_catalog_audit(
             session=session,
-            actor_user_id=current_user.id,
+            actor_user_id=ctx.user_id,
             action="catalog.reuse_check_available",
-            client_id=target_client.id if target_client else None,
+            client_id=ctx.client_id,
             details={
                 "identifier_hash": ident_hash,
-                "target_client_slug": clean_slug,
-                "target_client_id": target_client.id if target_client else None,
+                "target_client_slug": ctx.client_slug,
+                "target_client_id": ctx.client_id,
                 "snapshot_id": result.get("snapshot_id"),
+                "correlation_id": ctx.correlation_id,
             },
-            is_actor_super_admin=(getattr(current_user, "role", None) == "super_admin"),
+            is_actor_super_admin=ctx.is_super_admin,
         )
         session.commit()
 
-        # Generate cryptographically signed HMAC preview token
         token = AccountReuseService.generate_preview_token(
             snapshot_id=result["snapshot_id"],
-            target_client_slug=clean_slug,
-            user_id=current_user.id,
+            target_client_slug=ctx.client_slug,
+            user_id=ctx.user_id,
         )
         result["preview_token"] = token
         return result
@@ -234,28 +165,19 @@ def reuse_check(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise _handle_unexpected_exception("Reuse check", e)
+        raise _handle_unexpected_exception("Reuse check", e, ctx.correlation_id)
 
 
 @catalog_router.post("/hydrate")
 def hydrate_account(
     req: HydrateRequest,
-    request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission_strict("account:write", require_client_context=True)),
+    ctx: TenantRequestContext = Depends(tenant_context("account:write", explicit_slug_from="body")),
     session: Session = Depends(get_platform_db),
 ):
     """Atomically imports verified intelligence into the target client workspace."""
-    clean_slug = resolve_target_client(
-        request=request,
-        user=current_user,
-        session=session,
-        permission="account:write",
-        explicit_slug=req.client_slug,
-    )
-
-    # 1. Validate cryptographic preview token (binds snapshot, slug, and user_id)
+    # 1. Validate preview token
     if not AccountReuseService.validate_preview_token(
-        req.preview_token, clean_slug, req.snapshot_id, current_user.id
+        req.preview_token, ctx.client_slug, req.snapshot_id, ctx.user_id
     ):
         raise HTTPException(
             status_code=400,
@@ -263,18 +185,13 @@ def hydrate_account(
         )
 
     # 2. Check approval requirement
-    target_client = session.query(Client).filter_by(slug=clean_slug).first()
-    if not target_client:
-        raise HTTPException(status_code=404, detail=f"Client '{clean_slug}' not found")
-
-    if not target_client.catalog_consume:
+    if not ctx.client_flags.catalog_consume:
         raise HTTPException(
             status_code=403,
             detail="Catalog reuse is not enabled for this organization",
         )
 
-    is_super_admin = getattr(current_user, "role", None) == "super_admin"
-    if target_client.reuse_requires_approval and not is_super_admin:
+    if ctx.client_flags.reuse_requires_approval and not ctx.is_super_admin:
         raise HTTPException(
             status_code=403,
             detail="This organization requires administrator approval to reuse catalog intelligence. "
@@ -285,19 +202,19 @@ def hydrate_account(
     if req.idempotency_key:
         idem_key = req.idempotency_key
     else:
-        raw_key = f"{clean_slug}:{req.snapshot_id}:{current_user.id}:{date.today().isoformat()}"
+        raw_key = f"{ctx.client_slug}:{req.snapshot_id}:{ctx.user_id}:{date.today().isoformat()}"
         idem_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
     try:
         hydration_res = AccountReuseService.hydrate_account_from_catalog(
             session=session,
-            target_client_slug=clean_slug,
+            ctx=ctx,
             snapshot_id=req.snapshot_id,
-            user_id=current_user.id,
+            user_id=ctx.user_id,
             idempotency_key=idem_key,
             mode=req.mode,
             fee_credits=1,
-            approved_by_user_id=current_user.id if is_super_admin else None,
+            approved_by_user_id=ctx.user_id if ctx.is_super_admin else None,
         )
         return hydration_res
 
@@ -314,35 +231,22 @@ def hydrate_account(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise _handle_unexpected_exception("Hydration", e)
+        raise _handle_unexpected_exception("Hydration", e, ctx.correlation_id)
 
 
 @catalog_router.post("/requests")
 def submit_reuse_request(
     req: ReuseRequestCreate,
-    request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission_strict("account:reuse_request", require_client_context=True)),
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_request", explicit_slug_from="body")),
     session: Session = Depends(get_platform_db),
 ):
     """Submits a reuse request for super admin approval when reuse_requires_approval is true."""
-    clean_slug = resolve_target_client(
-        request=request,
-        user=current_user,
-        session=session,
-        permission="account:reuse_request",
-        explicit_slug=req.client_slug,
-    )
-
     if not AccountReuseService.validate_preview_token(
-        req.preview_token, clean_slug, req.snapshot_id, current_user.id
+        req.preview_token, ctx.client_slug, req.snapshot_id, ctx.user_id
     ):
         raise HTTPException(status_code=400, detail="Invalid or expired preview token.")
 
-    target_client = session.query(Client).filter_by(slug=clean_slug).first()
-    if not target_client:
-        raise HTTPException(status_code=404, detail=f"Client '{clean_slug}' not found")
-
-    if not target_client.catalog_consume:
+    if not ctx.client_flags.catalog_consume:
         raise HTTPException(
             status_code=403,
             detail="Catalog reuse is not enabled for this organization",
@@ -352,10 +256,9 @@ def submit_reuse_request(
     if not snapshot:
         raise HTTPException(status_code=404, detail=f"Snapshot {req.snapshot_id} not found")
 
-    # Check for existing pending request
     existing_req = session.query(ShareEvent).filter_by(
         snapshot_id=req.snapshot_id,
-        target_client_id=target_client.id,
+        target_client_id=ctx.client_id,
         status="pending_approval",
     ).first()
     if existing_req:
@@ -366,12 +269,12 @@ def submit_reuse_request(
             "message": "A reuse request for this account is already pending approval.",
         }
 
-    idem_key = f"req_{target_client.id}_{req.snapshot_id}_{int(datetime.now().timestamp())}"
+    idem_key = f"req_{ctx.client_id}_{req.snapshot_id}_{int(datetime.now().timestamp())}"
     share_event = ShareEvent(
         snapshot_id=req.snapshot_id,
-        target_client_id=target_client.id,
+        target_client_id=ctx.client_id,
         mode=req.mode or "instant",
-        requested_by=current_user.id,
+        requested_by=ctx.user_id,
         reason=req.reason or f"Catalog reuse request for snapshot {req.snapshot_id}",
         status="pending_approval",
         idempotency_key=idem_key,
@@ -380,21 +283,20 @@ def submit_reuse_request(
     session.add(share_event)
     session.flush()
 
-    # S-14 Audit: Log request created inside caller transaction
     log_catalog_audit(
         session=session,
-        actor_user_id=current_user.id,
+        actor_user_id=ctx.user_id,
         action="catalog.request_created",
-        client_id=target_client.id,
+        client_id=ctx.client_id,
         details={
             "share_event_id": share_event.id,
             "snapshot_id": req.snapshot_id,
-            "target_client_slug": clean_slug,
+            "target_client_slug": ctx.client_slug,
             "reason": req.reason,
+            "correlation_id": ctx.correlation_id,
         },
-        is_actor_super_admin=(getattr(current_user, "role", None) == "super_admin"),
+        is_actor_super_admin=ctx.is_super_admin,
     )
-
     session.commit()
 
     return {
@@ -407,25 +309,11 @@ def submit_reuse_request(
 
 @catalog_router.get("/requests")
 def list_reuse_requests(
-    client: Optional[str] = Query(None, description="Filter by client slug"),
     status: Optional[str] = Query(None, description="Filter by status (pending_approval, done, rejected)"),
-    request: Request = None,
-    current_user: auth.User = Depends(auth.require_permission_strict("account:reuse_request", require_client_context=True)),
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_request", explicit_slug_from="query", allow_optional_client_for_super_admin=True)),
     session: Session = Depends(get_platform_db),
 ):
     """Lists intelligence reuse requests."""
-    is_super = getattr(current_user, "role", None) == "super_admin"
-    if not is_super:
-        clean_slug = resolve_target_client(
-            request=request,
-            user=current_user,
-            session=session,
-            permission="account:reuse_request",
-            explicit_slug=client,
-        )
-    else:
-        clean_slug = auth.normalize_client_slug(client) if client else None
-
     query = session.query(
         ShareEvent,
         Client.slug.label("client_slug"),
@@ -437,33 +325,15 @@ def list_reuse_requests(
      .join(Snapshot, Snapshot.id == ShareEvent.snapshot_id)\
      .join(Company, Company.id == Snapshot.company_id)
 
-    if not is_super:
-        query = query.filter(Client.slug == clean_slug)
-    elif clean_slug:
-        query = query.filter(Client.slug == clean_slug)
+    if not ctx.is_super_admin:
+        query = query.filter(Client.slug == ctx.client_slug)
+    elif ctx.client_slug:
+        query = query.filter(Client.slug == ctx.client_slug)
 
     if status:
         query = query.filter(ShareEvent.status == status)
 
     rows = query.order_by(desc(ShareEvent.created_at)).limit(100).all()
-    results = []
-    for event, c_slug, c_name, snap_ver, comp_name, canon_key in rows:
-        results.append({
-            "request_id": event.id,
-            "status": event.status,
-            "client_slug": c_slug,
-            "client_name": c_name,
-            "snapshot_id": event.snapshot_id,
-            "snapshot_version": snap_ver,
-            "company_name": comp_name,
-            "canonical_key": canon_key,
-            "mode": event.mode,
-            "fee_credits": event.fee_credits,
-            "reason": event.reason,
-            "created_at": event.created_at.isoformat() if event.created_at else None,
-            "completed_at": event.completed_at.isoformat() if event.completed_at else None,
-        })
-    return {"requests": results, "total": len(results)}
     results = []
     for event, c_slug, c_name, snap_ver, comp_name, canon_key in rows:
         results.append({
@@ -491,7 +361,7 @@ def list_catalog_companies(
     search: Optional[str] = Query(None, description="Search legal or display name, or identifier"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user: auth.User = Depends(auth.require_permission_strict("catalog:view_library")),
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:view_library")),
     session: Session = Depends(get_platform_db),
 ):
     """Platform Account Library overview for Super Administrators."""
@@ -516,7 +386,6 @@ def list_catalog_companies(
             company_id=comp.id, status="ready"
         ).order_by(desc(Snapshot.version)).first()
 
-        # Find which clients currently hold this account
         holder_clients = session.query(Client.slug, Client.name).join(
             ShareEvent, ShareEvent.target_client_id == Client.id
         ).filter(
@@ -553,7 +422,7 @@ def list_catalog_companies(
 @catalog_router.post("/publish")
 def publish_account(
     req: PublishRequest,
-    current_user: auth.User = Depends(auth.require_permission_strict("catalog:publish")),
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:publish")),
     session: Session = Depends(get_platform_db),
 ):
     """Publishes a sanitized account snapshot from a tenant schema to platform_catalog."""
@@ -563,7 +432,7 @@ def publish_account(
             session=session,
             source_client_slug=clean_slug,
             account_id=req.account_id,
-            published_by_user_id=current_user.id,
+            published_by_user_id=ctx.user_id,
             force=req.force,
         )
         company = session.query(Company).filter_by(id=snapshot.company_id).first()
@@ -582,30 +451,38 @@ def publish_account(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise _handle_unexpected_exception("Publish", e)
+        raise _handle_unexpected_exception("Publish", e, ctx.correlation_id)
 
 
 @catalog_router.post("/assign")
 def assign_account(
     req: AssignRequest,
-    current_user: auth.User = Depends(auth.require_permission_strict("catalog:assign")),
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:assign")),
     session: Session = Depends(get_platform_db),
 ):
     """Super Admin direct assignment drawer: imports catalog intelligence directly into a client."""
     clean_slug = auth.normalize_client_slug(req.target_client_slug)
     idem_key = f"assign_{clean_slug}_{req.snapshot_id}_{int(datetime.now().timestamp())}"
+    target_ctx = TenantRequestContext.for_client(
+        session=session,
+        client=clean_slug,
+        user_id=ctx.user_id,
+        user_role="super_admin",
+        effective_role="super_admin",
+        correlation_id=ctx.correlation_id,
+    )
 
     try:
         res = AccountReuseService.hydrate_account_from_catalog(
             session=session,
-            target_client_slug=clean_slug,
+            ctx=target_ctx,
             snapshot_id=req.snapshot_id,
-            user_id=current_user.id,
+            user_id=ctx.user_id,
             idempotency_key=idem_key,
             mode=req.mode,
-            fee_credits=0,  # Super admin direct assign is 0 fee by default
+            fee_credits=0,
             reason=req.reason or f"Super admin direct assignment to {clean_slug}",
-            approved_by_user_id=current_user.id,
+            approved_by_user_id=ctx.user_id,
             is_admin_assign=True,
         )
         return res
@@ -622,13 +499,13 @@ def assign_account(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise _handle_unexpected_exception("Direct assignment", e)
+        raise _handle_unexpected_exception("Direct assignment", e, ctx.correlation_id)
 
 
 @catalog_router.post("/requests/{request_id}/approve")
 def approve_reuse_request(
     request_id: int,
-    current_user: auth.User = Depends(auth.require_permission_strict("catalog:approve")),
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:approve")),
     session: Session = Depends(get_platform_db),
 ):
     """Super Admin approves a pending reuse request and triggers hydration."""
@@ -642,21 +519,26 @@ def approve_reuse_request(
             detail=f"Request {request_id} is in status '{event.status}', expected 'pending_approval'",
         )
 
-    target_client = session.query(Client).filter_by(id=event.target_client_id).first()
-    if not target_client:
-        raise HTTPException(status_code=404, detail="Target client not found")
+    target_ctx = TenantRequestContext.for_client(
+        session=session,
+        client=event.target_client_id,
+        user_id=event.requested_by or ctx.user_id,
+        user_role="super_admin",
+        effective_role="super_admin",
+        correlation_id=ctx.correlation_id,
+    )
 
     try:
         res = AccountReuseService.hydrate_account_from_catalog(
             session=session,
-            target_client_slug=target_client.slug,
+            ctx=target_ctx,
             snapshot_id=event.snapshot_id,
-            user_id=event.requested_by or current_user.id,
+            user_id=event.requested_by or ctx.user_id,
             idempotency_key=event.idempotency_key,
             mode=event.mode,
             fee_credits=event.fee_credits,
             reason=event.reason,
-            approved_by_user_id=current_user.id,
+            approved_by_user_id=ctx.user_id,
         )
         return {
             "ok": True,
@@ -674,8 +556,7 @@ def approve_reuse_request(
     except AccountReuseError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        correlation_id = uuid.uuid4().hex[:12]
-        logger.error(f"[approve_reuse_request] Approval hydration failed (correlation_id={correlation_id}): {e}", exc_info=True)
+        logger.error(f"[approve_reuse_request] Approval hydration failed (correlation_id={ctx.correlation_id}): {e}", exc_info=True)
         session.rollback()
         new_session = SessionLocal()
         try:
@@ -689,15 +570,16 @@ def approve_reuse_request(
 
         raise HTTPException(
             status_code=500,
-            detail={"detail": "Approval hydration failed", "correlation_id": correlation_id},
+            detail={"detail": "Approval hydration failed", "correlation_id": ctx.correlation_id},
+            headers={"X-Correlation-ID": ctx.correlation_id},
         )
 
 
 @catalog_router.post("/requests/{request_id}/reject")
 def reject_reuse_request(
     request_id: int,
-    req: RejectRequest = None,
-    current_user: auth.User = Depends(auth.require_permission_strict("catalog:approve")),
+    req: Optional[RejectRequest] = None,
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:approve")),
     session: Session = Depends(get_platform_db),
 ):
     """Super Admin rejects a pending reuse request."""
@@ -712,11 +594,10 @@ def reject_reuse_request(
     event.reason = (req.reason if req else None) or "Rejected by platform administrator"
     event.completed_at = datetime.now(timezone.utc)
 
-    # S-14 Audit: Log request rejected inside caller transaction
     target_client = session.query(Client).filter_by(id=event.target_client_id).first()
     log_catalog_audit(
         session=session,
-        actor_user_id=current_user.id,
+        actor_user_id=ctx.user_id,
         action="catalog.request_rejected",
         client_id=event.target_client_id,
         target_user_id=event.requested_by,
@@ -725,10 +606,10 @@ def reject_reuse_request(
             "snapshot_id": event.snapshot_id,
             "target_client_slug": target_client.slug if target_client else None,
             "reason": event.reason,
+            "correlation_id": ctx.correlation_id,
         },
         is_actor_super_admin=True,
     )
-
     session.commit()
 
     return {"ok": True, "request_id": event.id, "status": "rejected"}
@@ -737,8 +618,8 @@ def reject_reuse_request(
 @catalog_router.post("/share-events/{share_event_id}/rollback")
 def rollback_share_event(
     share_event_id: int,
-    req: RollbackRequest = None,
-    current_user: auth.User = Depends(auth.require_permission_strict("catalog:rollback")),
+    req: Optional[RollbackRequest] = None,
+    ctx: PlatformRequestContext = Depends(platform_context("catalog:rollback")),
     session: Session = Depends(get_platform_db),
 ):
     """Super Admin exact rollback of a completed hydration event.
@@ -751,7 +632,7 @@ def rollback_share_event(
         res = AccountReuseService.rollback_account_reuse(
             session=session,
             share_event_id=share_event_id,
-            admin_user_id=current_user.id,
+            admin_user_id=ctx.user_id,
             reason=req.reason if req else None,
         )
         return res
@@ -762,7 +643,7 @@ def rollback_share_event(
         target_client = session.query(Client).filter_by(id=client_id).first() if client_id else None
         log_catalog_audit(
             session=session,
-            actor_user_id=current_user.id,
+            actor_user_id=ctx.user_id,
             action="catalog.rollback_blocked",
             client_id=client_id,
             details={
@@ -770,6 +651,7 @@ def rollback_share_event(
                 "target_client_slug": target_client.slug if target_client else None,
                 "reason": str(e),
                 "breakdown": getattr(e, "breakdown", {}),
+                "correlation_id": ctx.correlation_id,
             },
             is_actor_super_admin=True,
         )
@@ -780,10 +662,11 @@ def rollback_share_event(
                 "message": str(e),
                 "breakdown": getattr(e, "breakdown", {}),
             },
+            headers={"X-Correlation-ID": ctx.correlation_id},
         )
     except AccountReuseError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise _handle_unexpected_exception("Rollback", e)
+        raise _handle_unexpected_exception("Rollback", e, ctx.correlation_id)

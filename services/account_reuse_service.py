@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+import auth
 import config
 from db.column_types import get_column_kinds, get_real_columns
 from db.models.client import Client
@@ -220,21 +221,44 @@ class AccountReuseService:
     def check_reuse_available(
         cls,
         session: Session,
-        identifier: str,
-        target_client_slug: str,
+        arg1: Any,
+        arg2: Any,
     ) -> Optional[Dict[str, Any]]:
         """Checks if verified intelligence is available for an identifier.
         
         Zero-Knowledge Principle:
         - NEVER exposes source tenant slug or ID.
         - Returns identical None if company does not exist or has no ready snapshot.
+        Supports both signatures:
+        - Modern: (session, ctx: TenantRequestContext, identifier: str)
+        - Legacy: (session, identifier: str, target_client_slug: str)
         """
-        clean_slug = validate_slug(target_client_slug)
-        target_client = session.query(Client).filter_by(slug=clean_slug).first()
-        if not target_client:
-            raise ValueError(f"Target client '{clean_slug}' not found.")
+        from core.tenant_context import TenantRequestContext
+        if isinstance(arg1, TenantRequestContext):
+            ctx = arg1
+            identifier = str(arg2)
+        elif isinstance(arg2, TenantRequestContext):
+            ctx = arg2
+            identifier = str(arg1)
+        elif isinstance(arg1, str) and isinstance(arg2, str):
+            norm_a = auth.normalize_client_slug(arg1)
+            client_a = session.query(Client).filter_by(slug=norm_a).first() if norm_a else None
+            if client_a:
+                ctx = TenantRequestContext.for_client(session, client_a)
+                identifier = arg2
+            else:
+                norm_b = auth.normalize_client_slug(arg2)
+                client_b = session.query(Client).filter_by(slug=norm_b).first() if norm_b else None
+                if client_b:
+                    ctx = TenantRequestContext.for_client(session, client_b)
+                    identifier = arg1
+                else:
+                    clean_slug = validate_slug(arg2)
+                    raise ValueError(f"Target client '{clean_slug}' not found.")
+        else:
+            raise ValueError("Invalid arguments to check_reuse_available")
 
-        if not target_client.catalog_consume:
+        if not ctx.client_flags.catalog_consume:
             return None
 
         company = CatalogService.get_company_by_identifier(session, identifier)
@@ -247,7 +271,8 @@ class AccountReuseService:
             return None
 
         # Check if target client already has this account
-        target_schema = schema_for(clean_slug)
+        target_schema = ctx.schema
+        clean_slug = ctx.client_slug
         already_exists = False
         existing_acct = session.execute(
             text(f"""
@@ -305,7 +330,7 @@ class AccountReuseService:
             "counts": counts,
             "estimated_credits_saved": estimated_credits_saved,
             "fee_credits": fee_credits,
-            "requires_approval": target_client.reuse_requires_approval,
+            "requires_approval": ctx.client_flags.reuse_requires_approval,
         }
 
     # ── 2. Cryptographic Preview Signing ──────────────────────────────────────
@@ -392,15 +417,16 @@ class AccountReuseService:
     def hydrate_account_from_catalog(
         cls,
         session: Session,
-        target_client_slug: str,
-        snapshot_id: int,
-        user_id: int,
-        idempotency_key: str,
+        ctx: Any = None,
+        snapshot_id: int = None,
+        user_id: int = None,
+        idempotency_key: str = None,
         mode: str = "instant",
         fee_credits: int = 1,
         reason: Optional[str] = None,
         approved_by_user_id: Optional[int] = None,
         is_admin_assign: bool = False,
+        target_client_slug: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Atomically imports a catalog snapshot into the target tenant workspace.
         
@@ -413,13 +439,23 @@ class AccountReuseService:
         - Provenance logged in account_origin.
         - Audit trail recorded in share_events.
         """
-        clean_slug = validate_slug(target_client_slug)
-        target_schema = schema_for(clean_slug)
+        if ctx is None and target_client_slug is not None:
+            ctx = target_client_slug
+        from core.tenant_context import TenantRequestContext
+        if isinstance(ctx, TenantRequestContext):
+            clean_slug = ctx.client_slug
+            target_schema = ctx.schema
+            target_client_id = ctx.client_id
+            target_client = session.query(Client).filter_by(id=ctx.client_id).first()
+        else:
+            clean_slug = validate_slug(str(ctx))
+            target_schema = schema_for(clean_slug)
+            target_client = session.query(Client).filter_by(slug=clean_slug).first()
+            if not target_client:
+                raise ValueError(f"Target client '{clean_slug}' not found.")
+            target_client_id = target_client.id
 
         # 1. Verify target client and snapshot
-        target_client = session.query(Client).filter_by(slug=clean_slug).first()
-        if not target_client:
-            raise ValueError(f"Target client '{clean_slug}' not found.")
         if target_client.status != "active":
             raise AccountReuseError(f"Target client is in '{target_client.status}' status.")
         if not target_client.catalog_consume and not is_admin_assign:
