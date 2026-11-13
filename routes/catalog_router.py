@@ -39,6 +39,7 @@ from db.models.platform_catalog import (
 )
 from db.tenant import schema_for, validate_slug
 from services.account_reuse_service import (
+    AccountMatcher,
     AccountReuseError,
     AccountReuseService,
     DuplicateAccountError,
@@ -48,9 +49,11 @@ from services.account_reuse_service import (
     SkeletonIncompatibleError,
 )
 from services.catalog_audit import log_catalog_audit, reuse_check_limiter
+from services.catalog_presenter import build_preview_view
 from services.catalog_pricing import CatalogPricing
 from services.catalog_service import AmbiguousIdentifierError, CatalogService
 from services.credit_service import AccountQuotaExceededError, InsufficientCreditsError
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +122,19 @@ class RejectRequest(BaseModel):
 
 class RollbackRequest(BaseModel):
     reason: Optional[str] = Field(None, description="Rollback justification")
+
+
+class FetchFreshRequest(BaseModel):
+    company_name: str = Field(..., description="Enterprise company name")
+    domain: Optional[str] = Field(None, description="Primary domain")
+    stock_symbol: Optional[str] = Field(None, description="Stock ticker symbol")
+    sec_cik: Optional[str] = Field(None, description="SEC CIK")
+    industry: Optional[str] = Field(None, description="Industry sector")
+    headquarters_location: Optional[str] = Field(None, description="HQ location")
+    company_type: Optional[str] = Field(None, description="Company type")
+    declined_snapshot_id: Optional[int] = Field(None, description="Snapshot ID declined in favor of fresh fetch")
+    reason: Optional[str] = Field(None, description="Reason for fresh fetch")
+    client_slug: Optional[str] = Field(None, description="Target client slug override")
 
 
 # ── Tenant-Facing Endpoints ──────────────────────────────────────────────────
@@ -194,6 +210,230 @@ def reuse_check(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise _handle_unexpected_exception("Reuse check", e, ctx.correlation_id)
+
+
+@catalog_router.get("/preview")
+def get_catalog_preview(
+    company_name: Optional[str] = Query(None, description="Company name"),
+    domain: Optional[str] = Query(None, description="Company domain"),
+    identifier: Optional[str] = Query(None, description="Domain, CIK, or canonical key"),
+    client_slug: Optional[str] = Query(None, description="Explicit target client slug"),
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_check", explicit_slug_from="query")),
+    session: Session = Depends(get_platform_db),
+):
+    """Returns a rich, tenant-safe PreviewView for verified catalog intelligence.
+
+    Strict Anti-Oracle isolation:
+    - Never reveals source tenant identity, other clients, or tenant counts.
+    - Emits standardized typed dictionary conformant to Phase C specification.
+    """
+    ident = (identifier or domain or company_name or "").strip()
+    if not ident:
+        raise HTTPException(status_code=400, detail="company_name, domain, or identifier is required")
+
+    rate_limit_key = f"{ctx.user_id}:{ctx.client_slug}"
+    if not reuse_check_limiter.check_and_record(rate_limit_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded: 30 calls per 5 minutes",
+        )
+
+    try:
+        result = AccountReuseService.check_reuse_available(session, ctx, ident)
+        if not result or not result.get("available"):
+            return {
+                "match_found": False,
+                "available": False,
+                "company_name": company_name or ident,
+                "message": "No verified catalog intelligence available for this company.",
+            }
+
+        snapshot_id = result.get("snapshot_id")
+        snapshot = session.query(Snapshot).filter_by(id=snapshot_id).first()
+        if not snapshot:
+            return {
+                "match_found": False,
+                "available": False,
+                "company_name": company_name or ident,
+            }
+
+        company = session.query(Company).filter_by(id=snapshot.company_id).first()
+
+        # Generate HMAC-signed preview token
+        token = AccountReuseService.generate_preview_token(
+            snapshot_id=snapshot.id,
+            target_client_slug=ctx.client_slug,
+            user_id=ctx.user_id,
+        )
+
+        client_obj = session.query(Client).filter_by(id=ctx.client_id).first()
+        client_balance = max(0, (client_obj.api_credits_total or 0) - (client_obj.api_credits_used or 0)) if client_obj else 0
+        fee_credits = result.get("fee_credits", 0)
+        estimated_credits_saved = result.get("estimated_credits_saved", 85)
+        fetch_fresh_estimate_credits = 100
+        now = datetime.now(timezone.utc)
+        from datetime import timedelta
+        expires_at = now + timedelta(minutes=15)
+
+        preview = build_preview_view(
+            snapshot=snapshot,
+            company=company,
+            quality_score=float(result.get("quality_score", 85.0)),
+            quality_grade=result.get("quality_grade", "A"),
+            counts=result.get("counts", {}),
+            already_exists=result.get("already_exists", False),
+            existing_account_id=result.get("existing_account_id"),
+            refresh_available=result.get("refresh_available", False),
+            fee_credits=fee_credits,
+            estimated_credits_saved=estimated_credits_saved,
+            fetch_fresh_estimate_credits=fetch_fresh_estimate_credits,
+            client_balance=client_balance,
+            requires_approval=client_obj.reuse_requires_approval if client_obj else result.get("requires_approval", True),
+            preview_token=token,
+            expires_at=expires_at,
+        )
+
+        # Audit view event
+        ident_hash = hashlib.sha256(ident.lower().encode("utf-8")).hexdigest()
+        log_catalog_audit(
+            session=session,
+            actor_user_id=ctx.user_id,
+            action="catalog.preview_viewed",
+            client_id=ctx.client_id,
+            details={
+                "identifier_hash": ident_hash,
+                "target_client_slug": ctx.client_slug,
+                "target_client_id": ctx.client_id,
+                "snapshot_id": snapshot.id,
+                "correlation_id": ctx.correlation_id,
+            },
+            is_actor_super_admin=ctx.is_super_admin,
+        )
+        session.commit()
+
+        return {
+            "match_found": True,
+            "available": True,
+            **preview,
+        }
+
+    except AmbiguousIdentifierError as e:
+        logger.warning(f"[preview] Ambiguous identifier '{ident}': {e}")
+        return {
+            "match_found": False,
+            "available": False,
+            "company_name": company_name or ident,
+            "message": "Multiple matches found in catalog.",
+        }
+    except Exception as e:
+        raise _handle_unexpected_exception("Catalog preview", e, ctx.correlation_id)
+
+
+@catalog_router.post("/fetch-fresh")
+def fetch_fresh_account(
+    req: FetchFreshRequest,
+    ctx: TenantRequestContext = Depends(tenant_context("account:write", explicit_slug_from="body")),
+    session: Session = Depends(get_platform_db),
+):
+    """Enqueues fresh intelligence harvesting for a company, declining catalog reuse if specified."""
+    clean_name = req.company_name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="company_name is required")
+
+    clean_dom = (
+        req.domain.replace("https://", "").replace("http://", "").split("/")[0].split("?")[0].strip().lower()
+        if req.domain
+        else None
+    )
+    if clean_dom and clean_dom.startswith("www."):
+        clean_dom = clean_dom[4:]
+
+    # Anti-collision check in target workspace
+    company_stub = type("CompanyStub", (), {
+        "canonical_key": clean_dom or clean_name.lower().replace(" ", "_"),
+        "display_name": clean_name,
+        "legal_name": clean_name,
+        "id": None,
+    })()
+    existing = AccountMatcher.find_existing(session, ctx, company_stub)
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Account '{clean_name}' already exists in workspace '{ctx.client_slug}'.",
+        )
+
+    # Log audit event when catalog reuse is declined in favor of fresh fetch
+    if req.declined_snapshot_id:
+        log_catalog_audit(
+            session=session,
+            actor_user_id=ctx.user_id,
+            action="catalog.fetch_fresh_chosen",
+            client_id=ctx.client_id,
+            details={
+                "declined_snapshot_id": req.declined_snapshot_id,
+                "company_name": clean_name,
+                "target_client_slug": ctx.client_slug,
+                "reason": req.reason,
+                "correlation_id": ctx.correlation_id,
+            },
+            is_actor_super_admin=ctx.is_super_admin,
+        )
+        session.commit()
+
+    from services.account_automation_engine import AccountAutomationEngine
+    from services.job_registry import (
+        create_job as _jreg_create,
+        update_job as _jreg_update,
+        STATUS_FAILED,
+        TYPE_ACCOUNT,
+    )
+    from db.tenant import tenant_scope
+
+    preflight = AccountAutomationEngine.preflight_account_check(clean_name, clean_dom, client_slug=ctx.client_slug)
+    if not preflight.get("allowed"):
+        raise HTTPException(
+            status_code=402,
+            detail=preflight.get("message", "Insufficient credits for autonomous pipeline enrichment."),
+        )
+
+    job_id = _jreg_create(
+        TYPE_ACCOUNT,
+        meta={
+            "company_name": clean_name,
+            "target_url": clean_dom,
+            "mode": "fetch_fresh_pipeline",
+            "declined_snapshot_id": req.declined_snapshot_id,
+        },
+        client_slug=ctx.client_slug,
+    )
+
+    def _bg_worker():
+        try:
+            with tenant_scope(ctx.client_slug):
+                AccountAutomationEngine.execute_account_automation(
+                    company_name=clean_name,
+                    domain=clean_dom,
+                    stock_symbol=req.stock_symbol,
+                    sec_cik=req.sec_cik,
+                    industry=req.industry,
+                    headquarters_location=req.headquarters_location,
+                    company_type=req.company_type,
+                    job_id=job_id,
+                    client_slug=ctx.client_slug,
+                )
+        except Exception as exc:
+            _jreg_update(job_id, status=STATUS_FAILED, error=str(exc))
+
+    threading.Thread(target=_bg_worker, daemon=True).start()
+
+    return {
+        "status": "queued",
+        "job_id": job_id,
+        "company_name": clean_name,
+        "domain": clean_dom,
+        "client_slug": ctx.client_slug,
+        "message": "Fresh intelligence pipeline initiated in background.",
+    }
 
 
 @catalog_router.post("/hydrate")

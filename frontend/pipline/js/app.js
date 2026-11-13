@@ -3521,7 +3521,7 @@ $(function () {
       if (chosenSlug) headers['X-Client-Slug'] = chosenSlug;
 
       try {
-        const res = await fetch(`${API_BASE}/api/catalog/reuse-check?identifier=${encodeURIComponent(identifier)}`, {
+        const res = await fetch(`${API_BASE}/api/catalog/preview?identifier=${encodeURIComponent(identifier)}`, {
           headers,
           credentials: "include"
         });
@@ -3530,15 +3530,16 @@ $(function () {
           return;
         }
         const data = await res.json();
-        if (!data.available) {
+        if (!data.available && !data.match_found) {
           this.reset();
           return;
         }
 
         this.currentResult = data;
-        if (data.default_action === "use_verified") {
+        const rec = data.recommendation || data.default_action;
+        if (rec === "use_verified" || rec === "instant") {
           this.selectedMode = "instant";
-        } else if (data.default_action === "use_verified_refresh") {
+        } else if (rec === "use_verified_then_refresh" || rec === "use_verified_refresh" || rec === "refresh") {
           this.selectedMode = "refresh";
         } else {
           this.selectedMode = "fresh";
@@ -3554,18 +3555,22 @@ $(function () {
 
     renderCallout(data) {
       const $callout = $("#catalogReuseCallout");
-      if (!data || !data.available) {
+      if (!data || (!data.available && !data.match_found)) {
         $callout.empty().hide();
         return;
       }
 
       const counts = data.counts || {};
-      const lobs = counts.lobs || 0;
-      const personas = counts.personas || 0;
-      const score = Math.round(data.quality_score || 85);
-      const grade = data.quality_grade || "A";
+      const lobs = counts.lobs || (data.included ? (data.included.find(i => i.category === 'Lines of Business')?.count || 0) : 0);
+      const personas = counts.personas || (data.included ? (data.included.find(i => i.category === 'Executives & Personas')?.count || 0) : 0);
+      const score = Math.round(data.quality?.score || data.quality_score || 85);
+      const grade = data.quality?.grade || data.quality_grade || "A";
       const ageDays = data.age_days !== undefined ? data.age_days : 0;
       const ageText = ageDays === 0 ? "today" : `${ageDays}d ago`;
+
+      const feeCredits = data.pricing?.fee_credits !== undefined ? data.pricing.fee_credits : (data.fee_credits || 1);
+      const savingsCredits = data.pricing?.savings_credits !== undefined ? data.pricing.savings_credits : (data.estimated_credits_saved || 85);
+      const balanceAfter = data.pricing?.balance_after !== undefined ? data.pricing.balance_after : null;
 
       let freshnessBadge = `<span class="badge bg-success" style="font-size:0.7rem;"><i class="bi bi-clock-history me-1"></i>Fresh (${ageText})</span>`;
       if (data.freshness === "stale") {
@@ -3611,6 +3616,8 @@ $(function () {
         `;
       }
 
+      const displayName = data.company?.display_name || data.display_name || 'Enterprise Account';
+
       $callout.html(`
         <div style="background:linear-gradient(135deg, #fdf8f4 0%, #f7eee7 100%);border:1.5px solid #d4b59e;border-radius:12px;padding:14px 16px;box-shadow:0 3px 10px rgba(74,53,40,0.06);">
           ${alreadyExistsAlert}
@@ -3622,12 +3629,12 @@ $(function () {
               ${freshnessBadge}
             </div>
             <span class="badge" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:0.72rem;font-weight:700;padding:4px 8px;border-radius:6px;">
-              <i class="bi bi-piggy-bank-fill me-1"></i>~${data.estimated_credits_saved || 4300} Credits Saved
+              <i class="bi bi-piggy-bank-fill me-1"></i>~${savingsCredits} Credits Saved
             </span>
           </div>
 
           <div style="font-size:0.78rem;color:#4a3528;margin-bottom:10px;line-height:1.4;">
-            Sanitized golden record available in catalog for <strong>${esc(data.display_name || 'Enterprise Account')}</strong>.
+            Sanitized golden record available in catalog for <strong>${esc(displayName)}</strong>.
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-bottom:12px;">
@@ -3658,7 +3665,7 @@ $(function () {
                   <div style="font-size:0.68rem;color:#64748b;">Instant single-transaction import from sanitized catalog snapshot</div>
                 </div>
               </div>
-              <span class="badge" style="background:#f1f5f9;color:#334155;font-size:0.72rem;font-weight:700;border:1px solid #cbd5e1;">${data.fee_credits || 1} credit</span>
+              <span class="badge" style="background:#f1f5f9;color:#334155;font-size:0.72rem;font-weight:700;border:1px solid #cbd5e1;">${feeCredits} credit</span>
             </label>
 
             <label class="catalog-mode-card ${this.selectedMode === 'refresh' ? 'selected' : ''}" style="display:flex;align-items:center;justify-content:space-between;background:#fff;border:1.5px solid ${this.selectedMode === 'refresh' ? '#8A6248' : '#e2e8f0'};border-radius:8px;padding:8px 12px;cursor:${data.already_exists ? 'not-allowed' : 'pointer'};">
@@ -3669,7 +3676,7 @@ $(function () {
                   <div style="font-size:0.68rem;color:#64748b;">Instant golden record hydration + queues background incremental freshness scan</div>
                 </div>
               </div>
-              <span class="badge" style="background:#f1f5f9;color:#334155;font-size:0.72rem;font-weight:700;border:1px solid #cbd5e1;">${data.fee_credits || 1} cr + refresh</span>
+              <span class="badge" style="background:#f1f5f9;color:#334155;font-size:0.72rem;font-weight:700;border:1px solid #cbd5e1;">${feeCredits} cr + refresh</span>
             </label>
 
             <label class="catalog-mode-card ${this.selectedMode === 'fresh' ? 'selected' : ''}" style="display:flex;align-items:center;justify-content:space-between;background:#fff;border:1.5px solid ${this.selectedMode === 'fresh' ? '#8A6248' : '#e2e8f0'};border-radius:8px;padding:8px 12px;cursor:pointer;">
@@ -3686,6 +3693,59 @@ $(function () {
           ${approvalBox}
         </div>
       `).show();
+    },
+
+    async executeFetchFresh(companyName, domain, chosenSlug, $btn) {
+      const data = this.currentResult;
+      const originalBtnText = $btn.html();
+      $btn.html('<i class="bi bi-arrow-repeat me-1 spin"></i> Initiating Fresh Harvest...').prop("disabled", true);
+
+      const token = sessionStorage.getItem('access_token') || localStorage.getItem('access_token');
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (chosenSlug) headers['X-Client-Slug'] = chosenSlug;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/catalog/fetch-fresh`, {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify({
+            company_name: companyName,
+            domain: domain || null,
+            stock_symbol: ($("#newAccountTicker").val() || "").trim().toUpperCase() || null,
+            declined_snapshot_id: data ? data.snapshot_id : null,
+            reason: "User selected fetch fresh from catalog preview",
+          }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}: Failed to initiate fresh pipeline`);
+        }
+
+        const freshRes = await res.json();
+        const modalEl = document.getElementById("addAccountModal");
+        if (modalEl) {
+          const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+          bsModal.hide();
+        }
+
+        showNotification(
+          `🚀 Fresh research pipeline queued for <strong>${esc(companyName)}</strong>.<br/>` +
+          `<span style="font-size:0.74rem;color:#0284c7;">Autonomous harvest running in background.</span>`,
+          "info",
+          7000
+        );
+
+        if (typeof loadData === "function") {
+          setTimeout(() => loadData(), 1500);
+        }
+      } catch (err) {
+        console.error("Fetch fresh error:", err);
+        $btn.html(originalBtnText).prop("disabled", false);
+        showNotification(`❌ Error initiating fresh fetch: ${esc(err.message)}`, "error");
+      }
+    },
     },
 
     updateModalButtons() {
@@ -13266,8 +13326,12 @@ $(function () {
       return;
     }
 
-    // Option Catalog: Verified Intelligence Reuse / Request Gatekeeper (v2)
-    if (CatalogReuseManager.currentResult && CatalogReuseManager.currentResult.available && CatalogReuseManager.selectedMode !== "fresh") {
+    // Option Catalog: Verified Intelligence Reuse / Request Gatekeeper (v2 Dual-Mode)
+    if (CatalogReuseManager.currentResult && (CatalogReuseManager.currentResult.available || CatalogReuseManager.currentResult.match_found)) {
+      if (CatalogReuseManager.selectedMode === "fresh") {
+        await CatalogReuseManager.executeFetchFresh(companyName, domain, chosenSlug, $btn);
+        return;
+      }
       await CatalogReuseManager.executeReuse(companyName, domain, chosenSlug, $btn);
       return;
     }

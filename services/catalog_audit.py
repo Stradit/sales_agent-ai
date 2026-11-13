@@ -24,6 +24,8 @@ CATALOG_ACTIONS = {
     "catalog.publish",
     "catalog.publish_forced",
     "catalog.reuse_check_available",
+    "catalog.preview_viewed",
+    "catalog.fetch_fresh_chosen",
     "catalog.hydrate",
     "catalog.assign",
     "catalog.request_created",
