@@ -33,9 +33,7 @@ __pycache__/
 dist/
 build/
 
-# Celery & Redis Task Queue (Deferred for later update)
-celery_app.py
-tasks/
+# Celery Beat runtime files
 celerybeat-schedule
 celerybeat.pid
 

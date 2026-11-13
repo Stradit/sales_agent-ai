@@ -173,6 +173,13 @@ class ShareEvent(Base):
     status = Column(String(32), default="previewed", nullable=False)  # previewed | pending_approval | queued | running | done | failed | rolled_back
     idempotency_key = Column(String(128), unique=True, nullable=False, index=True)
     fee_credits = Column(Integer, default=0, nullable=False)
+    estimated_credits_saved = Column(Integer, nullable=True)
+    quality_score_at_event = Column(Numeric(5, 2), nullable=True)
+    freshness_at_event = Column(String(16), nullable=True)
+    fetch_fresh_credits_est = Column(Integer, nullable=True)
+    decided_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    decision_note = Column(Text, nullable=True)
     created_ids = Column(JSONB, nullable=True)
     counts = Column(JSONB, nullable=True)
     error = Column(Text, nullable=True)
@@ -245,3 +252,49 @@ class AccountOrigin(Base):
 
     def __repr__(self):
         return f"<AccountOrigin(account_id={self.account_id}, origin='{self.origin_type}', key='{self.canonical_key}')>"
+
+
+class ReuseRequestNotification(Base):
+    """Platform inbox and delivery outbox for catalog reuse requests and status updates."""
+    __tablename__ = "reuse_request_notifications"
+    __table_args__ = {"schema": "platform_catalog"}
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    event_id = Column(
+        BigInteger,
+        ForeignKey("platform_catalog.share_events.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    recipient_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    recipient_scope = Column(String(32), nullable=False)  # super_admin | client_admin
+    channel = Column(String(16), nullable=False)          # in_app | email
+    kind = Column(String(32), nullable=False)             # request_created | approved | rejected | failed | refresh_available
+    target_client_id = Column(
+        Integer,
+        ForeignKey("clients.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    payload = Column(JSONB, default=dict, nullable=False)
+    status = Column(String(16), default="pending", nullable=False)  # pending | sent | failed | read
+    attempts = Column(Integer, default=0, nullable=False)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    event = relationship("ShareEvent", foreign_keys=[event_id])
+    recipient = relationship("User", foreign_keys=[recipient_user_id])
+    target_client = relationship("Client", foreign_keys=[target_client_id])
+
+    def __repr__(self):
+        return f"<ReuseRequestNotification(id={self.id}, kind='{self.kind}', status='{self.status}', channel='{self.channel}')>"
