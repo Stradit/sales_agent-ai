@@ -24,6 +24,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
@@ -46,6 +47,7 @@ from db.models.platform_catalog import (
 )
 from db.tenant import schema_for, validate_slug
 from services.catalog_audit import log_catalog_audit
+from services.catalog_pricing import CatalogPricing
 from services.catalog_service import CatalogService, get_share_policy
 from services.credit_service import (
     AccountQuotaExceededError,
@@ -74,6 +76,11 @@ class AccountReuseError(Exception):
 
 class DuplicateAccountError(AccountReuseError):
     """Raised when an account already exists in the target tenant workspace."""
+    pass
+
+
+class IdempotencyConflictError(AccountReuseError):
+    """Raised when an idempotency key conflict occurs."""
     pass
 
 
@@ -305,14 +312,13 @@ class AccountReuseService:
             freshness = "old"
             default_action = "fetch_fresh"
 
-        # Rate card credit savings estimation
+        # S-8: Unified rate card fee and credit savings estimation via CatalogPricing
         counts = snapshot.counts or {}
-        lobs_cnt = counts.get("lobs", 0)
-        per_cnt = counts.get("personas", 0)
-        # Baseline crawl (25) + 2 credits per LOB + 5 credits per Persona
-        estimated_credits_saved = 25 + (lobs_cnt * 2) + (per_cnt * 5)
-
-        fee_credits = 1  # Configurable flat fee
+        estimated_credits_saved = CatalogPricing.estimated_credits_saved(snapshot)
+        fee_credits = CatalogPricing.fee_for(
+            snapshot=snapshot,
+            is_super_admin=ctx.is_super_admin,
+        )
 
         return {
             "available": True,
@@ -386,6 +392,34 @@ class AccountReuseService:
             return True
         except Exception:
             return False
+
+    # ── Idempotency Formatting & Validation (S-9) ─────────────────────────────
+
+    IDEMPOTENCY_KEY_REGEX = re.compile(r"^[A-Za-z0-9_\-:.]{8,128}$")
+
+    @classmethod
+    def format_idempotency_key(
+        cls,
+        key: Optional[str],
+        client_id: int,
+        snapshot_id: int,
+        mode: str,
+    ) -> str:
+        """Formats and validates an idempotency key (S-9).
+        
+        Caller-supplied keys must match ^[A-Za-z0-9_\-:.]{8,128}$ and are namespaced as '{client_id}:{key}'.
+        Default deterministic key is '{client_id}:{snapshot_id}:{mode}'.
+        """
+        if key:
+            if not cls.IDEMPOTENCY_KEY_REGEX.match(key):
+                raise ValueError(
+                    f"Invalid idempotency key '{key}'. Must match ^[A-Za-z0-9_\\-:.]{{8,128}}$"
+                )
+            prefix = f"{client_id}:"
+            if not key.startswith(prefix):
+                return f"{prefix}{key}"
+            return key
+        return f"{client_id}:{snapshot_id}:{mode}"
 
     # ── 3. Relational Remapping Engine ────────────────────────────────────────
 
@@ -481,16 +515,28 @@ class AccountReuseService:
         )
         CreditService.acquire_account_quota_lock(session, clean_slug)
 
+        # S-9: Format and namespace idempotency key
+        idem_key = cls.format_idempotency_key(idempotency_key, target_client.id, snapshot.id, mode)
+
         # 3. Idempotency Check
-        existing_event = session.query(ShareEvent).filter_by(idempotency_key=idempotency_key).first()
-        if existing_event and existing_event.status == "done":
-            return {
-                "ok": True,
-                "idempotent": True,
-                "share_event_id": existing_event.id,
-                "account_id": (existing_event.created_ids or {}).get("accounts", [None])[0],
-                "counts": existing_event.counts,
-            }
+        existing_event = session.query(ShareEvent).filter_by(idempotency_key=idem_key).first()
+        if existing_event:
+            if existing_event.snapshot_id != snapshot.id or existing_event.target_client_id != target_client.id:
+                raise IdempotencyConflictError(
+                    f"Idempotency key '{idempotency_key}' reused for different snapshot ({existing_event.snapshot_id} vs {snapshot.id}) or target."
+                )
+            if existing_event.status == "rolled_back":
+                raise IdempotencyConflictError("This operation was previously rolled back and cannot be re-driven.")
+            if existing_event.status == "done":
+                return {
+                    "ok": True,
+                    "idempotent": True,
+                    "share_event_id": existing_event.id,
+                    "account_id": (existing_event.created_ids or {}).get("accounts", [None])[0],
+                    "counts": existing_event.counts,
+                }
+            if existing_event.status == "running" and not (existing_event and approved_by_user_id):
+                raise IdempotencyConflictError("Operation is already in progress.")
 
         # 4. Quota Enforcement
         CreditService.check_and_enforce_account_quota(
@@ -521,38 +567,17 @@ class AccountReuseService:
             raise DuplicateAccountError(f"Account '{acct_key or acct_domain}' already exists in tenant workspace.")
 
         try:
-            # 6. Credit Fee Billing & Ledger (atomic check & deduction)
-            if fee_credits > 0:
-                if target_client.api_credits_total > 0 and (target_client.api_credits_used + fee_credits > target_client.api_credits_total):
-                    raise InsufficientCreditsError(
-                        f"Insufficient credits: client '{clean_slug}' requires {fee_credits} credits but only has {max(0, target_client.api_credits_total - target_client.api_credits_used)} remaining."
-                    )
-
-                res = session.execute(
-                    text("""
-                        UPDATE public.clients
-                        SET api_credits_used = api_credits_used + :fee
-                        WHERE id = :id AND (api_credits_total = 0 OR api_credits_used + :fee <= api_credits_total)
-                        RETURNING api_credits_used
-                    """),
-                    {"fee": fee_credits, "id": target_client.id},
-                ).fetchone()
-
-                if not res:
-                    raise InsufficientCreditsError(
-                        f"Insufficient credits: client '{clean_slug}' has reached or exceeded its credit limit."
-                    )
-
-                target_client.api_credits_used = res[0]
-                ledger_entry = CreditLedger(
-                    client_id=target_client.id,
-                    delta=-fee_credits,
-                    reason=f"Verified catalog intelligence hydration: {canonical_key}",
+            # S-8: Compute fee via CatalogPricing if not provided
+            if fee_credits is None:
+                fee_credits = CatalogPricing.fee_for(
+                    snapshot=snapshot,
+                    client=target_client,
+                    mode=mode,
+                    is_super_admin=bool(approved_by_user_id and approved_by_user_id != user_id),
                 )
-                session.add(ledger_entry)
 
-            # 7. Create or update ShareEvent
-            if existing_event and existing_event.status == "pending_approval":
+            # 6. Create or update ShareEvent
+            if existing_event and existing_event.status in ("pending_approval", "failed"):
                 share_event = existing_event
                 share_event.status = "running"
                 share_event.approved_by = approved_by_user_id or user_id
@@ -567,11 +592,22 @@ class AccountReuseService:
                     approved_by=approved_by_user_id or user_id,
                     reason=reason or f"Hydrated verified intelligence for {canonical_key}",
                     status="running",
-                    idempotency_key=idempotency_key,
+                    idempotency_key=idem_key,
                     fee_credits=fee_credits,
                 )
                 session.add(share_event)
             session.flush()
+
+            # 7. Credit Fee Billing & Ledger (atomic in-transaction reservation with ref_type and ref_id)
+            if fee_credits > 0:
+                CreditService.reserve_credits_in_tx(
+                    session=session,
+                    client_id=target_client.id,
+                    amount=fee_credits,
+                    ref_type="share_event",
+                    ref_id=share_event.id,
+                    reason=f"Verified catalog intelligence hydration: {canonical_key}",
+                )
 
             created_ids: Dict[str, List[int]] = {
                 "accounts": [],
@@ -1214,16 +1250,21 @@ class AccountReuseService:
         if len(res_del) != 1:
             raise AccountReuseError(f"Account deletion count mismatch: expected 1, deleted {len(res_del)}")
 
-        # 5. Credit Refund in Ledger
+        # 5. Credit Refund in Ledger (Phase B S-8 in-transaction refund with ref_type and ref_id)
         if share_event.fee_credits > 0:
-            target_client.api_credits_used = max(0, target_client.api_credits_used - share_event.fee_credits)
-            ledger_reason = f"Catalog reuse rollback refund: {reason}" if reason else f"Catalog reuse rollback refund: Event #{share_event.id}"
-            refund_entry = CreditLedger(
+            ledger_reason = (
+                f"Catalog reuse rollback refund: {reason}"
+                if reason
+                else f"Catalog reuse rollback refund: Event #{share_event.id}"
+            )
+            CreditService.refund_credits_in_tx(
+                session=session,
                 client_id=target_client.id,
-                delta=share_event.fee_credits,
+                amount=share_event.fee_credits,
+                ref_type="share_event",
+                ref_id=share_event.id,
                 reason=ledger_reason,
             )
-            session.add(refund_entry)
 
         # 6. Mark ShareEvent rolled_back
         share_event.status = "rolled_back"

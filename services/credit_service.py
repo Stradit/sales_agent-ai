@@ -10,6 +10,7 @@ Implements the multi-tenant billing & quota architecture (§5.5):
 from typing import Any, Dict, Optional
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 from db.connection import engine as default_engine
 from db.tenant import schema_for, validate_slug
 
@@ -172,6 +173,117 @@ class CreditService:
 
         return cls.get_balance(clean_slug, eng)
 
+    # ── In-Transaction Billing Methods (Phase B S-8) ─────────────────────────
+
+    @classmethod
+    def reserve_credits_in_tx(
+        cls,
+        session: Session,
+        client_id: int,
+        amount: int,
+        ref_type: Optional[str] = None,
+        ref_id: Optional[int] = None,
+        reason: str = "reserve",
+    ) -> int:
+        """Reserves credits atomically within caller transaction.
+        
+        Inserts a credit_ledger row with ref_type, ref_id, and balance_after.
+        Raises InsufficientCreditsError if balance is insufficient.
+        Returns balance_after.
+        """
+        if amount <= 0:
+            row = session.execute(
+                text("SELECT api_credits_total - api_credits_used FROM public.clients WHERE id = :cid"),
+                {"cid": client_id},
+            ).fetchone()
+            return row[0] if row else 0
+
+        res = session.execute(
+            text("""
+                UPDATE public.clients
+                SET api_credits_used = api_credits_used + :amt,
+                    updated_at = NOW()
+                WHERE id = :cid
+                  AND (api_credits_total = 0 OR api_credits_used + :amt <= api_credits_total)
+                RETURNING api_credits_total - api_credits_used AS balance_after
+            """),
+            {"cid": client_id, "amt": amount},
+        ).fetchone()
+
+        if not res:
+            raise InsufficientCreditsError(
+                f"Insufficient credits: Client ID {client_id} cannot afford {amount} credits."
+            )
+
+        balance_after = res[0]
+
+        session.execute(
+            text("""
+                INSERT INTO public.credit_ledger (client_id, ref_type, ref_id, delta, balance_after, reason, created_at)
+                VALUES (:cid, :rtype, :rid, :delta, :bal, :reason, NOW())
+            """),
+            {
+                "cid": client_id,
+                "rtype": ref_type,
+                "rid": ref_id,
+                "delta": -amount,
+                "bal": balance_after,
+                "reason": reason,
+            },
+        )
+        return balance_after
+
+    @classmethod
+    def refund_credits_in_tx(
+        cls,
+        session: Session,
+        client_id: int,
+        amount: int,
+        ref_type: Optional[str] = None,
+        ref_id: Optional[int] = None,
+        reason: str = "refund",
+    ) -> int:
+        """Refunds credits atomically within caller transaction.
+        
+        Inserts a credit_ledger row referencing the same ref_id and ref_type with positive delta.
+        Returns balance_after.
+        """
+        if amount <= 0:
+            row = session.execute(
+                text("SELECT api_credits_total - api_credits_used FROM public.clients WHERE id = :cid"),
+                {"cid": client_id},
+            ).fetchone()
+            return row[0] if row else 0
+
+        res = session.execute(
+            text("""
+                UPDATE public.clients
+                SET api_credits_used = GREATEST(0, api_credits_used - :amt),
+                    updated_at = NOW()
+                WHERE id = :cid
+                RETURNING api_credits_total - api_credits_used AS balance_after
+            """),
+            {"cid": client_id, "amt": amount},
+        ).fetchone()
+
+        balance_after = res[0] if res else 0
+
+        session.execute(
+            text("""
+                INSERT INTO public.credit_ledger (client_id, ref_type, ref_id, delta, balance_after, reason, created_at)
+                VALUES (:cid, :rtype, :rid, :delta, :bal, :reason, NOW())
+            """),
+            {
+                "cid": client_id,
+                "rtype": ref_type,
+                "rid": ref_id,
+                "delta": amount,
+                "bal": balance_after,
+                "reason": reason,
+            },
+        )
+        return balance_after
+
     @classmethod
     def top_up_credits(
         cls,
@@ -219,6 +331,117 @@ class CreditService:
             })
 
         return cls.get_balance(clean_slug, eng)
+
+    # ── In-Transaction Billing Methods (Phase B S-8) ─────────────────────────
+
+    @classmethod
+    def reserve_credits_in_tx(
+        cls,
+        session: Session,
+        client_id: int,
+        amount: int,
+        ref_type: Optional[str] = None,
+        ref_id: Optional[int] = None,
+        reason: str = "reserve",
+    ) -> int:
+        """Reserves credits atomically within caller transaction.
+        
+        Inserts a credit_ledger row with ref_type, ref_id, and balance_after.
+        Raises InsufficientCreditsError if balance is insufficient.
+        Returns balance_after.
+        """
+        if amount <= 0:
+            row = session.execute(
+                text("SELECT api_credits_total - api_credits_used FROM public.clients WHERE id = :cid"),
+                {"cid": client_id},
+            ).fetchone()
+            return row[0] if row else 0
+
+        res = session.execute(
+            text("""
+                UPDATE public.clients
+                SET api_credits_used = api_credits_used + :amt,
+                    updated_at = NOW()
+                WHERE id = :cid
+                  AND (api_credits_total = 0 OR api_credits_used + :amt <= api_credits_total)
+                RETURNING api_credits_total - api_credits_used AS balance_after
+            """),
+            {"cid": client_id, "amt": amount},
+        ).fetchone()
+
+        if not res:
+            raise InsufficientCreditsError(
+                f"Insufficient credits: Client ID {client_id} cannot afford {amount} credits."
+            )
+
+        balance_after = res[0]
+
+        session.execute(
+            text("""
+                INSERT INTO public.credit_ledger (client_id, ref_type, ref_id, delta, balance_after, reason, created_at)
+                VALUES (:cid, :rtype, :rid, :delta, :bal, :reason, NOW())
+            """),
+            {
+                "cid": client_id,
+                "rtype": ref_type,
+                "rid": ref_id,
+                "delta": -amount,
+                "bal": balance_after,
+                "reason": reason,
+            },
+        )
+        return balance_after
+
+    @classmethod
+    def refund_credits_in_tx(
+        cls,
+        session: Session,
+        client_id: int,
+        amount: int,
+        ref_type: Optional[str] = None,
+        ref_id: Optional[int] = None,
+        reason: str = "refund",
+    ) -> int:
+        """Refunds credits atomically within caller transaction.
+        
+        Inserts a credit_ledger row referencing the same ref_id and ref_type with positive delta.
+        Returns balance_after.
+        """
+        if amount <= 0:
+            row = session.execute(
+                text("SELECT api_credits_total - api_credits_used FROM public.clients WHERE id = :cid"),
+                {"cid": client_id},
+            ).fetchone()
+            return row[0] if row else 0
+
+        res = session.execute(
+            text("""
+                UPDATE public.clients
+                SET api_credits_used = GREATEST(0, api_credits_used - :amt),
+                    updated_at = NOW()
+                WHERE id = :cid
+                RETURNING api_credits_total - api_credits_used AS balance_after
+            """),
+            {"cid": client_id, "amt": amount},
+        ).fetchone()
+
+        balance_after = res[0] if res else 0
+
+        session.execute(
+            text("""
+                INSERT INTO public.credit_ledger (client_id, ref_type, ref_id, delta, balance_after, reason, created_at)
+                VALUES (:cid, :rtype, :rid, :delta, :bal, :reason, NOW())
+            """),
+            {
+                "cid": client_id,
+                "rtype": ref_type,
+                "rid": ref_id,
+                "delta": amount,
+                "bal": balance_after,
+                "reason": reason,
+            },
+        )
+        return balance_after
 
     @classmethod
     def acquire_account_quota_lock(cls, conn, client_slug: str) -> None:

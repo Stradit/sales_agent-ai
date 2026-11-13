@@ -42,9 +42,11 @@ from services.account_reuse_service import (
     AccountReuseError,
     AccountReuseService,
     DuplicateAccountError,
+    IdempotencyConflictError,
     RollbackBlockedError,
 )
 from services.catalog_audit import log_catalog_audit, reuse_check_limiter
+from services.catalog_pricing import CatalogPricing
 from services.catalog_service import AmbiguousIdentifierError, CatalogService
 from services.credit_service import AccountQuotaExceededError, InsufficientCreditsError
 
@@ -216,22 +218,16 @@ def hydrate_account(
                    "Please submit a reuse request instead.",
         )
 
-    # 3. Derive idempotency key if omitted
-    if req.idempotency_key:
-        idem_key = req.idempotency_key
-    else:
-        raw_key = f"{ctx.client_slug}:{req.snapshot_id}:{ctx.user_id}:{date.today().isoformat()}"
-        idem_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
-
     try:
+        fee = CatalogPricing.fee_for(mode=req.mode, is_super_admin=ctx.is_super_admin)
         hydration_res = AccountReuseService.hydrate_account_from_catalog(
             session=session,
             ctx=ctx,
             snapshot_id=req.snapshot_id,
             user_id=ctx.user_id,
-            idempotency_key=idem_key,
+            idempotency_key=req.idempotency_key,
             mode=req.mode,
-            fee_credits=1,
+            fee_credits=fee,
             approved_by_user_id=ctx.user_id if ctx.is_super_admin else None,
         )
         return hydration_res
@@ -242,12 +238,18 @@ def hydrate_account(
         raise HTTPException(status_code=402, detail=str(e))
     except AccountQuotaExceededError as e:
         raise HTTPException(status_code=402, detail=str(e))
+    except IdempotencyConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "idempotency_key_reuse", "message": str(e)},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
     except DuplicateAccountError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except AccountReuseError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e))
     except Exception as e:
         raise _handle_unexpected_exception("Hydration", e, ctx.correlation_id)
 
@@ -287,7 +289,8 @@ def submit_reuse_request(
             "message": "A reuse request for this account is already pending approval.",
         }
 
-    idem_key = f"req_{ctx.client_id}_{req.snapshot_id}_{int(datetime.now().timestamp())}"
+    fee = CatalogPricing.fee_for(snapshot=snapshot, mode=req.mode or "instant", is_super_admin=ctx.is_super_admin)
+    idem_key = f"{ctx.client_id}:{req.snapshot_id}:request:{uuid.uuid4().hex[:12]}"
     share_event = ShareEvent(
         snapshot_id=req.snapshot_id,
         target_client_id=ctx.client_id,
@@ -296,7 +299,7 @@ def submit_reuse_request(
         reason=req.reason or f"Catalog reuse request for snapshot {req.snapshot_id}",
         status="pending_approval",
         idempotency_key=idem_key,
-        fee_credits=1,
+        fee_credits=fee,
     )
     session.add(share_event)
     session.flush()
@@ -491,6 +494,7 @@ def assign_account(
     )
 
     try:
+        fee = CatalogPricing.fee_for(mode=req.mode, is_super_admin=True)
         res = AccountReuseService.hydrate_account_from_catalog(
             session=session,
             ctx=target_ctx,
@@ -498,7 +502,7 @@ def assign_account(
             user_id=ctx.user_id,
             idempotency_key=idem_key,
             mode=req.mode,
-            fee_credits=0,
+            fee_credits=fee,
             reason=req.reason or f"Super admin direct assignment to {clean_slug}",
             approved_by_user_id=ctx.user_id,
             is_admin_assign=True,
@@ -510,6 +514,8 @@ def assign_account(
         raise HTTPException(status_code=402, detail=str(e))
     except AccountQuotaExceededError as e:
         raise HTTPException(status_code=402, detail=str(e))
+    except IdempotencyConflictError as e:
+        raise HTTPException(status_code=409, detail={"error": "idempotency_key_reuse", "message": str(e)})
     except DuplicateAccountError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except AccountReuseError as e:
