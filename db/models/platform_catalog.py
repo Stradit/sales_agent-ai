@@ -298,3 +298,30 @@ class ReuseRequestNotification(Base):
 
     def __repr__(self):
         return f"<ReuseRequestNotification(id={self.id}, kind='{self.kind}', status='{self.status}', channel='{self.channel}')>"
+
+
+class AccountOriginBackup(Base):
+    """Tenant-level pre-refresh backup storage (present in public template and tenant schemas)."""
+    __tablename__ = "account_origin_backups"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    snapshot_version_before = Column(Integer, nullable=True)
+    snapshot_version_after = Column(Integer, nullable=True)
+    strategy = Column(String(32), nullable=False)
+    backup_payload = Column(JSONB, nullable=False)
+    performed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    def __repr__(self):
+        return f"<AccountOriginBackup(id={self.id}, account_id={self.account_id}, strategy='{self.strategy}')>"
+

@@ -58,6 +58,7 @@ CLIENT_TABLES_ORDERED: List[str] = [
     "action_item_reminders",# -> action_items(id)
     "command_center_snapshots", # -> accounts(id)
     "account_origin",           # -> accounts(id)
+    "account_origin_backups",   # -> accounts(id)
     # 4. Deals & sales flow
     "deals",                # -> accounts(id), lobs(id), business_lines(id)
     "deal_stakeholders",    # -> deals(id), personas(id)
@@ -210,10 +211,13 @@ class SchemaProvisioningService:
                     v_account_id := NEW.id;
                 ELSIF TG_TABLE_NAME = 'lobs' THEN
                     v_account_id := NEW.account_id;
+                    NEW.local_edited_at := NOW();
                 ELSIF TG_TABLE_NAME = 'sub_lobs' THEN
                     SELECT account_id INTO v_account_id FROM "{schema_name}"."lobs" WHERE id = NEW.lob_id;
+                    NEW.local_edited_at := NOW();
                 ELSIF TG_TABLE_NAME = 'personas' THEN
                     v_account_id := NEW.account_id;
+                    NEW.local_edited_at := NOW();
                 END IF;
 
                 IF v_account_id IS NOT NULL THEN
@@ -237,17 +241,17 @@ class SchemaProvisioningService:
 
             DROP TRIGGER IF EXISTS trg_lobs_local_edits ON "{schema_name}"."lobs";
             CREATE TRIGGER trg_lobs_local_edits
-            AFTER UPDATE ON "{schema_name}"."lobs"
+            BEFORE UPDATE ON "{schema_name}"."lobs"
             FOR EACH ROW EXECUTE FUNCTION "{schema_name}".set_catalog_account_local_edits();
 
             DROP TRIGGER IF EXISTS trg_sub_lobs_local_edits ON "{schema_name}"."sub_lobs";
             CREATE TRIGGER trg_sub_lobs_local_edits
-            AFTER UPDATE ON "{schema_name}"."sub_lobs"
+            BEFORE UPDATE ON "{schema_name}"."sub_lobs"
             FOR EACH ROW EXECUTE FUNCTION "{schema_name}".set_catalog_account_local_edits();
 
             DROP TRIGGER IF EXISTS trg_personas_local_edits ON "{schema_name}"."personas";
             CREATE TRIGGER trg_personas_local_edits
-            AFTER UPDATE ON "{schema_name}"."personas"
+            BEFORE UPDATE ON "{schema_name}"."personas"
             FOR EACH ROW EXECUTE FUNCTION "{schema_name}".set_catalog_account_local_edits();
         """))
 
@@ -591,9 +595,12 @@ class SchemaProvisioningService:
             # Intra-schema and cross-schema foreign keys
             repaired_fks = cls._ensure_tenant_foreign_keys(conn, schema_name)
 
-            # S-19: Repair account_origin timestamps and triggers
+            # S-19 & Phase C: Repair account_origin timestamps, entity local_edited_at and triggers
             conn.execute(text(f'ALTER TABLE "{schema_name}"."account_origin" ADD COLUMN IF NOT EXISTS "source_extracted_at" timestamptz'))
             conn.execute(text(f'ALTER TABLE "{schema_name}"."account_origin" ADD COLUMN IF NOT EXISTS "snapshot_taken_at" timestamptz'))
+            conn.execute(text(f'ALTER TABLE "{schema_name}"."lobs" ADD COLUMN IF NOT EXISTS "local_edited_at" timestamptz'))
+            conn.execute(text(f'ALTER TABLE "{schema_name}"."sub_lobs" ADD COLUMN IF NOT EXISTS "local_edited_at" timestamptz'))
+            conn.execute(text(f'ALTER TABLE "{schema_name}"."personas" ADD COLUMN IF NOT EXISTS "local_edited_at" timestamptz'))
             cls._ensure_catalog_triggers(conn, schema_name)
 
             clean_slug = validate_slug(client_slug)

@@ -45,14 +45,16 @@ from services.account_reuse_service import (
     DuplicateAccountError,
     IdempotencyConflictError,
     LocalEditsPresentError,
+    PlanChangedError,
     RollbackBlockedError,
     SkeletonIncompatibleError,
 )
 from services.catalog_audit import log_catalog_audit, reuse_check_limiter
-from services.catalog_presenter import build_preview_view
+from services.catalog_presenter import build_diff_view, build_preview_view
 from services.catalog_pricing import CatalogPricing
 from services.catalog_service import AmbiguousIdentifierError, CatalogService
 from services.credit_service import AccountQuotaExceededError, InsufficientCreditsError
+from services.refresh_planner import RefreshPlanner
 import threading
 
 logger = logging.getLogger(__name__)
@@ -77,6 +79,7 @@ def _handle_unexpected_exception(endpoint_name: str, e: Exception, correlation_i
 
 
 catalog_router = APIRouter(prefix="/api/catalog", tags=["Verified Intelligence Catalog"])
+accounts_reuse_router = APIRouter(prefix="/api/accounts", tags=["Account Reuse"])
 
 
 # ── Pydantic Request & Response Schemas ──────────────────────────────────────
@@ -93,6 +96,15 @@ class RefreshRequest(BaseModel):
     snapshot_id: Optional[int] = Field(None, description="Optional snapshot ID to refresh to; defaults to latest ready")
     idempotency_key: Optional[str] = Field(None, description="Optional caller idempotency key")
     client_slug: Optional[str] = Field(None, description="Target client slug override (super_admin only)")
+
+
+class RefreshApplyRequest(BaseModel):
+    snapshot_id: int = Field(..., description="Snapshot ID to refresh to")
+    preview_token: str = Field(..., description="Cryptographically signed preview token carrying plan_hash")
+    strategy: str = Field("apply_non_edited", description="Refresh strategy: apply_non_edited or apply_all_overwrite")
+    confirm_overwrite: Optional[bool] = Field(False, description="Must be true if strategy is apply_all_overwrite")
+    reason: Optional[str] = Field(None, description="Audit justification for overwriting local edits")
+    idempotency_key: Optional[str] = Field(None, description="Client idempotency key")
 
 
 class ReuseRequestCreate(BaseModel):
@@ -579,6 +591,132 @@ def refresh_account(
         raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e))
     except Exception as e:
         raise _handle_unexpected_exception("Account refresh", e, ctx.correlation_id)
+
+
+@accounts_reuse_router.get("/{account_id}/reuse/refresh-preview")
+@catalog_router.get("/accounts/{account_id}/reuse/refresh-preview")
+def refresh_preview(
+    account_id: int,
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_check")),
+    session: Session = Depends(get_platform_db),
+):
+    """Computes real-time DiffView between local tenant account and latest catalog snapshot (C2)."""
+    clean_slug = validate_slug(ctx.client_slug)
+    target_schema = schema_for(clean_slug)
+
+    local_acct_row = session.execute(
+        text(f'SELECT * FROM "{target_schema}"."accounts" WHERE id = :id'),
+        {"id": account_id},
+    ).mappings().first()
+    if not local_acct_row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Account {account_id} not found in workspace.",
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+
+    local_origin = session.execute(
+        text(f'SELECT * FROM "{target_schema}"."account_origin" WHERE account_id = :id'),
+        {"id": account_id},
+    ).mappings().first()
+    if not local_origin or not local_origin.get("canonical_key"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Account {account_id} was not imported from platform catalog.",
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+
+    company = session.query(Company).filter_by(canonical_key=local_origin["canonical_key"]).first()
+    if not company:
+        raise HTTPException(
+            status_code=404,
+            detail="Catalog company record not found.",
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+
+    snapshot = CatalogService.get_latest_snapshot(session, company.id, status="ready")
+    if not snapshot:
+        raise HTTPException(
+            status_code=404,
+            detail="No ready snapshot found for company.",
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+
+    blob = session.query(SnapshotBlob).filter_by(snapshot_id=snapshot.id).first()
+    if not blob:
+        raise HTTPException(
+            status_code=404,
+            detail="Snapshot blob payload not found.",
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+
+    plan = RefreshPlanner.plan(
+        session=session,
+        schema=target_schema,
+        account_id=account_id,
+        snapshot=snapshot,
+        blob_payload=blob.payload,
+        is_super_admin=ctx.is_super_admin,
+    )
+
+    token = AccountReuseService.generate_preview_token(
+        snapshot_id=snapshot.id,
+        target_client_slug=clean_slug,
+        user_id=ctx.user_id,
+        plan_hash=plan["plan_hash"],
+    )
+
+    return build_diff_view(
+        **plan,
+        preview_token=token,
+        snapshot_id=snapshot.id,
+    )
+
+
+@accounts_reuse_router.post("/{account_id}/reuse/refresh")
+@catalog_router.post("/accounts/{account_id}/reuse/refresh")
+def apply_refresh(
+    account_id: int,
+    req: RefreshApplyRequest,
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_execute")),
+    session: Session = Depends(get_platform_db),
+):
+    """Applies catalog refresh to an account with local-edit protection or explicit overwrite (C2)."""
+    try:
+        res = AccountReuseService.refresh_account_from_catalog(
+            session=session,
+            ctx=ctx,
+            account_id=account_id,
+            snapshot_id=req.snapshot_id,
+            preview_token=req.preview_token,
+            strategy=req.strategy,
+            confirm_overwrite=bool(req.confirm_overwrite),
+            reason=req.reason,
+            idempotency_key=req.idempotency_key,
+        )
+        return res
+    except PlanChangedError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "plan_changed", "message": str(e), "plan_hash": e.plan_hash},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e), headers={"X-Correlation-ID": ctx.correlation_id})
+    except InsufficientCreditsError as e:
+        raise HTTPException(status_code=402, detail=str(e), headers={"X-Correlation-ID": ctx.correlation_id})
+    except IdempotencyConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "idempotency_key_reuse", "message": str(e)},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+    except AccountReuseError as e:
+        raise HTTPException(status_code=400, detail=str(e), headers={"X-Correlation-ID": ctx.correlation_id})
+    except ValueError as e:
+        raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e), headers={"X-Correlation-ID": ctx.correlation_id})
+    except Exception as e:
+        raise _handle_unexpected_exception("Refresh apply", e, ctx.correlation_id)
 
 
 @catalog_router.post("/requests")

@@ -110,6 +110,7 @@ class Persona(Base):
     # ── Manual Verification Flag ──
     is_manually_verified = Column(Boolean, default=False)
     manually_verified_at = Column(DateTime(timezone=True))
+    local_edited_at = Column(DateTime(timezone=True))
 
     # ── Extended Profile — enrichment data with no dedicated column ──
     # Stores: legal_name, middle_name, age, political_affiliation, home_address,

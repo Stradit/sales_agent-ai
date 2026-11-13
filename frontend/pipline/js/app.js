@@ -3898,8 +3898,315 @@ $(function () {
     }
   };
 
+  const CatalogRefreshManager = {
+    currentDiff: null,
+    activeAccountId: null,
+
+    async checkAndRenderBanner(account) {
+      if (!account || !account.id) return;
+      $("#catalogRefreshBannerContainer").remove();
+
+      try {
+        const res = await $.ajax({
+          url: `/api/accounts/${account.id}/reuse/refresh-preview`,
+          method: "GET",
+          headers: getAuthHeaders(),
+        });
+
+        if (res && res.refresh_policy && res.refresh_policy.status !== "up_to_date") {
+          this.currentDiff = res;
+          this.activeAccountId = account.id;
+          const fromVer = res.refresh_policy.snapshot_version_from || 1;
+          const toVer = res.refresh_policy.snapshot_version_to || (fromVer + 1);
+          const fee = res.refresh_policy.fee_credits || 0;
+          const feeText = fee === 0 ? "Free (0 credits)" : `${fee} credit`;
+
+          const bannerHtml = `
+            <div id="catalogRefreshBannerContainer" class="alert alert-info d-flex align-items-center justify-content-between fade-in" style="margin: 12px 0 16px 0; border-radius: 8px; border-left: 4px solid #6366f1; background: #f5f3ff;">
+              <div class="d-flex align-items-center gap-3">
+                <i class="bi bi-arrow-repeat text-indigo" style="font-size: 1.4rem; color: #6366f1;"></i>
+                <div>
+                  <strong style="color: #4338ca;">Update available in Verified Intelligence Catalog (v${fromVer} &rarr; v${toVer})</strong>
+                  <div style="font-size: 0.8rem; color: #4b5563; margin-top: 2px;">
+                    Newer verified intelligence is available for this account &bull; Refresh fee: <strong>${feeText}</strong>
+                    ${res.local_edits && res.local_edits.present ? ' &bull; <span class="badge bg-amber text-dark" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;"><i class="bi bi-lock-fill"></i> Local edits protected</span>' : ''}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <button type="button" class="btn btn-sm btn-primary" id="btnOpenRefreshDiff" style="background: #6366f1; border-color: #4f46e5; font-weight: 600;">
+                  <i class="bi bi-eye"></i> Review Updates
+                </button>
+              </div>
+            </div>
+          `;
+          $("#accountHeroContainer").after(bannerHtml);
+        }
+      } catch (err) {
+        // Silent if not a catalog account (400/404) or up to date
+      }
+    },
+
+    openDiffModal() {
+      if (!this.currentDiff) return;
+      const diff = this.currentDiff;
+      const summary = diff.summary || {};
+      const localEdits = diff.local_edits || {};
+      const hasProtected = localEdits.present;
+
+      // Summary chips
+      const chips = [];
+      if (summary.personas && summary.personas.changed > 0) chips.push(`${summary.personas.changed} personas changed`);
+      if (summary.personas && summary.personas.added > 0) chips.push(`${summary.personas.added} new personas`);
+      if (summary.lobs && summary.lobs.changed > 0) chips.push(`${summary.lobs.changed} LOBs changed`);
+      if (summary.lobs && summary.lobs.added > 0) chips.push(`${summary.lobs.added} new LOBs`);
+      if (summary.account_fields_changed && summary.account_fields_changed.length > 0) chips.push(`${summary.account_fields_changed.length} company fields updated`);
+      if (chips.length === 0) chips.push("General intelligence updates");
+
+      // Tables
+      let detailsHtml = "";
+
+      // Account details
+      if (diff.details && diff.details.account && diff.details.account.length > 0) {
+        detailsHtml += `
+          <h6 class="mt-3 mb-2 font-weight-bold" style="color:#374151;"><i class="bi bi-building"></i> Company Profile</h6>
+          <table class="table table-sm table-bordered" style="font-size:0.82rem;">
+            <thead class="table-light"><tr><th>Field</th><th>Current Workspace</th><th>Catalog Intelligence</th></tr></thead>
+            <tbody>
+              ${diff.details.account.map(d => `
+                <tr>
+                  <td><strong>${esc(d.field)}</strong></td>
+                  <td class="text-muted">${esc(d.old || "—")}</td>
+                  <td style="color:#047857;font-weight:600;">${esc(d.new || "—")}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+
+      // Personas details
+      if (diff.details && diff.details.personas && diff.details.personas.length > 0) {
+        detailsHtml += `
+          <h6 class="mt-3 mb-2 font-weight-bold" style="color:#374151;"><i class="bi bi-people"></i> Personas & Buying Committee</h6>
+          <table class="table table-sm table-bordered" style="font-size:0.82rem;">
+            <thead class="table-light"><tr><th>Persona</th><th>Status</th><th>Changes / Values</th></tr></thead>
+            <tbody>
+              ${diff.details.personas.map(p => `
+                <tr ${p.is_local_edited ? 'style="background:#fffbeb;"' : ''}>
+                  <td>
+                    <strong>${esc(p.label || p.name || p.key)}</strong>
+                    ${p.title ? `<div class="text-muted" style="font-size:0.75rem;">${esc(p.title)}</div>` : ''}
+                    ${p.is_local_edited ? '<span class="badge bg-warning text-dark mt-1"><i class="bi bi-lock-fill"></i> You edited this</span>' : ''}
+                  </td>
+                  <td><span class="badge ${p.status === 'added' ? 'bg-success' : 'bg-primary'}">${esc(p.status)}</span></td>
+                  <td>
+                    ${(p.changes || []).map(c => `<div><span class="text-muted">${esc(c.field)}:</span> ${esc(c.old || '—')} &rarr; <strong>${esc(c.new || '—')}</strong></div>`).join("")}
+                  </td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+
+      // LOBs details
+      if (diff.details && diff.details.lobs && diff.details.lobs.length > 0) {
+        detailsHtml += `
+          <h6 class="mt-3 mb-2 font-weight-bold" style="color:#374151;"><i class="bi bi-diagram-3"></i> Lines of Business</h6>
+          <table class="table table-sm table-bordered" style="font-size:0.82rem;">
+            <thead class="table-light"><tr><th>LOB Name</th><th>Status</th><th>Changes</th></tr></thead>
+            <tbody>
+              ${diff.details.lobs.map(l => `
+                <tr ${l.is_local_edited ? 'style="background:#fffbeb;"' : ''}>
+                  <td>
+                    <strong>${esc(l.label || l.name || l.key)}</strong>
+                    ${l.is_local_edited ? '<span class="badge bg-warning text-dark mt-1"><i class="bi bi-lock-fill"></i> You edited this</span>' : ''}
+                  </td>
+                  <td><span class="badge ${l.status === 'added' ? 'bg-success' : 'bg-primary'}">${esc(l.status)}</span></td>
+                  <td>
+                    ${(l.changes || []).map(c => `<div><span class="text-muted">${esc(c.field)}:</span> ${esc(c.old || '—')} &rarr; <strong>${esc(c.new || '—')}</strong></div>`).join("")}
+                  </td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+
+      let modalHtml = `
+        <div class="modal fade" id="catalogRefreshDiffModal" tabindex="-1" aria-labelledby="catalogRefreshDiffModalLabel" aria-hidden="true">
+          <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+              <div class="modal-header" style="background:#f8fafc;">
+                <div>
+                  <h5 class="modal-title font-weight-bold" id="catalogRefreshDiffModalLabel">
+                    <i class="bi bi-arrow-repeat text-indigo"></i> Catalog Intelligence Refresh Preview
+                  </h5>
+                  <div class="text-muted" style="font-size:0.8rem; margin-top:2px;">
+                    Comparing workspace records with Snapshot v${diff.refresh_policy.snapshot_version_to}
+                  </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+              </div>
+              <div class="modal-body" style="padding: 18px 24px;">
+                <!-- Summary Chips -->
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                  ${chips.map(c => `<span class="badge" style="background:#e0e7ff;color:#3730a3;font-size:0.78rem;padding:6px 10px;border-radius:20px;"><i class="bi bi-check-circle-fill"></i> ${esc(c)}</span>`).join("")}
+                </div>
+
+                <!-- Entity Diff Tables -->
+                ${detailsHtml || '<div class="alert alert-light text-center py-4 text-muted">All entity records are up to date.</div>'}
+
+                <!-- Strategy Selection -->
+                <div class="card mt-4 p-3" style="border: 1px solid #e2e8f0; background: #fafafa;">
+                  <h6 class="font-weight-bold mb-2" style="font-size:0.88rem;">Refresh Strategy</h6>
+                  <div class="form-check mb-2">
+                    <input class="form-check-input" type="radio" name="refreshStrategyRadio" id="strategyNonEdited" value="apply_non_edited" checked>
+                    <label class="form-check-label" for="strategyNonEdited" style="font-size:0.84rem;">
+                      <strong>Update everything you haven't edited (Recommended)</strong>
+                      <div class="text-muted" style="font-size:0.75rem;">Adds new records and updates unedited rows. Protects your custom edits and notes.</div>
+                    </label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="refreshStrategyRadio" id="strategyOverwrite" value="apply_all_overwrite">
+                    <label class="form-check-label" for="strategyOverwrite" style="font-size:0.84rem;">
+                      <strong>Overwrite my edits</strong>
+                      <div class="text-muted" style="font-size:0.75rem;">Replaces local records with golden catalog intelligence. A backup will be created automatically.</div>
+                    </label>
+                  </div>
+
+                  <!-- Overwrite Confirmation Box (Hidden by default) -->
+                  <div id="overwriteConfirmBox" style="display:none; margin-top: 12px; padding: 12px; border-radius: 6px; background: #fef2f2; border: 1px solid #fecaca;">
+                    <div style="font-size: 0.8rem; color: #991b1b; font-weight: 600; margin-bottom: 6px;">
+                      <i class="bi bi-exclamation-triangle-fill"></i> Caution: This will overwrite manually verified data!
+                    </div>
+                    <div class="mb-2">
+                      <label style="font-size: 0.75rem; color: #475569;">Type <strong>OVERWRITE</strong> to confirm:</label>
+                      <input type="text" class="form-control form-control-sm" id="confirmOverwriteInput" placeholder="OVERWRITE">
+                    </div>
+                    <div>
+                      <label style="font-size: 0.75rem; color: #475569;">Reason for overwrite:</label>
+                      <input type="text" class="form-control form-control-sm" id="overwriteReasonInput" placeholder="e.g. Syncing corporate restructuring">
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer d-flex justify-content-between" style="background:#f8fafc;">
+                <div style="font-size:0.82rem; color:#475569;">
+                  Fee: <strong>${diff.refresh_policy.fee_credits === 0 ? "Free (0 credits)" : diff.refresh_policy.fee_credits + " credit"}</strong>
+                </div>
+                <div>
+                  <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                  <button type="button" class="btn btn-primary btn-sm" id="btnExecuteRefreshApply" style="background:#6366f1; border-color:#4f46e5; font-weight:600;">
+                    <i class="bi bi-check-lg"></i> Apply Updates
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      $("#catalogRefreshDiffModal").remove();
+      $("body").append(modalHtml);
+      const modalEl = document.getElementById("catalogRefreshDiffModal");
+      const bsModal = new bootstrap.Modal(modalEl);
+      bsModal.show();
+    },
+
+    async executeRefresh() {
+      if (!this.currentDiff || !this.activeAccountId) return;
+      const strategy = $("input[name='refreshStrategyRadio']:checked").val();
+      const $btn = $("#btnExecuteRefreshApply");
+      const origText = $btn.html();
+
+      let confirmOverwrite = false;
+      let reason = null;
+
+      if (strategy === "apply_all_overwrite") {
+        const typed = ($("#confirmOverwriteInput").val() || "").trim();
+        reason = ($("#overwriteReasonInput").val() || "").trim();
+        if (typed !== "OVERWRITE") {
+          alert("Please type OVERWRITE into the confirmation box to proceed.");
+          return;
+        }
+        if (!reason) {
+          alert("Please provide a reason for overwriting local edits.");
+          return;
+        }
+        confirmOverwrite = true;
+      }
+
+      $btn.prop("disabled", true).html('<span class="spinner-border spinner-border-sm" role="status"></span> Applying...');
+
+      try {
+        const payload = {
+          snapshot_id: this.currentDiff.snapshot_id,
+          preview_token: this.currentDiff.preview_token,
+          strategy: strategy,
+          confirm_overwrite: confirmOverwrite,
+          reason: reason,
+        };
+
+        const res = await $.ajax({
+          url: `/api/accounts/${this.activeAccountId}/reuse/refresh`,
+          method: "POST",
+          headers: getAuthHeaders(),
+          contentType: "application/json",
+          data: JSON.stringify(payload),
+        });
+
+        const modalEl = document.getElementById("catalogRefreshDiffModal");
+        if (modalEl) {
+          const bsModal = bootstrap.Modal.getInstance(modalEl);
+          if (bsModal) bsModal.hide();
+        }
+
+        if (typeof showNotification === "function") {
+          showNotification(
+            `Catalog refresh applied! Updated ${res.updated || 0} entities, added ${res.added || 0} entities.`,
+            "success"
+          );
+        } else {
+          alert(`Catalog refresh applied! Updated ${res.updated || 0} entities, added ${res.added || 0} entities.`);
+        }
+
+        $("#catalogRefreshBannerContainer").remove();
+
+        // Reload account details
+        if (typeof openAccountFromHub === "function") {
+          openAccountFromHub(this.activeAccountId);
+        } else if (typeof loadData === "function") {
+          loadData();
+        }
+      } catch (err) {
+        let msg = "Catalog refresh failed";
+        if (err.responseJSON && err.responseJSON.detail) {
+          msg = typeof err.responseJSON.detail === "string" ? err.responseJSON.detail : JSON.stringify(err.responseJSON.detail);
+        }
+        alert(msg);
+      } finally {
+        $btn.prop("disabled", false).html(origText);
+      }
+    }
+  };
+
+  $(document).on("click", "#btnOpenRefreshDiff", function () {
+    CatalogRefreshManager.openDiffModal();
+  });
+
+  $(document).on("change", "input[name='refreshStrategyRadio']", function () {
+    $("#overwriteConfirmBox").toggle($(this).val() === "apply_all_overwrite");
+  });
+
+  $(document).on("click", "#btnExecuteRefreshApply", function () {
+    CatalogRefreshManager.executeRefresh();
+  });
+
   window.PlatformCatalogManager = PlatformCatalogManager;
   window.CatalogReuseManager = CatalogReuseManager;
+  window.CatalogRefreshManager = CatalogRefreshManager;
 
   // Initial load
   ClientWorkspaceManager.init();
@@ -7379,6 +7686,9 @@ $(function () {
     // Show View 1 components
     $("#accountViewWrapper").removeClass("d-none");
     $("#accountHeroContainer").html(renderModernAccountHeader(activeAccount));
+    if (typeof CatalogRefreshManager !== "undefined") {
+      CatalogRefreshManager.checkAndRenderBanner(activeAccount);
+    }
     $("#completenessContainer").html(renderModernCompleteness(activeAccount));
 
     const targetSubTab = window._pendingAccountSubTab || "overview";
@@ -10259,6 +10569,9 @@ $(function () {
         activeAccount.name = updatedAcct.display_name || updatedAcct.legal_name || activeAccount.name;
 
         $("#accountHeroContainer").html(renderModernAccountHeader(activeAccount));
+    if (typeof CatalogRefreshManager !== "undefined") {
+      CatalogRefreshManager.checkAndRenderBanner(activeAccount);
+    }
         $("#accountOverviewContainer").html(renderModernAccountOverview(activeAccount));
         renderModernBreadcrumbs();
 
@@ -13841,6 +14154,9 @@ $(function () {
 
           // Re-render view in-place
           $("#accountHeroContainer").html(renderModernAccountHeader(activeAccount));
+    if (typeof CatalogRefreshManager !== "undefined") {
+      CatalogRefreshManager.checkAndRenderBanner(activeAccount);
+    }
           $("#completenessContainer").html(renderModernCompleteness(activeAccount));
           renderLobCardsList($("#lobCardsContainer"), activeAccount.lobs || []);
           renderAllPersonasDirectory(activeAccount);
@@ -14248,6 +14564,9 @@ $(function () {
         // Refresh UI
         $("#accountOverviewContainer").html(renderModernAccountOverview(activeAccount));
         $("#accountHeroContainer").html(renderModernAccountHeader(activeAccount));
+    if (typeof CatalogRefreshManager !== "undefined") {
+      CatalogRefreshManager.checkAndRenderBanner(activeAccount);
+    }
         $("#completenessContainer").html(renderModernCompleteness(activeAccount));
         refreshAccountsCache();
       } else {

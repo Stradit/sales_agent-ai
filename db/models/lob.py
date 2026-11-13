@@ -37,6 +37,7 @@ class Lob(Base):
     # ── Manual Verification Flag ──
     is_manually_verified = Column(Boolean, default=False)
     manually_verified_at = Column(DateTime(timezone=True))
+    local_edited_at = Column(DateTime(timezone=True))
 
     # ── LOB Scraping URLs ──
     google_news_rss_url = Column(Text)

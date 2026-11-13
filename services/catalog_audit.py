@@ -19,7 +19,7 @@ from db.models.audit_log import AuditLog
 
 logger = logging.getLogger(__name__)
 
-# The 11 exact cross-tenant catalog audit actions (Phase A S-14)
+# The exact cross-tenant catalog audit actions (Phase A, B & C)
 CATALOG_ACTIONS = {
     "catalog.publish",
     "catalog.publish_forced",
@@ -28,6 +28,9 @@ CATALOG_ACTIONS = {
     "catalog.fetch_fresh_chosen",
     "catalog.hydrate",
     "catalog.assign",
+    "catalog.refresh",
+    "catalog.refresh_applied",
+    "catalog.refresh_overwrite",
     "catalog.request_created",
     "catalog.request_approved",
     "catalog.request_rejected",

@@ -26,6 +26,7 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
+import uuid
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -102,6 +103,13 @@ class RollbackBlockedError(AccountReuseError):
     def __init__(self, message: str, breakdown: Optional[Dict[str, int]] = None):
         super().__init__(message)
         self.breakdown = breakdown or {}
+
+
+class PlanChangedError(AccountReuseError):
+    """Raised when the plan_hash from preview does not match the recomputed plan at execution time."""
+    def __init__(self, message: str = "Plan has changed since preview", plan_hash: str = ""):
+        super().__init__(message)
+        self.plan_hash = plan_hash
 
 
 def _bind_params(row: dict, kinds: dict) -> dict:
@@ -439,6 +447,8 @@ class AccountReuseService:
             is_super_admin=ctx.is_super_admin,
         )
 
+        session.commit()
+
         return {
             "available": True,
             "already_exists": already_exists,
@@ -469,10 +479,14 @@ class AccountReuseService:
         target_client_slug: str,
         user_id: int,
         expires_in_seconds: int = 900,
+        plan_hash: Optional[str] = None,
     ) -> str:
         """Generates a tamper-proof signed preview token."""
         exp = int(datetime.now(timezone.utc).timestamp()) + expires_in_seconds
-        payload = f"{snapshot_id}:{target_client_slug}:{user_id}:{exp}"
+        if plan_hash:
+            payload = f"{snapshot_id}:{target_client_slug}:{user_id}:{exp}:{plan_hash}"
+        else:
+            payload = f"{snapshot_id}:{target_client_slug}:{user_id}:{exp}"
         signature = hmac.new(CATALOG_TOKEN_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
         token_data = {"payload": payload, "sig": signature}
         return base64.urlsafe_b64encode(json.dumps(token_data).encode("utf-8")).decode("utf-8")
@@ -484,6 +498,7 @@ class AccountReuseService:
         target_client_slug: str,
         snapshot_id: int,
         user_id: int,
+        expected_plan_hash: Optional[str] = None,
     ) -> bool:
         """Validates that a preview token is authentic, untampered, and unexpired."""
         try:
@@ -497,10 +512,14 @@ class AccountReuseService:
                 return False
 
             parts = payload.split(":")
-            if len(parts) != 4:
+            if len(parts) == 4:
+                token_sid, token_slug, token_uid, exp = parts
+                token_hash = None
+            elif len(parts) == 5:
+                token_sid, token_slug, token_uid, exp, token_hash = parts
+            else:
                 return False
 
-            token_sid, token_slug, token_uid, exp = parts
             if int(token_sid) != snapshot_id:
                 return False
             if token_slug != target_client_slug:
@@ -509,10 +528,25 @@ class AccountReuseService:
                 return False
             if int(exp) < int(datetime.now(timezone.utc).timestamp()):
                 return False
+            if expected_plan_hash and token_hash and token_hash != expected_plan_hash:
+                return False
 
             return True
         except Exception:
             return False
+
+    @classmethod
+    def extract_plan_hash_from_token(cls, token: str) -> Optional[str]:
+        """Extracts plan hash from preview token if present."""
+        try:
+            raw = base64.urlsafe_b64decode(token.encode("utf-8")).decode("utf-8")
+            data = json.loads(raw)
+            parts = data.get("payload", "").split(":")
+            if len(parts) >= 5:
+                return parts[4]
+            return None
+        except Exception:
+            return None
 
     # ── Idempotency Formatting & Validation (S-9) ─────────────────────────────
 
@@ -1437,6 +1471,8 @@ class AccountReuseService:
             f"-> Account ID {target_account_id if mode == 'refresh' else new_account_id} with {counts_summary['lobs']} LOBs and {counts_summary['personas']} Personas."
         )
 
+        session.commit()
+
         return {
             "ok": True,
             "share_event_id": share_event.id,
@@ -1833,4 +1869,358 @@ class AccountReuseService:
             "share_event_id": share_event.id,
             "account_id": target_account_id,
             "refunded_credits": share_event.fee_credits,
+        }
+
+    # ── 6. Granular Refresh Execution with Local-Edit Protection (C2) ──────────
+
+    @classmethod
+    def refresh_account_from_catalog(
+        cls,
+        session: Session,
+        ctx: Any,  # TenantRequestContext
+        account_id: int,
+        snapshot_id: int,
+        preview_token: str,
+        strategy: str = "apply_non_edited",
+        confirm_overwrite: bool = False,
+        reason: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Atomically refreshes an existing tenant account from catalog snapshot with diff protection."""
+        from services.refresh_planner import RefreshPlanner
+        from services.catalog_service import get_share_policy
+
+        if strategy not in ("apply_non_edited", "apply_all_overwrite"):
+            raise ValueError(f"Unknown refresh strategy '{strategy}'. Allowed: apply_non_edited, apply_all_overwrite")
+
+        if strategy == "apply_all_overwrite":
+            if not ctx.is_super_admin and ctx.effective_role != "client_admin" and ctx.user_role != "client_admin":
+                raise PermissionError("apply_all_overwrite requires client_admin role")
+            if not confirm_overwrite:
+                raise ValueError("apply_all_overwrite requires confirm_overwrite=true")
+            if not reason or not reason.strip():
+                raise ValueError("apply_all_overwrite requires a non-empty reason")
+
+        clean_slug = validate_slug(ctx.client_slug)
+        target_schema = schema_for(clean_slug)
+
+        # 1. Fetch account and account_origin
+        local_acct_row = session.execute(
+            text(f'SELECT * FROM "{target_schema}"."accounts" WHERE id = :id'),
+            {"id": account_id},
+        ).mappings().first()
+        if not local_acct_row:
+            raise ValueError(f"Account {account_id} not found in workspace.")
+
+        local_origin = session.execute(
+            text(f'SELECT * FROM "{target_schema}"."account_origin" WHERE account_id = :id'),
+            {"id": account_id},
+        ).mappings().first()
+        if not local_origin:
+            raise ValueError(f"Account {account_id} is not linked to platform catalog.")
+
+        # 2. Fetch Snapshot & SnapshotBlob
+        snapshot = session.query(Snapshot).filter_by(id=snapshot_id).first()
+        if not snapshot or snapshot.status not in ("ready", "verified"):
+            raise ValueError(f"Snapshot {snapshot_id} is not ready or verified for refresh.")
+
+        blob = session.query(SnapshotBlob).filter_by(snapshot_id=snapshot_id).first()
+        if not blob:
+            raise ValueError(f"Snapshot blob payload not found for snapshot {snapshot_id}.")
+
+        # 3. Cryptographic Token Validation
+        if not cls.validate_preview_token(preview_token, clean_slug, snapshot.id, ctx.user_id):
+            raise AccountReuseError("Invalid or expired preview token.")
+
+        # 4. Plan and plan_hash verification
+        plan = RefreshPlanner.plan(session, target_schema, account_id, snapshot, blob.payload, is_super_admin=ctx.is_super_admin)
+        token_plan_hash = cls.extract_plan_hash_from_token(preview_token)
+        if token_plan_hash and token_plan_hash != plan["plan_hash"]:
+            raise PlanChangedError(
+                f"Diff plan has changed since preview was generated. Please refresh the preview.",
+                plan_hash=plan["plan_hash"],
+            )
+
+        # 5. Advisory Lock & Idempotency Key
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"refresh:{clean_slug}:{account_id}"},
+        )
+
+        idem_key = None
+        if idempotency_key:
+            idem_key = cls.validate_idempotency_key(idempotency_key)
+            existing_event = (
+                session.query(ShareEvent)
+                .filter_by(
+                    target_client_id=ctx.client_id,
+                    idempotency_key=idem_key,
+                    status="done",
+                )
+                .first()
+            )
+            if existing_event:
+                return {
+                    "ok": True,
+                    "share_event_id": existing_event.id,
+                    "account_id": account_id,
+                    "snapshot_version": snapshot.version,
+                    "strategy": strategy,
+                    "already_executed": True,
+                    "manifest": existing_event.manifest,
+                }
+
+        # 6. Credit Fee Check & Reservation
+        fee_credits = plan["fee_credits"]
+        target_client = session.query(Client).filter_by(id=ctx.client_id).first()
+        if fee_credits > 0:
+            CreditService.reserve_credits_in_tx(
+                session=session,
+                client_id=target_client.id,
+                amount=fee_credits,
+                ref_type="catalog_refresh",
+                ref_id=snapshot.id,
+                reason=f"Verified catalog intelligence refresh: {plan['company_name']}",
+            )
+
+        # 7. Backup for overwrite strategy
+        if strategy == "apply_all_overwrite":
+            loc_lobs = session.execute(
+                text(f'SELECT * FROM "{target_schema}"."lobs" WHERE account_id = :id'),
+                {"id": account_id},
+            ).mappings().all()
+            loc_personas = session.execute(
+                text(f'SELECT * FROM "{target_schema}"."personas" WHERE account_id = :id'),
+                {"id": account_id},
+            ).mappings().all()
+            backup_data = {
+                "account": dict(local_acct_row),
+                "lobs": [dict(l) for l in loc_lobs],
+                "personas": [dict(p) for p in loc_personas],
+            }
+            session.execute(
+                text(f"""
+                    INSERT INTO "{target_schema}"."account_origin_backups"
+                    (account_id, snapshot_version_before, snapshot_version_after, strategy, backup_payload, performed_by, created_at)
+                    VALUES (:aid, :vb, :va, :strat, :payload, :uid, NOW())
+                """),
+                {
+                    "aid": account_id,
+                    "vb": plan["snapshot_version_from"],
+                    "va": plan["snapshot_version_to"],
+                    "strat": strategy,
+                    "payload": json.dumps(backup_data, default=str),
+                    "uid": ctx.user_id,
+                },
+            )
+            log_catalog_audit(
+                session=session,
+                actor_user_id=ctx.user_id,
+                action="catalog.refresh_overwrite",
+                client_id=ctx.client_id,
+                details={
+                    "account_id": account_id,
+                    "snapshot_id": snapshot.id,
+                    "reason": reason,
+                    "strategy": strategy,
+                },
+                is_actor_super_admin=ctx.is_super_admin,
+            )
+
+        # 8. Execution with catalog_hydrating flag on
+        session.execute(text("SET LOCAL app.catalog_hydrating = 'on'"))
+
+        created_ids = {"lobs": [], "sub_lobs": [], "personas": []}
+        updated_ids = {"accounts": [account_id], "lobs": [], "personas": []}
+        skipped_ids = {"lobs": [], "personas": []}
+        share_policy = get_share_policy()
+        dropped_cols = {}
+
+        # 8a. Update Account
+        if strategy == "apply_all_overwrite" or not local_origin["local_edits"]:
+            clean_acct = _filter_payload_for_table(
+                session, target_schema, "accounts", blob.payload.get("account", {}), share_policy, dropped_tracker=dropped_cols
+            )
+            for excl in ["id", "key", "owner_user_id", "created_at", "api_credits_total", "api_credits_used", "is_manually_verified", "manually_verified_at"]:
+                clean_acct.pop(excl, None)
+            clean_acct["updated_at"] = datetime.now(timezone.utc)
+            acct_kinds = get_column_kinds(session, target_schema, "accounts")
+            _update_row(session, target_schema, "accounts", clean_acct, acct_kinds, "id", account_id)
+
+        # 8b. LOBs
+        existing_lobs = session.execute(
+            text(f'SELECT id, key, lob_name, is_manually_verified, local_edited_at FROM "{target_schema}"."lobs" WHERE account_id = :aid'),
+            {"aid": account_id},
+        ).mappings().all()
+
+        lob_by_key = {
+            (l.get("key") or l.get("lob_name") or "").strip().lower(): l
+            for l in existing_lobs if l.get("key") or l.get("lob_name")
+        }
+        lob_id_map: Dict[int, int] = {}
+        lob_kinds = get_column_kinds(session, target_schema, "lobs")
+
+        for r_lob in blob.payload.get("lobs", []):
+            old_lob_id = r_lob.get("_old_id")
+            r_key = (r_lob.get("key") or r_lob.get("lob_name") or r_lob.get("name") or "").strip().lower()
+            clean_lob = _filter_payload_for_table(
+                session, target_schema, "lobs", r_lob, share_policy, dropped_tracker=dropped_cols
+            )
+            matched_lob = lob_by_key.get(r_key)
+
+            if matched_lob:
+                target_lob_id = matched_lob["id"]
+                if old_lob_id is not None:
+                    lob_id_map[old_lob_id] = target_lob_id
+
+                is_protected = bool(matched_lob.get("is_manually_verified") or matched_lob.get("local_edited_at"))
+                if strategy == "apply_non_edited" and is_protected:
+                    skipped_ids["lobs"].append(target_lob_id)
+                else:
+                    for excl in ["id", "account_id", "key"]:
+                        clean_lob.pop(excl, None)
+                    if strategy == "apply_all_overwrite":
+                        clean_lob["is_manually_verified"] = False
+                        clean_lob["local_edited_at"] = None
+                    _update_row(session, target_schema, "lobs", clean_lob, lob_kinds, "id", target_lob_id)
+                    updated_ids["lobs"].append(target_lob_id)
+            else:
+                for excl in ["id", "is_manually_verified", "manually_verified_at", "local_edited_at"]:
+                    clean_lob.pop(excl, None)
+                clean_lob["account_id"] = account_id
+                new_lob_id = _insert_row(session, target_schema, "lobs", clean_lob, lob_kinds)
+                if old_lob_id is not None:
+                    lob_id_map[old_lob_id] = new_lob_id
+                created_ids["lobs"].append(new_lob_id)
+
+        # 8c. Personas
+        existing_personas = session.execute(
+            text(f'SELECT id, key, email, display_name, full_name, is_manually_verified, local_edited_at FROM "{target_schema}"."personas" WHERE account_id = :aid'),
+            {"aid": account_id},
+        ).mappings().all()
+
+        per_by_key = {}
+        for p in existing_personas:
+            pk = (p.get("key") or p.get("email") or p.get("display_name") or p.get("full_name") or "").strip().lower()
+            if pk:
+                per_by_key[pk] = p
+
+        per_kinds = get_column_kinds(session, target_schema, "personas")
+
+        for r_per in blob.payload.get("personas", []):
+            r_key = (r_per.get("key") or r_per.get("email") or r_per.get("display_name") or r_per.get("full_name") or r_per.get("name") or "").strip().lower()
+            clean_per = _filter_payload_for_table(
+                session, target_schema, "personas", r_per, share_policy, dropped_tracker=dropped_cols
+            )
+            matched_per = per_by_key.get(r_key)
+
+            if matched_per:
+                target_per_id = matched_per["id"]
+                is_protected = bool(matched_per.get("is_manually_verified") or matched_per.get("local_edited_at"))
+                if strategy == "apply_non_edited" and is_protected:
+                    skipped_ids["personas"].append(target_per_id)
+                else:
+                    for excl in ["id", "account_id", "key"]:
+                        clean_per.pop(excl, None)
+                    if strategy == "apply_all_overwrite":
+                        clean_per["is_manually_verified"] = False
+                        clean_per["local_edited_at"] = None
+                    if clean_per.get("lob_id") in lob_id_map:
+                        clean_per["lob_id"] = lob_id_map[clean_per["lob_id"]]
+                    _update_row(session, target_schema, "personas", clean_per, per_kinds, "id", target_per_id)
+                    updated_ids["personas"].append(target_per_id)
+            else:
+                for excl in ["id", "is_manually_verified", "manually_verified_at", "local_edited_at"]:
+                    clean_per.pop(excl, None)
+                clean_per["account_id"] = account_id
+                if clean_per.get("lob_id") in lob_id_map:
+                    clean_per["lob_id"] = lob_id_map[clean_per["lob_id"]]
+                new_per_id = _insert_row(session, target_schema, "personas", clean_per, per_kinds)
+                created_ids["personas"].append(new_per_id)
+
+        # 8d. Update account_origin
+        if strategy == "apply_all_overwrite":
+            final_local_edits = False
+        else:
+            final_local_edits = bool(len(skipped_ids["lobs"]) > 0 or len(skipped_ids["personas"]) > 0 or local_origin["local_edits"])
+
+        session.execute(
+            text(f"""
+                UPDATE "{target_schema}"."account_origin"
+                SET snapshot_id = :sid,
+                    snapshot_version = :sver,
+                    hydrated_at = NOW(),
+                    snapshot_taken_at = :taken_at,
+                    local_edits = :ledits
+                WHERE account_id = :aid
+            """),
+            {
+                "sid": snapshot.id,
+                "sver": snapshot.version,
+                "taken_at": snapshot.taken_at,
+                "ledits": final_local_edits,
+                "aid": account_id,
+            },
+        )
+
+        # 9. Record ShareEvent
+        saved_est = CatalogPricing.estimated_credits_saved(snapshot)
+        event_idem_key = idem_key or f"refresh_{ctx.client_id}_{account_id}_{snapshot.id}_{int(datetime.now(timezone.utc).timestamp())}_{uuid.uuid4().hex[:6]}"
+        manifest = {
+            "created": created_ids,
+            "updated": updated_ids,
+            "skipped": skipped_ids,
+            "removed": [],
+        }
+        share_event = ShareEvent(
+            snapshot_id=snapshot.id,
+            target_client_id=ctx.client_id,
+            requested_by=ctx.user_id,
+            approved_by=ctx.user_id,
+            mode="refresh",
+            status="done",
+            fee_credits=fee_credits,
+            idempotency_key=event_idem_key,
+            estimated_credits_saved=saved_est,
+            quality_score_at_event=snapshot.quality_score,
+            freshness_at_event=snapshot.status,
+            created_ids=created_ids,
+            counts={"lobs": len(created_ids["lobs"]) + len(updated_ids["lobs"]), "personas": len(created_ids["personas"]) + len(updated_ids["personas"])},
+            completed_at=datetime.now(timezone.utc),
+        )
+        session.add(share_event)
+        session.flush()
+
+        # 10. Audit Log
+        log_catalog_audit(
+            session=session,
+            actor_user_id=ctx.user_id,
+            action="catalog.refresh_applied",
+            client_id=ctx.client_id,
+            details={
+                "share_event_id": share_event.id,
+                "account_id": account_id,
+                "snapshot_id": snapshot.id,
+                "strategy": strategy,
+                "fee_credits": fee_credits,
+                "estimated_saved": saved_est,
+            },
+            is_actor_super_admin=ctx.is_super_admin,
+        )
+
+        session.commit()
+
+        return {
+            "ok": True,
+            "share_event_id": share_event.id,
+            "account_id": account_id,
+            "snapshot_version": snapshot.version,
+            "strategy": strategy,
+            "updated": len(updated_ids["lobs"]) + len(updated_ids["personas"]) + 1,
+            "added": len(created_ids["lobs"]) + len(created_ids["personas"]),
+            "skipped_protected": len(skipped_ids["lobs"]) + len(skipped_ids["personas"]),
+            "removed": 0,
+            "fee": fee_credits,
+            "saved": saved_est,
+            "manifest": manifest,
         }

@@ -236,6 +236,9 @@ def build_diff_view(
     protected_rows: List[Dict[str, Any]],
     fee_credits: int,
     plan_hash: str,
+    preview_token: Optional[str] = None,
+    snapshot_id: Optional[int] = None,
+    **kwargs,
 ) -> Dict[str, Any]:
     """Builds a tenant-safe DiffView for GET /api/accounts/{id}/reuse/refresh-preview."""
     total_changes = (
@@ -256,6 +259,7 @@ def build_diff_view(
     return {
         "account_id": account_id,
         "company_name": company_name,
+        "snapshot_id": snapshot_id,
         "summary": summary,
         "details": details,
         "local_edits": {
@@ -269,6 +273,7 @@ def build_diff_view(
             "snapshot_version_to": snapshot_version_to,
         },
         "plan_hash": plan_hash,
+        "preview_token": preview_token,
     }
 
 

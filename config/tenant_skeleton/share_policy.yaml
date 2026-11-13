@@ -109,6 +109,7 @@ tables:
     - api_credits_used
     - id
     - is_manually_verified
+    - local_edited_at
     - manually_verified_at
     - osint_feed_manifest
     - owner_user_id
@@ -146,6 +147,7 @@ tables:
     - account_id
     - id
     - is_manually_verified
+    - local_edited_at
     - manually_verified_at
     - osint_feed_manifest
     - raw_data
@@ -172,6 +174,7 @@ tables:
     - id
     - is_manually_verified
     - lob_id
+    - local_edited_at
     - manually_verified_at
   personas:
     classification: copy
@@ -267,6 +270,7 @@ tables:
     - id
     - is_manually_verified
     - lob_id
+    - local_edited_at
     - manually_verified_at
     - osint_feed_manifest
     - raw_data
@@ -1142,3 +1146,17 @@ tables:
     - snapshot_taken_at
     - snapshot_version
     - source_extracted_at
+  account_origin_backups:
+    classification: never
+    copy: []
+    regenerate: []
+    sensitive: []
+    never:
+    - account_id
+    - backup_payload
+    - created_at
+    - id
+    - performed_by
+    - snapshot_version_after
+    - snapshot_version_before
+    - strategy
