@@ -313,7 +313,7 @@ def test_super_admin_catalog_management(setup_catalog_router_environment):
         assert res_v.status_code == 403
 
         # 2. Super admin library overview -> 200 OK
-        res_lib = api_client.get("/api/catalog/companies", headers=super_headers)
+        res_lib = api_client.get("/api/catalog/companies?search=Veritas", headers=super_headers)
         assert res_lib.status_code == 200
         data = res_lib.json()
         assert "companies" in data

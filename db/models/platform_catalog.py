@@ -240,6 +240,8 @@ class AccountOrigin(Base):
     hydrated_at = Column(DateTime(timezone=True), nullable=True)
     hydrated_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     local_edits = Column(Boolean, default=False, nullable=False)
+    source_extracted_at = Column(DateTime(timezone=True), nullable=True)
+    snapshot_taken_at = Column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self):
         return f"<AccountOrigin(account_id={self.account_id}, origin='{self.origin_type}', key='{self.canonical_key}')>"

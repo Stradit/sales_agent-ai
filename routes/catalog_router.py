@@ -43,6 +43,7 @@ from services.account_reuse_service import (
     AccountReuseService,
     DuplicateAccountError,
     IdempotencyConflictError,
+    LocalEditsPresentError,
     RollbackBlockedError,
     SkeletonIncompatibleError,
 )
@@ -81,6 +82,12 @@ class HydrateRequest(BaseModel):
     snapshot_id: int = Field(..., description="ID of catalog snapshot to hydrate")
     preview_token: str = Field(..., description="HMAC-signed preview token from reuse-check")
     mode: str = Field("instant", description="instant | refresh")
+    idempotency_key: Optional[str] = Field(None, description="Optional caller idempotency key")
+    client_slug: Optional[str] = Field(None, description="Target client slug override (super_admin only)")
+
+
+class RefreshRequest(BaseModel):
+    snapshot_id: Optional[int] = Field(None, description="Optional snapshot ID to refresh to; defaults to latest ready")
     idempotency_key: Optional[str] = Field(None, description="Optional caller idempotency key")
     client_slug: Optional[str] = Field(None, description="Target client slug override (super_admin only)")
 
@@ -233,6 +240,12 @@ def hydrate_account(
         )
         return hydration_res
 
+    except LocalEditsPresentError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "local_edits_present", "message": str(e), "diff": e.diff},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except InsufficientCreditsError as e:
@@ -259,6 +272,73 @@ def hydrate_account(
         raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e))
     except Exception as e:
         raise _handle_unexpected_exception("Hydration", e, ctx.correlation_id)
+
+
+@catalog_router.post("/accounts/{company_id}/refresh")
+def refresh_account(
+    company_id: int,
+    req: Optional[RefreshRequest] = None,
+    ctx: TenantRequestContext = Depends(tenant_context("account:reuse_execute", explicit_slug_from="body")),
+    session: Session = Depends(get_platform_db),
+):
+    """Refreshes an existing imported catalog account with newer intelligence (B9)."""
+    if req is None:
+        req = RefreshRequest()
+
+    if req.snapshot_id:
+        snapshot = session.query(Snapshot).filter_by(id=req.snapshot_id, company_id=company_id).first()
+    else:
+        snapshot = CatalogService.get_latest_snapshot(session, company_id, status="ready")
+
+    if not snapshot:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No ready snapshot found for company {company_id}",
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+
+    try:
+        fee = CatalogPricing.fee_for(snapshot=snapshot, mode="refresh", is_super_admin=ctx.is_super_admin)
+        res = AccountReuseService.hydrate_account_from_catalog(
+            session=session,
+            ctx=ctx,
+            snapshot_id=snapshot.id,
+            user_id=ctx.user_id,
+            idempotency_key=req.idempotency_key,
+            mode="refresh",
+            fee_credits=fee,
+        )
+        return res
+    except LocalEditsPresentError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "local_edits_present", "message": str(e), "diff": e.diff},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except InsufficientCreditsError as e:
+        raise HTTPException(status_code=402, detail=str(e))
+    except IdempotencyConflictError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "idempotency_key_reuse", "message": str(e)},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+    except SkeletonIncompatibleError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "skeleton_incompatible", "message": str(e)},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
+    except DuplicateAccountError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except AccountReuseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e))
+    except Exception as e:
+        raise _handle_unexpected_exception("Account refresh", e, ctx.correlation_id)
 
 
 @catalog_router.post("/requests")
@@ -515,6 +595,12 @@ def assign_account(
             is_admin_assign=True,
         )
         return res
+    except LocalEditsPresentError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "local_edits_present", "message": str(e), "diff": e.diff},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except InsufficientCreditsError as e:
@@ -584,6 +670,12 @@ def approve_reuse_request(
             "account_id": res["account_id"],
             "counts": res["counts"],
         }
+    except LocalEditsPresentError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "local_edits_present", "message": str(e), "diff": e.diff},
+            headers={"X-Correlation-ID": ctx.correlation_id},
+        )
     except InsufficientCreditsError as e:
         raise HTTPException(status_code=402, detail=str(e))
     except SkeletonIncompatibleError as e:
@@ -699,8 +791,9 @@ def rollback_share_event(
             is_actor_super_admin=True,
         )
         session.commit()
+        status_code = 400 if "refresh" in str(e).lower() else 409
         raise HTTPException(
-            status_code=409,
+            status_code=status_code,
             detail={
                 "message": str(e),
                 "breakdown": getattr(e, "breakdown", {}),

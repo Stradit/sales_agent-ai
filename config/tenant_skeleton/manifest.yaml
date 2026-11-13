@@ -1,4 +1,4 @@
-skeleton_version: T0002
+skeleton_version: T0003
 total_tables: 59
 platform_references:
 - ref_table: users

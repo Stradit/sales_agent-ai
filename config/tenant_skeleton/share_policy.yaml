@@ -1139,4 +1139,6 @@ tables:
     - local_edits
     - origin_type
     - snapshot_id
+    - snapshot_taken_at
     - snapshot_version
+    - source_extracted_at

@@ -187,6 +187,71 @@ class SchemaProvisioningService:
         return applied
 
     @classmethod
+    def _ensure_catalog_triggers(cls, conn, schema_name: str) -> None:
+        """Installs the local_edits trigger function and triggers on accounts, lobs, sub_lobs, personas (B9: S-19)."""
+        conn.execute(text(f"""
+            CREATE OR REPLACE FUNCTION "{schema_name}".set_catalog_account_local_edits()
+            RETURNS trigger AS $$
+            DECLARE
+                v_account_id integer;
+                v_hydrating text;
+            BEGIN
+                BEGIN
+                    v_hydrating := current_setting('app.catalog_hydrating', true);
+                EXCEPTION WHEN OTHERS THEN
+                    v_hydrating := 'off';
+                END;
+
+                IF v_hydrating = 'on' THEN
+                    RETURN NEW;
+                END IF;
+
+                IF TG_TABLE_NAME = 'accounts' THEN
+                    v_account_id := NEW.id;
+                ELSIF TG_TABLE_NAME = 'lobs' THEN
+                    v_account_id := NEW.account_id;
+                ELSIF TG_TABLE_NAME = 'sub_lobs' THEN
+                    SELECT account_id INTO v_account_id FROM "{schema_name}"."lobs" WHERE id = NEW.lob_id;
+                ELSIF TG_TABLE_NAME = 'personas' THEN
+                    v_account_id := NEW.account_id;
+                END IF;
+
+                IF v_account_id IS NOT NULL THEN
+                    UPDATE "{schema_name}"."account_origin"
+                    SET local_edits = true
+                    WHERE account_id = v_account_id
+                      AND origin_type = 'catalog'
+                      AND local_edits = false;
+                END IF;
+
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """))
+
+        conn.execute(text(f"""
+            DROP TRIGGER IF EXISTS trg_accounts_local_edits ON "{schema_name}"."accounts";
+            CREATE TRIGGER trg_accounts_local_edits
+            AFTER UPDATE ON "{schema_name}"."accounts"
+            FOR EACH ROW EXECUTE FUNCTION "{schema_name}".set_catalog_account_local_edits();
+
+            DROP TRIGGER IF EXISTS trg_lobs_local_edits ON "{schema_name}"."lobs";
+            CREATE TRIGGER trg_lobs_local_edits
+            AFTER UPDATE ON "{schema_name}"."lobs"
+            FOR EACH ROW EXECUTE FUNCTION "{schema_name}".set_catalog_account_local_edits();
+
+            DROP TRIGGER IF EXISTS trg_sub_lobs_local_edits ON "{schema_name}"."sub_lobs";
+            CREATE TRIGGER trg_sub_lobs_local_edits
+            AFTER UPDATE ON "{schema_name}"."sub_lobs"
+            FOR EACH ROW EXECUTE FUNCTION "{schema_name}".set_catalog_account_local_edits();
+
+            DROP TRIGGER IF EXISTS trg_personas_local_edits ON "{schema_name}"."personas";
+            CREATE TRIGGER trg_personas_local_edits
+            AFTER UPDATE ON "{schema_name}"."personas"
+            FOR EACH ROW EXECUTE FUNCTION "{schema_name}".set_catalog_account_local_edits();
+        """))
+
+    @classmethod
     def create_client_schema(cls, engine: Engine, client_slug: str) -> str:
         """Provisions a complete isolated schema for the client from the skeleton.
         
@@ -271,7 +336,10 @@ class SchemaProvisioningService:
                 # 5. Intra-schema & cross-schema foreign keys
                 cls._ensure_tenant_foreign_keys(conn, schema_name)
 
-            # 6. Mark client status = 'active', set skeleton_version to manifest head
+                # 6. S-19: Catalog local edits tracking triggers
+                cls._ensure_catalog_triggers(conn, schema_name)
+
+            # 7. Mark client status = 'active', set skeleton_version to manifest head
             try:
                 with engine.begin() as conn:
                     conn.execute(text("""
@@ -522,6 +590,16 @@ class SchemaProvisioningService:
 
             # Intra-schema and cross-schema foreign keys
             repaired_fks = cls._ensure_tenant_foreign_keys(conn, schema_name)
+
+            # S-19: Repair account_origin timestamps and triggers
+            conn.execute(text(f'ALTER TABLE "{schema_name}"."account_origin" ADD COLUMN IF NOT EXISTS "source_extracted_at" timestamptz'))
+            conn.execute(text(f'ALTER TABLE "{schema_name}"."account_origin" ADD COLUMN IF NOT EXISTS "snapshot_taken_at" timestamptz'))
+            cls._ensure_catalog_triggers(conn, schema_name)
+
+            clean_slug = validate_slug(client_slug)
+            from db.manifest import TenantManifest
+            manifest_ver = TenantManifest.get_skeleton_version()
+            conn.execute(text("UPDATE public.clients SET skeleton_version = :ver WHERE slug = :s"), {"ver": manifest_ver, "s": clean_slug})
 
         from db.column_types import invalidate_column_kinds_cache
         invalidate_column_kinds_cache(schema_name)

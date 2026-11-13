@@ -1,7 +1,7 @@
 # Enterprise Sales Intelligence Database Architecture & Schema Catalog
 > **Generated Date:** 2026-11-12 | **Target Environment:** Multi-Tenant PostgreSQL (sales_ai)
 > **Architecture Style:** Multi-Tenant Schema-Isolated Hybrid Architecture with Centralized Platform Catalog
-> **Tenant Skeleton Version:** `T0002` (59 Replicated Canonical Tables)
+> **Tenant Skeleton Version:** `T0003` (59 Replicated Canonical Tables)
 
 ---
 ## 1. Architectural Overview & Schema Topology
@@ -60,7 +60,7 @@ graph TD
   - [5.6 Autonomous AI Copilot & Memory System](#56-autonomous-ai-copilot--memory-system)
   - [5.7 RAG Knowledge Base & Vector Indexing](#57-rag-knowledge-base--vector-indexing)
   - [5.8 Integrations, Connectors & Pipeline Auditing](#58-integrations-connectors--pipeline-auditing)
-- [6. Multi-Tenant Provisioning & Integrity Contract (`T0002`)](#6-multi-tenant-provisioning--integrity-contract-t0002)
+- [6. Multi-Tenant Provisioning & Integrity Contract (`T0003`)](#6-multi-tenant-provisioning--integrity-contract-t0003)
 
 ---
 ## 3. Tier 1: Platform & Governance Schema (`public`)
@@ -176,12 +176,16 @@ The `public` schema hosts core shared infrastructure, security authentication, w
 | `delta` | `INTEGER` | **NO** | — | — | — |
 | `reason` | `VARCHAR(255)` | **NO** | — | — | — |
 | `created_at` | `TIMESTAMP` | **NO** | `INDEX` | `now()` | System audit timestamp tracking creation and mutation. |
+| `ref_type` | `VARCHAR(64)` | YES | `INDEX` | — | — |
+| `ref_id` | `BIGINT` | YES | `INDEX` | — | — |
+| `balance_after` | `INTEGER` | YES | — | — | — |
 
 **Foreign Key Constraints:**
 - (`client_id`) &rarr; `public.clients` (`id`)
 
 **Secondary Indexes:**
 - `ix_credit_ledger_client_created`: on (`client_id`, `created_at`)
+- `ix_credit_ledger_ref`: on (`ref_type`, `ref_id`)
 - `ix_credit_ledger_run_id`: on (`run_id`)
 
 ---
@@ -387,6 +391,11 @@ The `platform_catalog` schema manages centralized, immutable Golden Records for 
 | `country` | `VARCHAR(100)` | YES | — | — | — |
 | `created_at` | `TIMESTAMP` | **NO** | — | `now()` | System audit timestamp tracking creation and mutation. |
 | `updated_at` | `TIMESTAMP` | **NO** | — | `now()` | System audit timestamp tracking creation and mutation. |
+| `merged_into_id` | `BIGINT` | YES | FK &rarr; `platform_catalog.companies.id` | — | Foreign key reference to `platform_catalog.companies.id`. |
+| `needs_review` | `BOOLEAN` | **NO** | — | `false` | Boolean operational flag. |
+
+**Foreign Key Constraints:**
+- (`merged_into_id`) &rarr; `platform_catalog.companies` (`id`)
 
 **Secondary Indexes:**
 - `companies_canonical_key_key` (UNIQUE): on (`canonical_key`)
@@ -433,6 +442,8 @@ The `platform_catalog` schema manages centralized, immutable Golden Records for 
 | `taken_at` | `TIMESTAMP` | **NO** | — | `now()` | — |
 | `counts` | `JSONB` | **NO** | — | `'{}'::jsonb` | Structured JSONB payload containing semi-structured intelligence. |
 | `checksum` | `VARCHAR(128)` | **NO** | — | — | — |
+| `checksum_version` | `INTEGER` | **NO** | — | `1` | — |
+| `policy_hash` | `VARCHAR(64)` | YES | — | — | — |
 
 **Foreign Key Constraints:**
 - (`company_id`) &rarr; `platform_catalog.companies` (`id`)
@@ -479,10 +490,13 @@ The `platform_catalog` schema manages centralized, immutable Golden Records for 
 | `created_at` | `TIMESTAMP` | **NO** | — | `now()` | System audit timestamp tracking creation and mutation. |
 | `completed_at` | `TIMESTAMP` | YES | — | — | — |
 | `rolled_back_at` | `TIMESTAMP` | YES | — | — | — |
+| `rolled_back_by` | `INTEGER` | YES | FK &rarr; `platform_catalog.users.id` | — | — |
+| `rollback_reason` | `TEXT` | YES | — | — | — |
 
 **Foreign Key Constraints:**
 - (`approved_by`) &rarr; `platform_catalog.users` (`id`)
 - (`requested_by`) &rarr; `platform_catalog.users` (`id`)
+- (`rolled_back_by`) &rarr; `platform_catalog.users` (`id`)
 - (`snapshot_id`) &rarr; `platform_catalog.snapshots` (`id`)
 - (`target_client_id`) &rarr; `platform_catalog.clients` (`id`)
 
@@ -2033,7 +2047,7 @@ The `platform_catalog` schema manages centralized, immutable Golden Records for 
 
 ---
 
-## 6. Multi-Tenant Provisioning & Integrity Contract (`T0002`)
+## 6. Multi-Tenant Provisioning & Integrity Contract (`T0003`)
 
 ### 6.1 Provisioning Rules & Isolation Boundary
 1. **Strict PostgreSQL Schema Boundary:** Each tenant workspace operates in an isolated schema named `client_<slug>`. Cross-tenant queries are structurally prevented by PostgreSQL role permissions and dynamic session routing (`SET search_path`).
@@ -2049,9 +2063,9 @@ The `platform_catalog` schema manages centralized, immutable Golden Records for 
 
 | Schema Identifier | Client Workspace Display Name | Status | Plan Tier | Table Count | Skeleton Version |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| `client_stradit_india` | **Stradit India PVT LTD** | `ACTIVE` | `ENTERPRISE` | 59 tables | `T0002` |
-| `client_acme_corp` | **Acme Corporation** | `ACTIVE` | `ENTERPRISE` | 59 tables | `T0002` |
-| `client_inactive_test_client` | **Inactive Test** | `SUSPENDED` | `STANDARD` | 0 tables | `T0002` |
+| `client_stradit_india` | **Stradit India PVT LTD** | `ACTIVE` | `ENTERPRISE` | 59 tables | `T0003` |
+| `client_acme_corp` | **Acme Corporation** | `ACTIVE` | `ENTERPRISE` | 59 tables | `T0003` |
+| `client_inactive_test_client` | **Inactive Test** | `SUSPENDED` | `STANDARD` | 0 tables | `T0003` |
 
 ---
 **Document Maintenance:** This schema catalog is grounded directly in the live PostgreSQL database and canonical skeleton manifest. Updates should be re-generated whenever Alembic migrations or manifest contracts are applied.
